@@ -1,0 +1,16 @@
+[package]
+name = "orrch-tui"
+description = "Terminal UI for orrchestrator dashboard and session focus"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orrch-core = { path = "../orrch-core" }
+orrch-retrospect = { path = "../orrch-retrospect" }
+tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+arboard.workspace = true
+libc.workspace = true

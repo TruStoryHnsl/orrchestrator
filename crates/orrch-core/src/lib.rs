@@ -1,0 +1,18 @@
+pub mod backend;
+pub mod feedback;
+pub mod git;
+pub mod output_parser;
+pub mod process_manager;
+pub mod project;
+pub mod remote;
+pub mod session;
+pub mod session_log;
+pub mod windows;
+pub mod vault;
+
+pub use backend::{BackendKind, BackendsConfig};
+pub use feedback::{save_and_route_feedback, CONTINUE_DEV_PROMPT, FeedbackItem, FeedbackStatus, FeedbackType, load_feedback_items, submit_feedback, delete_feedback, create_draft, create_append_draft, mark_as_processing, mark_as_processed, mark_as_routed, check_processing_complete, write_feedback_metadata, set_feedback_type};
+pub use output_parser::{analyze_output, infer_state, OutputSignal};
+pub use process_manager::ProcessManager;
+pub use project::{list_directory, load_deprecated, load_projects, package_as_v1, ColorTag, DirEntry, Project, ProjectMeta, RoadmapItem, Scope, Temperature};
+pub use session::{ExternalSession, Session, SessionState};

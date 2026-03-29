@@ -1,0 +1,33 @@
+# Rust
+/target/
+Cargo.lock
+
+# Python prototype (archived)
+python-prototype/venv/
+python-prototype/__pycache__/
+python-prototype/*.pyc
+python-prototype/*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Retrospect data (generated)
+.retrospect/
+
+# OS
+.DS_Store
+._*
+
+# Env/secrets
+.env
+*.env
+.env.*
+
+# Feedback processing temp files
+.feedback/.processing-*
+.feedback/.correction-*
+.feedback/.autocommit-*
+.feedback/.git-commit-*
