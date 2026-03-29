@@ -1,0 +1,20 @@
+[package]
+name = "orrchestrator"
+description = "AI development pipeline hypervisor"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "orrchestrator"
+path = "src/main.rs"
+
+[dependencies]
+orrch-core = { path = "../crates/orrch-core" }
+orrch-retrospect = { path = "../crates/orrch-retrospect" }
+orrch-tui = { path = "../crates/orrch-tui" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
