@@ -340,6 +340,8 @@ pub struct FeedbackItem {
     pub routes: Vec<String>,
     /// True if the file is empty or whitespace-only.
     pub is_empty: bool,
+    /// tmux session name (when Processing).
+    pub tmux_session: Option<String>,
 }
 
 /// Load the status map from .feedback/.status.json.
@@ -359,6 +361,16 @@ fn save_status_map(feedback_dir: &Path, map: &HashMap<String, FeedbackMeta>) {
     }
 }
 
+/// Public access to status map for the deny_commit workflow.
+pub fn load_status_map_pub(feedback_dir: &Path) -> HashMap<String, FeedbackMeta> {
+    load_status_map(feedback_dir)
+}
+
+/// Public access to save status map for the deny_commit workflow.
+pub fn save_status_map_pub(feedback_dir: &Path, map: &HashMap<String, FeedbackMeta>) {
+    save_status_map(feedback_dir, map);
+}
+
 /// Load all feedback items from the .feedback directory.
 pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
     let feedback_dir = projects_dir.join(".feedback");
@@ -372,6 +384,10 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
                 let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                // Skip temp processing files — they belong to their parent feedback item
+                if filename.starts_with('.') || filename.starts_with("append-") {
+                    continue;
+                }
                 let contents = fs::read_to_string(&path).unwrap_or_default();
                 let is_empty = contents.trim().is_empty();
                 let preview: String = contents
@@ -397,6 +413,8 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
                 let routes = meta.map(|m| m.routes.clone()).unwrap_or_default();
                 let feedback_type = meta.map(|m| m.feedback_type).unwrap_or_default();
 
+                let tmux_session = meta.and_then(|m| m.tmux_session.clone());
+
                 items.push(FeedbackItem {
                     filename,
                     path,
@@ -407,6 +425,7 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
                     modified,
                     routes,
                     is_empty,
+                    tmux_session,
                 });
             }
         }
@@ -533,6 +552,29 @@ pub fn mark_as_routed(filename: &str, projects_dir: &Path) {
         meta.tmux_session = None;
     }
     save_status_map(&feedback_dir, &status_map);
+}
+
+/// Get the last non-empty line from a tmux session's visible pane.
+/// Returns a short status string showing what Claude is currently doing.
+pub fn tmux_session_status(session_name: &str) -> Option<String> {
+    let output = std::process::Command::new("tmux")
+        .args(["capture-pane", "-t", session_name, "-p"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() { return None; }
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Find the last non-empty, non-decoration line
+    text.lines()
+        .rev()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("───") && !t.starts_with("⏵")
+            && !t.starts_with("Esc to") && !t.starts_with("ctrl+")
+        })
+        .next()
+        .map(|l| l.trim().chars().take(60).collect())
 }
 
 /// Check if a feedback file's tmux processing session has finished.
