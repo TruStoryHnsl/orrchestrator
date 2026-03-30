@@ -22,13 +22,15 @@ use crate::editor::{VimKind, VimRequest, PendingEditor};
 pub enum Panel {
     Ideas,    // 0
     Projects, // 1 — hot/cold/production/facilities
-    Feedback, // 2 — feedback pipeline
+    Sessions, // 2 — tmux session manager
+    Feedback, // 3 — feedback pipeline
 }
 
 impl Panel {
-    pub const ALL: [Panel; 3] = [
+    pub const ALL: [Panel; 4] = [
         Panel::Ideas,
         Panel::Projects,
+        Panel::Sessions,
         Panel::Feedback,
     ];
 
@@ -36,6 +38,7 @@ impl Panel {
         match self {
             Self::Ideas => "Ideas",
             Self::Projects => "Projects",
+            Self::Sessions => "Sessions",
             Self::Feedback => "Feedback",
         }
     }
@@ -44,7 +47,8 @@ impl Panel {
         match self {
             Self::Ideas => 0,
             Self::Projects => 1,
-            Self::Feedback => 2,
+            Self::Sessions => 2,
+            Self::Feedback => 3,
         }
     }
 
@@ -278,6 +282,10 @@ pub struct App {
     /// Detected at startup from the current window's output, or set manually.
     pub target_output: Option<String>,
 
+    // Sessions tab
+    pub managed_sessions: Vec<orrch_core::windows::ManagedSession>,
+    pub session_tab_selected: usize,
+
     // New project wizard
     pub new_project_name: String,
     pub new_project_scope: orrch_core::Scope,
@@ -349,6 +357,8 @@ impl App {
             session_selected: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
+            managed_sessions: Vec::new(),
+            session_tab_selected: 0,
             tree_expanded: HashMap::new(),
             tree_cache: HashMap::new(),
             tree_selected: 0,
@@ -984,6 +994,7 @@ impl App {
             SubView::List => match self.panel {
                 Panel::Ideas => self.key_ideas(key),
                 Panel::Projects => self.key_projects(key),
+                Panel::Sessions => self.key_sessions_tab(key),
                 Panel::Feedback => self.key_feedback_tab(key),
             },
             SubView::ProjectDetail(_) => self.key_project_detail(key),
@@ -2308,19 +2319,13 @@ impl App {
                     let route_names: Vec<String> = enabled_routes.iter().map(|(n, _)| n.clone()).collect();
                     let fb_type = self.confirm_feedback_type;
 
-                    // Write metadata header to the feedback file
-                    let _ = orrch_core::write_feedback_metadata(
-                        &feedback_path,
-                        &route_names,
-                        if fb_type == orrch_core::FeedbackType::Plan { "planning document" } else { "development feedback" },
-                    );
-
-                    // Spawn Claude to process the feedback
+                    // Spawn Claude to process the feedback via /interpret-user-instructions
                     match spawn_feedback_processor(
                         &text,
                         &route_names,
                         &projects_dir,
                         fb_type,
+                        &feedback_path,
                     ) {
                         Ok(session_name) => {
                             orrch_core::feedback::mark_as_processing(
@@ -2338,6 +2343,54 @@ impl App {
                             self.notify(format!("Failed to spawn processor: {e}"));
                         }
                     }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ─── Sessions Tab ────────────────────────────────────────────
+
+    fn key_sessions_tab(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('R') => {
+                self.managed_sessions = orrch_core::windows::list_all_sessions();
+                self.notify("Sessions refreshed".into());
+            }
+            KeyCode::Up => {
+                if self.session_tab_selected == 0 { self.tab_focused = true; }
+                else { self.session_tab_selected -= 1; }
+            }
+            KeyCode::Down => {
+                if !self.managed_sessions.is_empty() && self.session_tab_selected < self.managed_sessions.len() - 1 {
+                    self.session_tab_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                // Focus the selected session's terminal window + tmux window
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    orrch_core::windows::select_and_focus(s.category, s.index);
+                }
+            }
+            KeyCode::Char('m') => {
+                // Minimize the category's terminal window
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let title = format!("[orrch] {}", s.category.label());
+                    orrch_core::windows::minimize_window(&title);
+                    self.notify(format!("Minimized {}", s.category.label()));
+                }
+            }
+            KeyCode::Char('x') => {
+                // Kill selected session
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let cat = s.category;
+                    let name = s.name.clone();
+                    orrch_core::windows::kill_session(cat, &name);
+                    self.managed_sessions = orrch_core::windows::list_all_sessions();
+                    self.session_tab_selected = self.session_tab_selected.min(self.managed_sessions.len().saturating_sub(1));
+                    self.notify(format!("Killed {name}"));
                 }
             }
             _ => {}
@@ -2468,6 +2521,12 @@ impl App {
                 self.commit_typing_correction = true;
                 self.commit_correction_text.clear();
             }
+            KeyCode::Char('d') => {
+                // Deny — remove all pending entries from project fb2p.md files, return to draft
+                let removed = self.deny_commit(feedback_idx);
+                self.notify(format!("Denied — removed {removed} entries, returned to draft"));
+                self.sub = SubView::List;
+            }
             _ => {}
         }
         Ok(())
@@ -2507,6 +2566,77 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Deny a commit — remove ONLY the specific entries from this processing run
+    /// (identified by matching against commit_packages), and return feedback to draft.
+    fn deny_commit(&mut self, feedback_idx: usize) -> usize {
+        let mut removed = 0;
+
+        // Build a set of entry texts that belong to THIS processing run
+        // (the ones displayed in the commit review overlay)
+        let package_texts: Vec<String> = self.commit_packages.iter()
+            .map(|pkg| pkg.entry_full.trim().to_string())
+            .collect();
+
+        // For each project that had packages, scan its fb2p.md and remove only matching entries
+        let mut seen_dirs = std::collections::HashSet::new();
+        for pkg in &self.commit_packages {
+            if !seen_dirs.insert(pkg.project_dir.clone()) {
+                continue; // already processed this project
+            }
+            let fb2p_path = pkg.project_dir.join("fb2p.md");
+            let Ok(content) = std::fs::read_to_string(&fb2p_path) else { continue };
+
+            let mut kept = Vec::new();
+            let mut current_entry = String::new();
+            for line in content.lines() {
+                if line == "---" && !current_entry.is_empty() {
+                    let trimmed = current_entry.trim().to_string();
+                    if package_texts.iter().any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str())) {
+                        removed += 1;
+                    } else {
+                        kept.push(current_entry.clone());
+                    }
+                    current_entry.clear();
+                    continue;
+                }
+                current_entry.push_str(line);
+                current_entry.push('\n');
+            }
+            // Handle last entry (no trailing ---)
+            if !current_entry.trim().is_empty() {
+                let trimmed = current_entry.trim().to_string();
+                if package_texts.iter().any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str())) {
+                    removed += 1;
+                } else {
+                    kept.push(current_entry);
+                }
+            }
+
+            let new_content = kept.join("\n---\n");
+            if new_content.trim().is_empty() {
+                let _ = std::fs::remove_file(&fb2p_path);
+            } else {
+                let _ = std::fs::write(&fb2p_path, new_content);
+            }
+        }
+
+        // Return feedback file to draft
+        if let Some(item) = self.feedback_items.get(feedback_idx) {
+            let feedback_dir = self.projects_dir.join(".feedback");
+            let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
+            if let Some(meta) = status_map.get_mut(&item.filename) {
+                meta.status = FeedbackStatus::Draft;
+                meta.routes.clear();
+                meta.submitted_at = None;
+                meta.tmux_session = None;
+            }
+            orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
+        }
+        self.reload_feedback();
+
+        removed
     }
 
     // ─── New Project Wizard ──────────────────────────────────────
@@ -2745,6 +2875,14 @@ impl App {
             }
         }
         self.feedback_items = orrch_core::load_feedback_items(&self.projects_dir);
+        // Sort by status group so display order matches navigation order:
+        // Drafts first, then Processing/Processed, then Routed
+        self.feedback_items.sort_by_key(|item| match item.status {
+            FeedbackStatus::Draft => 0,
+            FeedbackStatus::Processing => 1,
+            FeedbackStatus::Processed => 1,
+            FeedbackStatus::Routed => 2,
+        });
     }
 
     // ─── Feedback Tab ────────────────────────────────────────────
@@ -2754,6 +2892,10 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('f') => {
                 self.request_vim(VimKind::GlobalFeedback);
+            }
+            KeyCode::Char('R') => {
+                self.reload_feedback();
+                self.notify("Feedback reloaded".into());
             }
             KeyCode::Char('s') => {
                 // Open confirmation overlay for selected draft
@@ -2795,6 +2937,47 @@ impl App {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     if item.status == FeedbackStatus::Processed {
                         self.open_commit_review(self.feedback_selected);
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                // Cancel processing — kill tmux session, return to draft
+                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
+                    if item.status == FeedbackStatus::Processing || item.status == FeedbackStatus::Processed {
+                        // Kill tmux session if still running
+                        if let Some(ref session) = item.tmux_session {
+                            let _ = std::process::Command::new("tmux")
+                                .args(["kill-session", "-t", session.as_str()])
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status();
+                        }
+                        // Return to draft
+                        let feedback_dir = self.projects_dir.join(".feedback");
+                        let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
+                        if let Some(meta) = status_map.get_mut(&item.filename) {
+                            meta.status = FeedbackStatus::Draft;
+                            meta.routes.clear();
+                            meta.submitted_at = None;
+                            meta.tmux_session = None;
+                        }
+                        orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
+                        self.reload_feedback();
+                        self.notify("Cancelled — returned to draft".into());
+                    }
+                }
+            }
+            KeyCode::Char('u') => {
+                // Recall/undo a routed item — remove pending entries from projects, return to draft
+                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
+                    if item.status == FeedbackStatus::Routed {
+                        // Use deny_commit logic to clean up pending entries
+                        // First build commit packages by scanning for pending entries
+                        self.open_commit_review(self.feedback_selected);
+                        // Now deny it
+                        let removed = self.deny_commit(self.feedback_selected);
+                        self.notify(format!("Recalled — removed {removed} pending entries, returned to draft"));
+                        self.sub = SubView::List;
                     }
                 }
             }
@@ -2951,47 +3134,32 @@ fn spawn_correction_processor(
     packages: &[CommitPackage],
     projects_dir: &Path,
 ) -> anyhow::Result<String> {
-    let session_name = format!("orrch-fix-{}", std::process::id() % 10000);
     let feedback_dir = projects_dir.join(".feedback");
     std::fs::create_dir_all(&feedback_dir)?;
 
-    // Build context: list current packages so Claude knows what to fix
     let mut context = String::new();
     for pkg in packages {
         context.push_str(&format!("\n### Project: {}\n{}\n", pkg.project_name, pkg.entry_full));
     }
 
-    let prompt = format!(
-        "You are correcting feedback routing in orrchestrator.\n\n\
-The user submitted feedback that was analyzed and routed to projects. \
-The user has reviewed the results and wants corrections.\n\n\
-Current instruction packages (in project fb2p.md files with 'Executed: pending'):\n\
-{context}\n\n\
-User's correction request:\n{correction}\n\n\
-Instructions:\n\
-1. Read each project's fb2p.md file\n\
-2. Find the entries with 'Executed: pending'\n\
-3. Apply the user's corrections: move entries between projects, edit content, split or merge entries, delete wrong ones\n\
-4. If an entry needs to move to a different project, remove it from the current fb2p.md and append it to the correct one\n\
-5. Do NOT change entries that don't have 'Executed: pending' — those are already committed\n\n\
-CRITICAL: NEVER create new project directories. Only modify fb2p.md files in EXISTING directories under {pd}/.",
-        pd = projects_dir.display(),
-    );
-
     let prompt_path = feedback_dir.join(".correction-prompt.md");
-    std::fs::write(&prompt_path, &prompt)?;
+    std::fs::write(&prompt_path, format!(
+        "Correct feedback routing. Current pending entries:\n{context}\n\nUser correction: {correction}\n\n\
+         Find 'Executed: pending' entries in project fb2p.md files, apply corrections. \
+         Do NOT touch entries without 'Executed: pending'. Do NOT create new project directories.",
+    ))?;
 
-    let runner_path = feedback_dir.join(".correction-run.sh");
-    let runner = format!(
-        "#!/bin/bash\ncd {dir}\nprompt=$(cat {prompt})\nclaude --dangerously-skip-permissions \"$prompt\"\nrm -f {prompt} {runner}\n",
-        dir = projects_dir.display(),
-        prompt = prompt_path.display(),
-        runner = runner_path.display(),
+    let cmd = format!(
+        "cd {} && prompt=$(cat {}) && claude --dangerously-skip-permissions \"$prompt\" && rm -f {}",
+        projects_dir.display(), prompt_path.display(), prompt_path.display(),
     );
-    std::fs::write(&runner_path, &runner)?;
 
-    tmux_spawn_session(&session_name, &runner_path)?;
-    Ok(session_name)
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    orrch_core::windows::spawn_in_category(
+        orrch_core::windows::SessionCategory::Proc,
+        &format!("fix-{}", ts % 100000),
+        &cmd,
+    )
 }
 
 /// Kill an existing tmux session if it exists, then create a new one running a script.
@@ -3029,109 +3197,36 @@ fn default_projects_dir() -> PathBuf {
 /// Claude reads the raw feedback text and runs the /interpret-user-instructions
 /// pipeline: analyze → generate optimized prompts → route to project fb2p.md files.
 /// The prompt is written to a temp file to avoid shell escaping issues.
+/// Spawn a Claude Code session to process a feedback file.
+///
+/// Simply runs: claude --dangerously-skip-permissions "/interpret-user-instructions <filepath>"
+/// Claude's own CLAUDE.md defines the full pipeline.
 fn spawn_feedback_processor(
-    feedback_text: &str,
-    target_projects: &[String],
+    _feedback_text: &str,
+    _target_projects: &[String],
     projects_dir: &Path,
-    fb_type: orrch_core::FeedbackType,
+    _fb_type: orrch_core::FeedbackType,
+    feedback_file: &Path,
 ) -> anyhow::Result<String> {
-    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-    let session_name = format!("orrch-fb-{}", ts % 100000);
-    let projects_list = target_projects.join(", ");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let window_name = format!("fb-{}", ts % 100000);
+    let file_path = feedback_file.to_string_lossy();
     let projects_dir_str = projects_dir.to_string_lossy();
-    let feedback_dir = projects_dir.join(".feedback");
-    std::fs::create_dir_all(&feedback_dir)?;
 
-    // Write raw feedback to a temp file
-    let raw_path = feedback_dir.join(".processing-raw.md");
-    std::fs::write(&raw_path, feedback_text)?;
-
-    // Write the full prompt to a temp file (avoids shell escaping nightmare)
-    let is_plan = fb_type == orrch_core::FeedbackType::Plan;
-    let projects_hint = if projects_list.is_empty() { "(none — route to workspace level)".into() } else { projects_list };
-
-    let prompt = if is_plan {
-        format!(
-            "You are processing a PLANNING DOCUMENT submitted through orrchestrator. \
-Read the document from: {raw}\n\n\
-Suggested target projects: {projects}\n\n\
-This is a planning document — a design specification for building or restructuring a project. \
-You have ELEVATED PERMISSIONS compared to regular feedback:\n\n\
-Instructions:\n\
-1. Read the planning document carefully. Understand the full scope of what is being designed.\n\
-2. Determine the target: is this for an existing project, a new project, or a new version of an existing project?\n\
-3. If the document describes a NEW PROJECT that doesn't exist under {pd}/:\n\
-   - Create the project directory: mkdir -p {pd}/<project_name>\n\
-   - Write a CLAUDE.md with project context derived from the document\n\
-   - Write a .scope file (infer from the document's language: private/public/commercial)\n\
-   - Write .orrtemp with 'hot'\n\
-4. If the document targets an EXISTING project and describes a MAJOR REWRITE or new version:\n\
-   - Consider triggering versioning: archive current code as vN/, scaffold vN+1/\n\
-   - The new version gets its own PLAN.md derived from this document\n\
-   - Note: only do this if the document clearly describes replacing the current version, not incremental changes\n\
-5. Generate a comprehensive PLAN.md for the target project from the document content, with:\n\
-   Architecture, Feature Roadmap (with [ ] items), Technical Stack, and Recent Changes\n\
-6. Generate optimized development prompts and append to the project's fb2p.md with:\n\
-   Objective, Requirements, Constraints, Technical Decisions, Open Questions, Acceptance Criteria\n\
-7. If the document covers multiple projects, split and route each section appropriately.\n\n\
-CRITICAL RULES:\n\
-- This is a PLAN document — you ARE allowed to create new project directories.\n\
-- You ARE allowed to write PLAN.md, CLAUDE.md, and .scope files.\n\
-- Read existing project context (if targeting an existing project) before deciding whether to merge or version.\n\
-- After processing, delete {raw}.",
-            raw = raw_path.display(),
-            projects = projects_hint,
-            pd = projects_dir_str,
-        )
-    } else {
-        format!(
-            "You are processing user feedback submitted through orrchestrator. \
-Read the raw feedback from: {raw}\n\n\
-Suggested target projects (user hint — you decide final routing after analysis): {projects}\n\n\
-Instructions:\n\
-1. Read the raw feedback carefully. Identify ALL distinct actionable items.\n\
-2. For each item, determine which existing project it belongs to by reading \
-   that project's PLAN.md and CLAUDE.md. The user's suggestions above are a \
-   starting hint — route to wherever each item actually belongs, even if the \
-   user didn't select that project. Split items across multiple projects if needed.\n\
-3. For each target project, generate an optimized development prompt with:\n\
-   - Objective (what needs to be done)\n\
-   - Requirements (specific items, prioritized)\n\
-   - Constraints (scope, tech stack)\n\
-   - Technical Decisions (where applicable)\n\
-   - Open Questions (ambiguities to resolve with user)\n\
-   - Acceptance Criteria\n\
-4. Append a structured entry to EACH target project's fb2p.md with the above sections, \
-   plus Raw Input (the original text) and Status: 'Executed: pending'\n\
-5. If any items don't fit an existing project, append them to {pd}/fb2p.md as workspace-level.\n\n\
-CRITICAL RULES:\n\
-- Do NOT skip the analysis step. Actually read project context before writing prompts.\n\
-- NEVER create new project directories or folders. Only write to fb2p.md in EXISTING directories under {pd}/.\n\
-- If feedback mentions a project that doesn't exist, note it in Open Questions — do not create it.\n\
-- After processing, delete {raw}.",
-            raw = raw_path.display(),
-            projects = projects_hint,
-            pd = projects_dir_str,
-        )
-    };
-
-    let prompt_path = feedback_dir.join(".processing-prompt.md");
-    std::fs::write(&prompt_path, &prompt)?;
-
-    // Write a runner script that reads the prompt from file and passes to Claude.
-    // This avoids all shell escaping issues with $(cat) or inline quotes.
-    let runner_path = feedback_dir.join(".processing-run.sh");
-    let runner = format!(
-        "#!/bin/bash\ncd {dir}\nprompt=$(cat {prompt})\nclaude --dangerously-skip-permissions \"$prompt\"\nrm -f {prompt} {raw} {runner}\n",
-        dir = projects_dir_str,
-        prompt = prompt_path.display(),
-        raw = raw_path.display(),
-        runner = runner_path.display(),
+    let cmd = format!(
+        "cd {} && claude --dangerously-skip-permissions '/interpret-user-instructions {}'",
+        projects_dir_str, file_path,
     );
-    std::fs::write(&runner_path, &runner)?;
 
-    tmux_spawn_session(&session_name, &runner_path)?;
-    Ok(session_name)
+    let name = orrch_core::windows::spawn_in_category(
+        orrch_core::windows::SessionCategory::Proc,
+        &window_name,
+        &cmd,
+    )?;
+    Ok(name)
 }
 
 /// Detect which KWin output orrchestrator is currently running on.

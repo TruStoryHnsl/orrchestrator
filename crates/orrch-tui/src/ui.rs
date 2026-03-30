@@ -96,6 +96,7 @@ fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.panel {
         Panel::Ideas => draw_ideas(frame, app, area),
         Panel::Projects => draw_projects(frame, app, area),
+        Panel::Sessions => draw_sessions_tab(frame, app, area),
         Panel::Feedback => draw_feedback_tab(frame, app, area),
     }
 }
@@ -280,6 +281,29 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
                 item_idx += 1;
             }
 
+            // Feedback processing sessions targeting this project
+            for fb_item in &app.feedback_items {
+                if fb_item.status == FeedbackStatus::Processing {
+                    if let Some(ref session) = fb_item.tmux_session {
+                        // Check if this session's routes include this project
+                        let targets_this = fb_item.routes.iter().any(|r| r == &proj.name)
+                            || fb_item.routes.is_empty(); // workspace-level targets all
+                        if targets_this {
+                            let live = orrch_core::tmux_session_status(session)
+                                .unwrap_or_else(|| "processing...".into());
+                            lines.push(Line::from(vec![
+                                Span::styled("    ⏳ ", Style::default().fg(WAITING_COLOR)),
+                                Span::styled(format!("feedback: {}", fb_item.preview.chars().take(25).collect::<String>()), Style::default().fg(WAITING_COLOR)),
+                            ]));
+                            lines.push(Line::styled(
+                                format!("       └─ {live}"),
+                                Style::default().fg(TEXT_MUTED),
+                            ));
+                        }
+                    }
+                }
+            }
+
             // Separator between sessions and files
             if session_count > 0 {
                 lines.push(Line::styled("    ────────────────────────", Style::default().fg(Color::Rgb(50, 50, 70))));
@@ -394,58 +418,19 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // ── FACILITIES section ──
-    let admin_sessions = app.admin_sessions();
-    if !app.facilities.is_empty() || app.projects_dir.join("deprecated").is_dir() || !admin_sessions.is_empty() {
+    // NOTE: This section must be 1:1 with build_list_map() — every item pushed here
+    // must correspond to exactly one entry in the map. No extra rows allowed.
+    if !app.facilities.is_empty() || app.projects_dir.join("deprecated").is_dir() {
         items.push(ListItem::new(Line::styled(
             "── FACILITIES ──────────────────────────────",
             Style::default().fg(TEXT_MUTED).add_modifier(Modifier::BOLD),
         )));
-        // Admin sessions (rooted at ~/projects/)
-        if !admin_sessions.is_empty() {
-            items.push(ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled("  🖥 ", Style::default().fg(CYAN)),
-                    Span::styled("general admin", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("  {} session(s)", admin_sessions.len()), Style::default().fg(TEXT_DIM)),
-                ]),
-            ]));
-            for s in &admin_sessions {
-                let host_badge = s.host_badge();
-                items.push(ListItem::new(Line::from(vec![
-                    Span::styled("      👁 ", Style::default().fg(CYAN)),
-                    Span::styled(s.display_name().to_string(), Style::default().fg(TEXT)),
-                    if !host_badge.is_empty() {
-                        Span::styled(format!(" {host_badge}"), Style::default().fg(Color::Rgb(180, 140, 255)))
-                    } else {
-                        Span::raw("")
-                    },
-                    Span::styled(format!("  pid:{}", s.pid), Style::default().fg(TEXT_MUTED)),
-                ])));
-            }
-        }
-        // Remote sessions — show per-host breakdown
-        if !app.remote_sessions.is_empty() {
-            // Group by host
-            let mut by_host: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-            for s in &app.remote_sessions {
-                *by_host.entry(&s.host).or_insert(0) += 1;
-            }
-            let summary: String = by_host.iter()
-                .map(|(h, c)| format!("{h}:{c}"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled("  🌐 ", Style::default().fg(CYAN)),
-                Span::styled(format!("{} remote — {summary}", app.remote_sessions.len()), Style::default().fg(TEXT_DIM)),
-            ])));
-        }
         if app.projects_dir.join("deprecated").is_dir() {
             items.push(ListItem::new(Line::from(vec![
                 Span::styled("  📦 ", Style::default().fg(TEXT_MUTED)),
                 Span::styled("deprecated/", Style::default().fg(TEXT_DIM)),
             ])));
         }
-        // Hyperfolders (admin, etc.)
         for facility in &app.facilities {
             items.push(ListItem::new(vec![
                 Line::from(vec![
@@ -761,9 +746,90 @@ fn draw_external_session(frame: &mut Frame, app: &App, area: Rect, pid: u32) {
 
 // ─── Feedback Tab ────────────────────────────────────────────────────
 
+// ─── Sessions Tab ────────────────────────────────────────────────────
+
+fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
+    use orrch_core::windows::{SessionCategory, SessionStatus};
+
+    // Refresh sessions on each render (fast — just reads tmux state)
+    app.managed_sessions = orrch_core::windows::list_all_sessions();
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut flat_idx: usize = 0;
+
+    for cat in SessionCategory::all() {
+        let cat_sessions: Vec<&orrch_core::windows::ManagedSession> = app.managed_sessions.iter()
+            .filter(|s| s.category == *cat)
+            .collect();
+
+        let cat_label = cat.label();
+        let count = cat_sessions.len();
+        lines.push(Line::styled(
+            format!("── {} ({}) ─────────────────────────", cat_label, count),
+            Style::default().fg(match cat {
+                SessionCategory::Dev => ACCENT,
+                SessionCategory::Edit => CYAN,
+                SessionCategory::Proc => WAITING_COLOR,
+            }).add_modifier(Modifier::BOLD),
+        ));
+
+        if cat_sessions.is_empty() {
+            lines.push(Line::styled("    (none)", Style::default().fg(TEXT_MUTED)));
+        }
+
+        for s in &cat_sessions {
+            let selected = flat_idx == app.session_tab_selected;
+            let marker = if selected { " ▶ " } else { "   " };
+
+            let status_color = match s.status {
+                SessionStatus::Working => GREEN,
+                SessionStatus::Idle => TEXT_MUTED,
+                SessionStatus::WaitingForInput => WAITING_COLOR,
+                SessionStatus::Dead => Color::Red,
+            };
+
+            let style = if selected {
+                Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT)
+            };
+
+            // Session row: marker icon name [status] cwd
+            lines.push(Line::from(vec![
+                Span::styled(marker, Style::default().fg(ACCENT)),
+                Span::styled(format!("{} ", s.status.icon()), Style::default().fg(status_color)),
+                Span::styled(&s.name, style),
+                Span::styled(format!("  [{}]", s.status.label()), Style::default().fg(status_color)),
+            ]));
+
+            // Show last output line underneath
+            if !s.last_output.is_empty() {
+                lines.push(Line::styled(
+                    format!("      {}", s.last_output),
+                    Style::default().fg(TEXT_MUTED),
+                ));
+            }
+
+            flat_idx += 1;
+        }
+
+        lines.push(Line::raw(""));
+    }
+
+    // Clamp selection
+    let total = app.managed_sessions.len();
+    if total > 0 && app.session_tab_selected >= total {
+        app.session_tab_selected = total - 1;
+    }
+
+    let items: Vec<ListItem> = lines.into_iter().map(|l| ListItem::new(l)).collect();
+    let list = List::new(items)
+        .scroll_padding(SCROLL_PAD)
+        .block(Block::default().title(" Sessions ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
+    frame.render_widget(list, area);
+}
+
 fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
-    let layout = Layout::default().direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)]).split(area);
 
     let drafts: Vec<(usize, &orrch_core::FeedbackItem)> = app.feedback_items.iter().enumerate()
         .filter(|(_, i)| i.status == FeedbackStatus::Draft).collect();
@@ -825,17 +891,40 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
         for (global_idx, item) in &processing {
             let selected = *global_idx == app.feedback_selected;
             let marker = if selected { " > " } else { "   " };
-            let status_icon = if item.status == FeedbackStatus::Processing { "⏳" } else { "✓" };
-            let action_hint = if item.status == FeedbackStatus::Processed { " [Enter/c to commit]" } else { " [Claude working...]" };
-            let style = if selected {
-                Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+
+            if item.status == FeedbackStatus::Processed {
+                // Done — ready to commit
+                let style = if selected {
+                    Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(GREEN)
+                };
+                lines.push(Line::styled(
+                    format!("{marker}✓ {} — {} [c to commit]", item.created, item.preview.chars().take(40).collect::<String>()),
+                    style,
+                ));
             } else {
-                Style::default().fg(WAITING_COLOR)
-            };
-            lines.push(Line::styled(
-                format!("{marker}{status_icon} {} — {}{action_hint}", item.created, item.preview.chars().take(40).collect::<String>()),
-                style,
-            ));
+                // Still processing — show file info
+                let style = if selected {
+                    Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(WAITING_COLOR)
+                };
+                lines.push(Line::styled(
+                    format!("{marker}⏳ {} — {}", item.created, item.preview.chars().take(40).collect::<String>()),
+                    style,
+                ));
+
+                // Show live tmux session status underneath
+                if let Some(ref session) = item.tmux_session {
+                    let live_status = orrch_core::tmux_session_status(session)
+                        .unwrap_or_else(|| "waiting...".into());
+                    lines.push(Line::styled(
+                        format!("      └─ {session}: {live_status}"),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                }
+            }
         }
         lines.push(Line::raw(""));
     }
@@ -874,13 +963,7 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
     let widget = Paragraph::new(lines)
         .block(Block::default().title(" Feedback Pipeline ").borders(Borders::ALL)
             .style(Style::default().bg(BG_DARK).fg(TEXT)));
-    frame.render_widget(widget, layout[0]);
-
-    frame.render_widget(
-        Paragraph::new(" f:new  s/Enter:submit  r:resume  d:delete  q:quit")
-            .style(Style::default().fg(TEXT_DIM).bg(BG_DARK)),
-        layout[1],
-    );
+    frame.render_widget(widget, area);
 }
 
 fn draw_confirm_delete_feedback(frame: &mut Frame, app: &App, idx: usize) {
@@ -1111,10 +1194,15 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("|", ""),
             ("←→", "panels"), ("q", "quit"),
         ]),
+        (Panel::Sessions, SubView::List) => hint_line(&[
+            ("Enter", "focus"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
+            ("|", ""),
+            ("↑↓", "select"), ("q", "quit"),
+        ]),
         (Panel::Feedback, SubView::List) => hint_line(&[
             ("f", "new"), ("s", "submit"), ("c", "commit"), ("p", "plan"),
             ("|", ""),
-            ("r", "resume"), ("d", "delete"), ("q", "quit"),
+            ("Esc", "cancel"), ("u", "recall"), ("r", "resume"), ("d", "delete"),
         ]),
         (_, SubView::ProjectDetail(_)) => hint_line(&[
             ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
@@ -1131,7 +1219,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("Enter", "send correction"), ("Esc", "cancel"),
         ]),
         (_, SubView::CommitReview(_)) => hint_line(&[
-            ("y", "approve"), ("n", "correct"), ("↑↓", "scroll"), ("Esc", "cancel"),
+            ("y", "approve"), ("n", "correct"), ("d", "deny"), ("↑↓", "scroll"), ("Esc", "cancel"),
         ]),
         (_, SubView::CommitCorrecting(_)) => hint_line(&[
             ("Esc", "cancel correction"),
@@ -1235,7 +1323,7 @@ fn draw_commit_review(frame: &mut Frame, app: &App) {
         ));
     } else {
         lines.push(Line::styled(
-            "  y/Enter: approve + commit    n/e: request correction    Esc: cancel",
+            "  y: approve    n: correct    d: deny + return to draft    Esc: cancel",
             Style::default().fg(TEXT_DIM),
         ));
     }

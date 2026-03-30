@@ -3,7 +3,12 @@
 A visual CLI application that serves as an AI development pipeline hypervisor — managing multiple parallel Claude Code instances, tracking project progress, and providing a unified interface for the user's entire development workflow.
 
 ## Open Conflicts
-None yet.
+
+### v2 Beta Redesign vs v1 Completion (2026-04-13)
+The v1 roadmap is 35/35 complete. A v2 vision document has been submitted that fundamentally expands orrchestrator from a session manager into an agent orchestration platform. **Key decision needed:**
+- Should `/versioning-init orrchestrator` be run to archive v1 and scaffold v2?
+- Or should v2 features be built incrementally on the existing codebase?
+- The v2 vision introduces 8 open questions that need user resolution before execution (see fb2p.md entry 2026-04-13).
 
 ## Architecture
 
@@ -168,7 +173,44 @@ Orrchestrator is not limited to Claude Code. It supports multiple AI CLI backend
 | `r` | Refresh process scan (discover external sessions) |
 | `q` | Quit orrchestrator |
 
-## Feature Roadmap
+## v2 Feature Roadmap — Agent Orchestration Platform
+
+### Phase 1: Agent Framework Foundation
+36. [ ] **Agent profile system** — `.md`-based agent definitions with role, capabilities, domain knowledge. Stored in `~/.config/orrchestrator/agents/`
+37. [ ] **Agent library** — 19 predefined agents across 4 departments (Admin, Development, Marketing, Legal)
+38. [ ] **Agent execution binding** — map agent profiles to real AI backend sessions (Claude/Gemini/Ollama/API)
+39. [ ] **COO instruction optimizer** — token-efficient prompt compression pipeline replacing raw feedback passthrough
+
+### Phase 2: Workforce Templates
+40. [ ] **Workforce template data model** — define team compositions as node graphs (agents + connections + operation flows)
+41. [ ] **Built-in templates** — Personal Tech Support, General Software Development, Commercial Software Development
+42. [ ] **Template selector in spawn flow** — when spawning a session, pick a workforce template instead of just a backend
+43. [ ] **Workforce-aware session management** — multiple agents from one workforce run as coordinated sessions
+
+### Phase 3: Operation Modules
+44. [ ] **Operation module engine** — trigger/blocker/interrupt system with ordered step execution
+45. [ ] **INSTRUCTION INTAKE module** — Executive Assistant → COO → Project Manager pipeline
+46. [ ] **DEVELOP FEATURE module** — heuristic loop: plan → build → test → break → repeat
+47. [ ] **Module editor** — view/edit operation modules in the TUI
+
+### Phase 4: Multi-Provider & Resource Management
+48. [ ] **Multi-provider backend expansion** — OpenAI, Google, Anthropic APIs + Ollama local models
+49. [ ] **API usage monitoring** — per-provider rate tracking with the Intelligence Resources Manager
+50. [ ] **Dynamic throttling** — auto-pause queues when providers approach rate limits, shift to available providers
+51. [ ] **Token optimization pipeline** — layered abstraction/recompilation to minimize executable prompt length
+
+### Phase 5: Node-Based Workflow Designer
+52. [ ] **Node editor TUI** — visual agent-as-node workflow designer within orrchestrator
+53. [ ] **Custom workforce creation** — user designs their own agent team configurations
+54. [ ] **Workflow template import/export** — share workforce designs as files
+
+### Queued (from previous cycle)
+- [ ] **Agent profile management** — swappable CLAUDE.md/GEMINI.md profiles per project (fb2p.md entry 2026-03-29)
+- [ ] **Feedback pipeline redesign** — replace ephemeral draft files with per-project persistent append-only feedback logs at `<project>/.feedback/feedback.md`. Vim split-view (log on top, new input below). Diff-based extraction of new content for processing. Bypass path: user can manually edit feedback log outside orrchestrator. (fb2p.md entry 2026-04-12)
+
+---
+
+## v1 Feature Roadmap (COMPLETE — 35/35)
 
 1. [x] **Core process manager** — spawn/kill/monitor Claude Code sessions in PTYs with `--dangerously-skip-permissions`
 2. [x] **External session discovery** — detect unmanaged Claude processes, display in dashboard
@@ -207,6 +249,8 @@ Orrchestrator is not limited to Claude Code. It supports multiple AI CLI backend
 35. [x] **Feedback lifecycle** — drafts saved to .feedback/, status tracked in .status.json, submit routes to projects, delete cleans up
 
 ## Recent Changes
+- 2026-04-12: **Feedback pipeline redesign** queued. Moves from ephemeral per-draft files to persistent per-project append-only feedback logs. Adds vim split-view (reference log + input buffer), diff-based new-content extraction, project-local storage (`<project>/.feedback/feedback.md`), and a bypass path for manual editing outside orrchestrator. One open question: auto-timestamp headers on appends vs user-structured.
+- 2026-04-13: **v2 BETA REDESIGN submitted.** Major vision expansion: agent orchestration platform with 19 agent roles across 4 departments, workforce templates, operation modules (trigger/blocker/step pipelines), multi-provider AI (all distributors + Ollama), token optimization, and node-based workflow designer. 19 new roadmap items across 5 phases. 8 open questions flagged for user resolution. Supersedes `v2_user_design.md` (earlier draft). Potential `/versioning-init` trigger.
 - 2026-03-29: ROADMAP COMPLETE. All 35 features implemented. Final push: (1) Retrospect engine: analyzer.rs mines error stores across all projects for recurring patterns, cross-project trends, resolution rates. protocol.rs generates per-project .troubleshooting.md decision trees and ~/projects/.troubleshooting-global.md cross-project KB. Runs every 10min in background. (2) Feedback routing made suggestive — Claude decides final destinations after analysis. (3) Feedback processor fix — runner script approach instead of $(cat) shell expansion that garbled prompts. (4) Tree browser replaces three-column layout. (5) Feedback metadata YAML frontmatter. 44/44 tests.
 - 2026-03-29: Major UX overhaul: (1) CRITICAL FIX — removed all KWin/qdbus window management that crashed Plasma desktop. (2) Session management migrated from Alacritty windows to tmux — `spawn_tmux_session()` creates named windows in "orrch" tmux session. (3) Context action menu (`a` key) — popup with all actions for selected item, replaces 15+ scattered hotkeys. (4) New project wizard (`P` key) — 3-step: name → scope → confirm, auto-spawns plan session. (5) Scope editing (`S` key) — cycles personal/private/public/commercial. (6) Styled status bar — grouped hints with accent-colored keys and `│` separators. (7) Feedback confirmation overlay — shows auto-detected routing with toggleable project checkboxes, spawns Claude tmux session for real processing. (8) Smart routing — word-boundary matching with scoring (orr-prefix boost, ambiguity penalties, context signals). (9) Recovered misrouted feedback — deleted bad fb2p.md entries from notes/admin/claude, restored originals to draft. (10) Deprecated project deletion (`d` key in deprecated browser). (11) Remote sessions show `@hostname` badges. (12) All projects expanded by default. 44/44 tests.
 - 2026-03-28: Parallel feature pipelines + remote session fix. (1) Parallel pipelines: `pipelines_for_project()` groups sessions by goal, duplicate-goal warnings in spawn overlay and session table, pipeline count badge (⊞) in project rows, Shift+N multi-spawn for all open roadmap items. (2) Remote session starter: orrch-agent.sh cross-platform agent (piped via SSH stdin, works on Linux+macOS), SSH target fixed for orrpheus (`coltonorr@orrpheus`), macOS discovery via `lsof`/`ps` instead of `/proc`, auto-detects tmux/screen/nohup for session management, initial capability probe on startup. 38/38 tests, 5.8MB binary.

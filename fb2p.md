@@ -518,51 +518,199 @@ Executed: pending — queued as future feature (not blocking current roadmap)
 
 ---
 
-## Entry: 2026-03-29 — orrchestrator feedback (persistent per-project feedback documents)
+## Entry: 2026-04-13 04:14 — 2026-04-13 04:14.md (BETA REDESIGN — v2 Vision Document)
 
 ### Raw Input
-- Instead of creating a new file every time feedback is created lets have one feedback document per project that acts as a master append-only persistent document. When I open a feedback session from orrchestrator it will open the feedback log on top and a vim instance below to recieve the users new addition to the feedback list.
-- when the use is done writin gtheir new feedback it is appended to the feedback doc and then a diff function is run against the feedback doc to extract the new content. THen claude processes only the new content the same way it does now.
+Source: `~/projects/.feedback/2026-04-13 04:14.md` (165 lines)
+Also supersedes: `~/projects/orrchestrator/v2_user_design.md` (earlier draft of same vision)
 
 ### Optimized Prompt
 
 ## Objective
-Replace the per-session feedback file model (`.feedback/<timestamp>.md`) with a **persistent per-project feedback document** model. Each project gets one master feedback file that accumulates all feedback entries over time. When creating feedback, orrchestrator opens a split view: the existing feedback log (read-only, scrollable) on top and a vim instance below for new input. After writing, the new content is appended to the master document, then a diff extracts only the new addition for Claude to process through the existing pipeline.
+Redesign orrchestrator from a TUI session manager into a **full AI-powered software development hypervisor** with a corporate-style agent hierarchy, node-based workforce design tools, configurable operation modules, multi-provider API management, and token optimization pipelines. This is a v2-scale architectural transformation.
 
 ## Requirements
-1. **Per-project feedback document** — each project gets `<project>/feedback.md` (or `<project>/.feedback.md`) as its persistent, append-only feedback log. All feedback ever written for that project lives in this file, most recent at the bottom.
-2. **Split view on feedback creation** — when the user initiates feedback for a project (from project detail or feedback tab), orrchestrator opens a tmux split: top pane shows `less +G` (or similar read-only viewer) on the existing feedback document, bottom pane opens vim on a temp file for the new entry. This gives the user full context of prior feedback while writing.
-3. **Append-on-save** — when vim exits cleanly (`:wq`), orrchestrator reads the temp file, appends the content to the project's master feedback document with a timestamp header (e.g., `## 2026-03-29 14:30 — new feedback`), then deletes the temp file.
-4. **Diff-based extraction** — after appending, extract only the newly appended content. This can be done by: (a) recording the file size/line count before append, then reading from that offset after, or (b) using the temp file content directly before appending. The extracted new content is what gets sent to Claude for processing — same pipeline as today.
-5. **Workspace-level feedback document** — feedback that doesn't target a specific project appends to `~/projects/.feedback/workspace-feedback.md` instead.
-6. **Migration from old model** — existing `.feedback/<timestamp>.md` files should still be readable. Optionally, offer a one-time migration to consolidate them into the new per-project documents.
-7. **Feedback tab updates** — the Feedback tab should reflect the new model: show per-project feedback documents with their last-modified dates and entry counts, rather than individual draft files. "Resume" opens the split view for that project. Status tracking (`.status.json`) still tracks processing status of individual entries.
+
+### 1. Agent Library — Departmental AI Workforce
+Build a structured agent system organized into departments, each with specialized roles:
+
+**Admin Department:**
+1. **Executive Assistant** — default user interface. Triages input: routes software development instructions to the COO, handles everything else directly
+2. **Chief Operations Officer (COO)** — processes raw dev instructions into concise, de-duplicated, token-optimized prompts. Determines project routing and distributes to job queues
+3. **Intelligence Resources Manager** — monitors API usage across all configured AI providers. Decides whether projects can continue processing their queues or must pause until API resources free up
+4. **Mentor** — advises user on strategy decisions. Analyzes agent `.md` profile files and augments agents with additional tools or skills
+
+**Development Department — Leadership:**
+5. **Project Manager** — runs the heuristic development loop: plan → build → test → break → repeat. Maintains broad project view. Recommends agent team configurations. Instructs agents at each development step with explicit skill/tool suggestions. Has department-specific identity to recognize misrouted instructions. Aware of other projects' featuresets to identify code reuse opportunities
+6. **Talent Scout** — reads instructions and creates specialty agents. Pairs new specialists with a Researcher to compile comprehensive narrow-topic knowledge sets. Maintains a specialist database for reuse
+
+**Development Department — Engineering:**
+7. **Software Engineer** — works with Researcher to design optimal implementations. Maintains the development roadmap as instructions and designs arrive. Broad application perspective
+8. **Developer** — implements software solutions per supervisor instructions
+9. **Feature-Tester** — validates developer work by creating test environments: VMs, Playwright, network-isolated hotspots, SSH-controlled remote machines. NEVER signs off untested features. If unable to test something, designs a manual test guide for the user and collects results
+10. **Researcher** — conducts comprehensive research on software engineering solutions. Produces up-to-date ecosystem reports for the dev team
+11. **UI Designer** — designs useful, fast, and beautiful interfaces following the UX design established by the user
+12. **Specialist** — works with a Researcher to build comprehensive knowledge of a narrow topic into their agent profile
+
+**Development Department — QA:**
+13. **Penetration Tester** — attempts to compromise program security and reports results
+14. **Beta-Tester** — tries to break things to find failure points and report them
+
+**Development Department — DevOps:**
+15. **Versioning Manager** — uses git MCP and similar tools to keep the project backed up, organized, and semantically versioned. Submits well-packaged commits
+
+**Marketing Department:**
+16. **UX Specialist** — audits application interface design across all target platforms. Writes state-of-interface reports with improvement recommendations
+17. **Market Researcher** — conducts thorough online investigation into target markets for software packages
+
+**Legal Department:**
+18. **Licensing Auditor** — analyzes project dependencies and creates legal compliance reports
+19. **Copyright Investigator** — researches relevant copyrights and reports conflicts with the development plan
+
+### 2. Agent Execution Model
+- Each agent is defined by a `.md` profile file containing its role description, capabilities, and domain knowledge
+- Agents are assumed to have access to whatever tools or skills they need to perform an action (tool access is not gated at the agent level)
+- Agents can be dynamically created (Talent Scout), augmented (Mentor), and reused (Specialist database)
+- Agent execution happens through the existing backend system (Claude Code, Gemini CLI, Ollama, API providers)
+
+### 3. Workforce Templates — Node-Based Team Organization
+Treat every agent as a **node** and every node as a **logical operation**. Workforce templates define how agents are organized into efficient, independent teams for different project types:
+
+- **Personal Tech Support** — minimal: assistant + developer
+- **General Software Development** — full department hierarchy
+- **Experimental Software Development** — research-heavy, more Researchers and Specialists
+- **Commercial Software Development** — full departments including Legal and Marketing
+- **Private Software Development** — lean development team, no Marketing/Legal
+- **Curriculum Design** — education-focused workflow
+
+Users can create custom workforce templates or modify existing ones via an **integrated node-based AI labor design tool**.
+
+### 4. Operation Modules — Structured Pipelines
+Formalized pipeline definitions with:
+- **Trigger** — event that starts the operation
+- **Blocker** — conditions that prevent execution
+- **Order of Operations** — indexed steps: `<index> | <agent> | <tool/skill> | <operation>`
+- **Interrupts** — conditions that cancel an in-progress operation
+
+**Built-in operations:**
+
+**INSTRUCTION INTAKE** (Trigger: user submits a prompt)
+1. Executive Assistant → separate dev instructions from other input, pass to COO
+1B. Executive Assistant → immediately handle non-dev input
+2. COO → process raw instructions into optimized prompts
+2B. COO → determine project routing
+2C. COO → distribute to appropriate project queues
+3. Project Manager → incorporate new instructions into project plan
+
+**DEVELOP FEATURE** (Type: togglable loop)
+Trigger: unincorporated instructions in queue
+Blocker: Intelligence Resources Manager pause order
+1. Project Manager (synthesize_instructions) → check for and incorporate new instructions
+2. Project Manager (delegate_work) → read plan, distribute tasks with skill recommendations
+3. (parallel) Developer + Researcher + Software Engineer + Feature Tester → execute assigned tasks
+4. (loop back to 1)
+
+### 5. Multi-Provider AI Backend Expansion
+Expand beyond Claude + Gemini to support:
+- All primary AI distributors (OpenAI, Google, Anthropic, etc.) via their APIs
+- Ollama for local model execution
+- API usage monitoring per provider with automatic throttling
+- When a provider's rate limit is approached, the Intelligence Resources Manager pauses that provider's queue and shifts work to available providers
+
+### 6. Token Optimization Pipeline
+- Layered processes of abstraction and recompilation to minimize token length of executable dev prompts
+- The COO applies optimization before distributing to project queues
+- The goal: user can "pump out new instructions with no regard for pacing" because every submission is processed, optimized, and queued efficiently
+
+### 7. UX Philosophy
+- User designs and tests constantly while development happens automatically
+- The user operates as a hypervisor — simultaneously managing several different software solutions
+- Minimal user input required once a plan is submitted
+- Dynamic development throttling respects API usage limits automatically
 
 ## Constraints
-- The master feedback document is **append-only** — never edit or remove prior entries. This protects the historical record and avoids conflicts.
-- The temp file for vim input is ephemeral — deleted after successful append. If vim exits without saving (`:q!`), nothing is appended, nothing is lost.
-- The split view uses tmux panes (consistent with the existing vim-in-tmux approach), not a custom TUI split.
-- Performance: the read-only viewer must handle large feedback files (months of entries) without lag — `less` handles this natively.
-- The processing pipeline (Claude routing, fb2p.md append, session spawn offer) remains unchanged — only the input mechanism changes.
+- Scope is `private` — build incrementally, don't over-engineer the agent framework before proving the core loop works
+- Must build on top of the existing Rust/ratatui TUI — this is an expansion, not a rewrite of the existing session management
+- The existing feedback pipeline, retrospect engine, and session management remain as the foundation
+- Agent "execution" must map to real backend sessions (Claude Code in tmux, Gemini CLI, API calls) — agents are not abstract; they are prompts sent to real AI backends
+- The node-based workflow designer is a significant UI feature — may need its own development phase
+- Must not break the existing "continue development" workflow — it becomes the simplest workforce template (1 supervisor + 1 developer)
 
 ## Technical Decisions
-- **File location**: `<project>/.feedback.md` (hidden, avoids cluttering project root in file browsers)
-- **Extraction method**: save temp file content BEFORE appending → use temp content as the "new feedback" for processing. This is simpler and more reliable than post-hoc diffing.
-- **Split view**: `tmux split-window -v -p 40 "vim <tempfile>"` in the bottom pane, `less +G <feedback.md>` in the top pane. When vim exits, the top pane is killed automatically.
-- **Timestamp headers**: each append gets `\n---\n\n## YYYY-MM-DD HH:MM\n\n<content>\n` for clear separation in the log.
-- **Feedback tab**: list view changes from `Vec<DraftItem>` to `Vec<ProjectFeedbackDoc>` showing: project name, entry count, last entry date, pending processing count.
+- Agent profiles stored as `.md` files (human-readable, Claude-readable) — user explicitly wants this
+- Workforce templates define agent composition as node graphs
+- Operation modules are the pipeline engine — they replace ad-hoc session spawning for complex workflows
+- Token optimization is a preprocessing step in the feedback pipeline, not a runtime concern
+- API monitoring is centralized in the Intelligence Resources Manager agent/module
 
 ## Open Questions
-- None — the user's intent is clear: consolidate per-session files into per-project documents, use split view for context while writing, diff/extract new content for processing.
+1. **"monitors API usage and stops sending new ___"** — user's sentence was cut off. Stops sending new prompts? New sessions? New tasks? (Likely: stops dispatching new work to rate-limited providers)
+2. **"creates a report of legal ___"** — Licensing Auditor description cut off. Creates a report of legal compliance? Legal risks? (Likely: legal compliance/license compatibility)
+3. **"an unincorporated ___"** — DEVELOP FEATURE trigger is incomplete. Trigger is "an unincorporated" what? (Likely: unincorporated instructions/feedback in the queue)
+4. **DEVELOP FEATURE steps 3-4+** — the operation module is partially defined. Steps after the parallel execution block are blank. What happens after parallel work completes? (Likely: Feature-Tester validates → Project Manager reviews → loop back or sign off)
+5. **Scope of node-based workflow designer** — is this a visual TUI tool within orrchestrator, or a separate application? How complex should the node editor be for v2 launch?
+6. **Relationship to v1** — should this trigger `/versioning-init` to archive the current 35-feature build as v1 and scaffold v2? Or should v2 features be built incrementally on top of v1?
+7. **Agent execution granularity** — does each agent get its own AI session (own PTY/tmux window), or do multiple agents share a session with role-switching prompts?
+8. **Ollama integration** — is this a priority for v2 launch, or a later addition? What models are intended for local execution?
 
 ## Acceptance Criteria
-- Each project has a single persistent feedback document that accumulates all entries
-- Opening feedback for a project shows the existing log (scrollable) alongside the vim editor
-- New content is appended with a timestamp separator
-- Only the new content is sent through the processing pipeline (not the entire document)
-- The Feedback tab reflects the per-project document model
-- Existing `.feedback/<timestamp>.md` files are not broken (graceful migration or coexistence)
+- Agent library is defined with all 19 roles as executable agent profiles
+- At least 2 workforce templates are functional (Personal Tech Support + General Software Development)
+- INSTRUCTION INTAKE operation module works end-to-end: user input → COO optimization → project routing → queue
+- DEVELOP FEATURE loop runs autonomously for at least one iteration: plan → build → test → report
+- API usage monitoring tracks at least one provider and pauses work when limits are approached
+- Node-based workflow designer exists in at least a basic form (view/edit workforce templates)
+- Token optimization measurably reduces prompt length vs raw user input
+- Existing v1 features (session management, feedback pipeline, retrospect) continue to work
 
 ### Status
-Generated: 2026-03-29
+Generated: 2026-04-13
 Executed: pending
+Queued: 1 of 2 — **VERSION-LEVEL CHANGE**: This is a v2 redesign. Consider `/versioning-init orrchestrator` before execution.
+
+---
+
+## Entry: 2026-04-12 10:20 — .feedback/2026-04-12 10:20.md
+
+### Raw Input
+1. Instead of creating a new file every time feedback is created lets have one feedback document per project that acts as a master append-only persistent document. When I open a feedback session from orrchestrator it will open the feedback log on top and a vim instance below to recieve the users new addition to the feedback list.
+2. When the user is done writing their new feedback it is appended to the feedback doc and then a diff function is run against the feedback doc to extract the new content. Then claude processes only the new content the same way it does now.
+3. The feedback drafts need to be stored in the project directory somewhere easily accessed by me. I want to be able to bypass orchestrator when it is misbehaving and start the feedback processing by simply loading the file into the project directory.
+
+### Optimized Prompt
+
+## Objective
+Redesign orrchestrator's feedback intake from ephemeral per-draft files to a **per-project persistent append-only feedback log**. The feedback editor opens the existing log for reference with a vim instance below for new input. New content is appended and extracted via diff for processing. Feedback logs live in the project directory so users can bypass orrchestrator entirely.
+
+## Requirements
+1. **Per-project feedback log** — each project gets a single persistent feedback document (e.g., `<project>/.feedback/feedback.md`) that is append-only. All feedback for that project accumulates here chronologically instead of spawning individual draft files.
+2. **Split-view feedback session** — when the user opens a feedback session from orrchestrator, vim opens with the existing feedback log displayed on top (read-only reference) and a fresh input buffer below for the new addition. On save, the new text is appended to the log.
+3. **Diff-based extraction** — after the new content is appended to the feedback log, a diff function compares the pre-append and post-append states to extract only the new content. This new content is then processed through the existing pipeline (optimize → route → update fb2p.md/PLAN.md) exactly as today.
+4. **Project-local storage** — feedback drafts/logs must be stored inside the project directory (not centralized in `~/projects/.feedback/`). This allows the user to bypass orrchestrator when it misbehaves — they can manually edit the feedback log, and Claude picks it up during "continue development".
+5. **Bypass path** — if a user edits the feedback log directly (outside orrchestrator), the next "continue development" session or orrchestrator scan should detect new unprocessed content and offer to process it.
+
+## Constraints
+- The existing `~/projects/.feedback/` directory may still be used for workspace-level feedback that isn't project-specific, but project feedback moves to `<project>/.feedback/`
+- The append-only model means previous feedback entries are never edited or deleted from the log — only new content is appended
+- The diff extraction must be robust against whitespace/formatting variations in vim
+
+## Technical Decisions
+- Feedback log path: `<project>/.feedback/feedback.md` (easily found, `.feedback/` keeps it out of source tree noise)
+- Diff mechanism: snapshot the file's byte length or line count before vim opens, then extract everything after that offset on save
+- Vim split-view: can be achieved with `vim -c "split <feedback.md> | wincmd j"` or similar — opens log in top split, empty buffer below
+- The `.feedback/` directory in each project replaces the per-timestamp draft files for that project's feedback
+
+## Open Questions
+- **Log format**: Should each append be delimited with a timestamp header (`## 2026-04-12 10:30`) automatically, or should the user structure it themselves? (Timestamp headers would make diff extraction and chronological scanning easier.)
+
+## Acceptance Criteria
+- Pressing `f` on a project opens vim with existing feedback log visible + new input area
+- New text is appended to the project's persistent feedback log on save
+- Only the new content is extracted and sent through the processing pipeline
+- Feedback logs live in `<project>/.feedback/feedback.md`
+- User can manually edit the feedback log outside orrchestrator and have it detected
+
+### Status
+Generated: 2026-04-12
+Executed: pending
+Queued: 2 of 2
