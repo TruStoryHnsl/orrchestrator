@@ -2968,16 +2968,49 @@ impl App {
                 }
             }
             KeyCode::Char('u') => {
-                // Recall/undo a routed item — remove pending entries from projects, return to draft
+                // Recall — remove any unexecuted entries from projects, return to draft
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Routed {
-                        // Use deny_commit logic to clean up pending entries
-                        // First build commit packages by scanning for pending entries
-                        self.open_commit_review(self.feedback_selected);
-                        // Now deny it
-                        let removed = self.deny_commit(self.feedback_selected);
-                        self.notify(format!("Recalled — removed {removed} pending entries, returned to draft"));
-                        self.sub = SubView::List;
+                    if item.status == FeedbackStatus::Routed || item.status == FeedbackStatus::Processed {
+                        let filename = item.filename.clone();
+                        let routes = item.routes.clone();
+
+                        // Scan routed projects and remove entries with "Executed: pending"
+                        let mut removed = 0;
+                        for route_name in &routes {
+                            if let Some(proj) = self.projects.iter().find(|p| p.name == *route_name) {
+                                let fb2p_path = proj.path.join("fb2p.md");
+                                if let Ok(content) = std::fs::read_to_string(&fb2p_path) {
+                                    let mut kept = Vec::new();
+                                    for entry in content.split("\n---\n") {
+                                        if entry.contains("Executed: pending") {
+                                            removed += 1;
+                                        } else {
+                                            kept.push(entry.to_string());
+                                        }
+                                    }
+                                    let new_content = kept.join("\n---\n");
+                                    if new_content.trim().is_empty() {
+                                        let _ = std::fs::remove_file(&fb2p_path);
+                                    } else {
+                                        let _ = std::fs::write(&fb2p_path, new_content);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Return to draft
+                        let feedback_dir = self.projects_dir.join(".feedback");
+                        let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
+                        if let Some(meta) = status_map.get_mut(&filename) {
+                            meta.status = FeedbackStatus::Draft;
+                            meta.routes.clear();
+                            meta.submitted_at = None;
+                            meta.tmux_session = None;
+                        }
+                        orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
+                        self.reload_feedback();
+                        self.reload_projects();
+                        self.notify(format!("Recalled — {removed} pending entries removed, returned to draft"));
                     }
                 }
             }
