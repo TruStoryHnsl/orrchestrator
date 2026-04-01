@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod backend;
 pub mod feedback;
 pub mod git;
@@ -10,6 +11,7 @@ pub mod session_log;
 pub mod windows;
 pub mod vault;
 
+pub use agent::{AgentProfile, load_agents, agents_dir};
 pub use backend::{BackendKind, BackendsConfig};
 pub use feedback::{save_and_route_feedback, CONTINUE_DEV_PROMPT, FeedbackItem, FeedbackStatus, FeedbackType, load_feedback_items, submit_feedback, delete_feedback, create_draft, create_append_draft, mark_as_processing, mark_as_processed, mark_as_routed, check_processing_complete, write_feedback_metadata, set_feedback_type, tmux_session_status};
 pub use output_parser::{analyze_output, infer_state, OutputSignal};

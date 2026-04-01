@@ -144,11 +144,11 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
 
     // Each terminal has different syntax for "run this command"
     match terminal.as_str() {
-        "gnome-terminal" => { cmd.arg("--title").arg(title).arg("--").arg("vim").args(&vim_args).arg(file_str); }
-        "kitty" => { cmd.arg("--title").arg(title).arg("vim").args(&vim_args).arg(file_str); }
-        "xterm" => { cmd.arg("-T").arg(title).arg("-e").arg("vim").args(&vim_args).arg(file_str); }
-        "konsole" => { cmd.arg("-e").arg("vim").args(&vim_args).arg(file_str); }
-        _ => { cmd.arg("--title").arg(title).arg("-e").arg("vim").args(&vim_args).arg(file_str); }
+        "gnome-terminal" => { cmd.arg("--title").arg(title).arg("--").arg("nvim").args(&vim_args).arg(file_str); }
+        "kitty" => { cmd.arg("--title").arg(title).arg("nvim").args(&vim_args).arg(file_str); }
+        "xterm" => { cmd.arg("-T").arg(title).arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
+        "konsole" => { cmd.arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
+        _ => { cmd.arg("--title").arg(title).arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
     }
 
     // Detach: new session so the terminal survives orrchestrator exit/crash.
