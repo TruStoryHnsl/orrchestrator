@@ -8,7 +8,7 @@ use orrch_core::process_manager::SessionEvent;
 use orrch_core::{
     analyze_output, infer_state, load_projects, BackendKind, ColorTag,
     OutputSignal, ProcessManager, Project, SessionState, Temperature, CONTINUE_DEV_PROMPT,
-    FeedbackItem, FeedbackStatus,
+    FeedbackItem, FeedbackStatus, load_agents, agents_dir,
 };
 use orrch_retrospect::{ErrorStore, SolutionTracker};
 use tokio::sync::mpsc;
@@ -74,6 +74,7 @@ pub enum SubView {
     ExternalSessionView(u32),
     /// Spawn wizard steps.
     SpawnGoal,
+    SpawnAgent,
     SpawnBackend,
     SpawnHost,
     /// Confirm feedback delete.
@@ -90,6 +91,8 @@ pub enum SubView {
     ActionMenu,
     /// Confirm permanent deletion of a deprecated project.
     ConfirmDeleteDeprecated,
+    /// Global app menu (Esc from anywhere).
+    AppMenu,
     /// Commit review overlay — shows instruction packages by project, allows correction loop.
     CommitReview(usize), // feedback_items index
     /// Waiting for Claude to finish a correction.
@@ -218,8 +221,12 @@ pub struct App {
     pub spawn_project_idx: usize,
     pub spawn_goal_text: String,
     pub spawn_goal_from_roadmap: Option<usize>,
+    pub spawn_agent_idx: usize, // 0 = no agent, 1+ = index into agent_profiles
     pub spawn_backend: BackendKind,
     pub spawn_host_idx: usize, // 0 = local, 1+ = remote_hosts index
+
+    // Agent profiles
+    pub agent_profiles: Vec<orrch_core::AgentProfile>,
 
     // File browser (two-column: parent dir + child dir/preview)
     pub browser_parent_entries: Vec<orrch_core::DirEntry>,
@@ -281,6 +288,9 @@ pub struct App {
     /// Target KWin output for orrchestrator-managed windows (e.g. "DP-2").
     /// Detected at startup from the current window's output, or set manually.
     pub target_output: Option<String>,
+
+    // App menu
+    pub app_menu_selected: usize,
 
     // Sessions tab
     pub managed_sessions: Vec<orrch_core::windows::ManagedSession>,
@@ -357,6 +367,7 @@ impl App {
             session_selected: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
+            app_menu_selected: 0,
             managed_sessions: Vec::new(),
             session_tab_selected: 0,
             tree_expanded: HashMap::new(),
@@ -368,8 +379,10 @@ impl App {
             spawn_project_idx: 0,
             spawn_goal_text: String::new(),
             spawn_goal_from_roadmap: None,
+            spawn_agent_idx: 0,
             spawn_backend: BackendKind::Claude,
             spawn_host_idx: 0,
+            agent_profiles: load_agents(&agents_dir()),
             browser_parent_entries: Vec::new(),
             browser_parent_selected: 0,
             browser_child_entries: Vec::new(),
@@ -960,7 +973,24 @@ impl App {
             }
         }
 
-        // Ctrl+W was KWin restore — removed (KWin crashes Plasma)
+        // Global Esc: from List views opens app menu, from app menu closes it
+        if code == KeyCode::Esc {
+            match &self.sub {
+                SubView::List => {
+                    if !self.tree_browsing {
+                        self.app_menu_selected = 0;
+                        self.sub = SubView::AppMenu;
+                        return Ok(());
+                    }
+                    // tree_browsing Esc is handled in key_inside_project
+                }
+                SubView::AppMenu => {
+                    self.sub = SubView::List;
+                    return Ok(());
+                }
+                _ => {} // other subviews handle Esc themselves
+            }
+        }
 
         // Normalize vim navigation keys to arrows (except in text inputs)
         let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName) || self.commit_typing_correction;
@@ -1001,6 +1031,7 @@ impl App {
             SubView::SessionFocus(_) => self.key_session_focus(key),
             SubView::ExternalSessionView(_) => self.key_external_session_view(key),
             SubView::SpawnGoal => self.key_spawn_goal(key, modifiers),
+            SubView::SpawnAgent => self.key_spawn_agent(key),
             SubView::SpawnBackend => self.key_spawn_backend(key),
             SubView::SpawnHost => self.key_spawn_host(key),
             SubView::RoutingSummary => self.key_routing_summary(key),
@@ -1017,6 +1048,7 @@ impl App {
                 self.key_confirm_delete_feedback(key, idx)
             }
             SubView::DeprecatedBrowser => self.key_deprecated_browser(key),
+            SubView::AppMenu => self.key_app_menu(key),
             SubView::ActionMenu => self.key_action_menu(key),
             SubView::ConfirmDeleteDeprecated => self.key_confirm_delete_deprecated(key),
             SubView::CommitReview(idx) => { let idx = *idx; self.key_commit_review(key, idx) }
@@ -1150,6 +1182,29 @@ impl App {
             KeyCode::Char('n') => {
                 self.request_vim(VimKind::NewIdea);
             }
+            KeyCode::Enter | KeyCode::Char('r') => {
+                // Open selected idea in vim
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    let path = idea.path.clone();
+                    let title = format!("[orrchestrator] Idea: {}", idea.title);
+                    self.vim_request = Some(VimRequest {
+                        file: path,
+                        kind: VimKind::NewIdea,
+                        title,
+                    });
+                }
+            }
+            KeyCode::Char('d') => {
+                // Delete selected idea
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    let path = idea.path.clone();
+                    let _ = std::fs::remove_file(&path);
+                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                    self.ideas = orrch_core::vault::load_ideas(&vault);
+                    self.idea_selected = self.idea_selected.min(self.ideas.len().saturating_sub(1));
+                    self.notify("Idea deleted".into());
+                }
+            }
             KeyCode::Up => {
                 if self.idea_selected == 0 { self.tab_focused = true; }
                 else { self.idea_selected -= 1; }
@@ -1185,6 +1240,7 @@ impl App {
                 }
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
+                self.spawn_agent_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             KeyCode::Char('N') => {
@@ -1548,6 +1604,7 @@ impl App {
                 self.spawn_project_idx = proj_idx;
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
+                self.spawn_agent_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             KeyCode::Char('x') => {
@@ -1605,6 +1662,7 @@ impl App {
                 self.spawn_project_idx = proj_idx;
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
+                self.spawn_agent_idx = 0;
                 self.sub = SubView::SpawnGoal;
                 return Ok(());
             }
@@ -1914,8 +1972,8 @@ impl App {
         match key {
             KeyCode::Esc => self.sub = SubView::List,
             KeyCode::Enter => {
-                self.spawn_backend = BackendKind::Claude;
-                self.sub = SubView::SpawnBackend;
+                self.spawn_agent_idx = 0;
+                self.sub = SubView::SpawnAgent;
             }
             KeyCode::Tab => {
                 if let Some(proj) = self.projects.get(self.spawn_project_idx) {
@@ -1936,6 +1994,25 @@ impl App {
             }
             KeyCode::Backspace => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.pop(); }
             KeyCode::Char(c) => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.push(c); }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_spawn_agent(&mut self, key: KeyCode) -> Result<()> {
+        let count = 1 + self.agent_profiles.len(); // 0 = no agent, 1+ = profiles
+        match key {
+            KeyCode::Esc => self.sub = SubView::List,
+            KeyCode::Tab | KeyCode::Down => {
+                self.spawn_agent_idx = (self.spawn_agent_idx + 1) % count;
+            }
+            KeyCode::Up => {
+                self.spawn_agent_idx = (self.spawn_agent_idx + count - 1) % count;
+            }
+            KeyCode::Enter => {
+                self.spawn_backend = BackendKind::Claude;
+                self.sub = SubView::SpawnBackend;
+            }
             _ => {}
         }
         Ok(())
@@ -1979,9 +2056,16 @@ impl App {
                     let path = proj.path.clone();
                     let proj_name = proj.name.clone();
                     let backend = self.spawn_backend;
-                    let goal = if self.spawn_goal_text.is_empty() {
+                    let raw_goal = if self.spawn_goal_text.is_empty() {
                         CONTINUE_DEV_PROMPT.to_string()
                     } else { self.spawn_goal_text.clone() };
+
+                    // Prepend agent profile preamble if one is selected
+                    let goal = if self.spawn_agent_idx > 0 {
+                        if let Some(profile) = self.agent_profiles.get(self.spawn_agent_idx - 1) {
+                            profile.as_preamble(&raw_goal)
+                        } else { raw_goal }
+                    } else { raw_goal };
 
                     if self.spawn_host_idx == 0 {
                         // Local spawn
@@ -2123,6 +2207,7 @@ impl App {
                 self.spawn_project_idx = pidx.unwrap_or(0);
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
+                self.spawn_agent_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             ActionKind::SpawnAll => {
@@ -2345,6 +2430,53 @@ impl App {
                     }
                 }
             }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ─── App Menu ────────────────────────────────────────────────
+
+    fn key_app_menu(&mut self, key: KeyCode) -> Result<()> {
+        const ITEMS: &[(&str, &str)] = &[
+            ("q", "Quit orrchestrator"),
+            ("r", "Reload all projects"),
+            ("g", "Git commit all projects"),
+            ("v", "Show version info"),
+        ];
+
+        match key {
+            KeyCode::Esc => { self.sub = SubView::List; }
+            KeyCode::Up => {
+                self.app_menu_selected = self.app_menu_selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                if self.app_menu_selected + 1 < ITEMS.len() {
+                    self.app_menu_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.sub = SubView::List;
+                match self.app_menu_selected {
+                    0 => self.should_quit = true,
+                    1 => { self.reload_projects(); self.notify("Reloaded".into()); }
+                    2 => {
+                        let spawned = orrch_core::git::spawn_commit_all(&self.projects_dir);
+                        let count = spawned.len();
+                        self.notify(format!("Committing {count} projects"));
+                    }
+                    3 => self.notify("orrchestrator v0.1.0".into()),
+                    _ => {}
+                }
+            }
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('r') => { self.sub = SubView::List; self.reload_projects(); self.notify("Reloaded".into()); }
+            KeyCode::Char('g') => {
+                self.sub = SubView::List;
+                let spawned = orrch_core::git::spawn_commit_all(&self.projects_dir);
+                self.notify(format!("Committing {} projects", spawned.len()));
+            }
+            KeyCode::Char('v') => { self.sub = SubView::List; self.notify("orrchestrator v0.1.0".into()); }
             _ => {}
         }
         Ok(())
@@ -2940,11 +3072,11 @@ impl App {
                     }
                 }
             }
-            KeyCode::Esc => {
-                // Cancel processing — kill tmux session, return to draft
+            KeyCode::Char('u') => {
+                // Recall — kill tmux if running, remove pending entries, return to draft
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Processing || item.status == FeedbackStatus::Processed {
-                        // Kill tmux session if still running
+                    if item.status != FeedbackStatus::Draft {
+                        // Kill tmux session if still alive
                         if let Some(ref session) = item.tmux_session {
                             let _ = std::process::Command::new("tmux")
                                 .args(["kill-session", "-t", session.as_str()])
@@ -2952,25 +3084,6 @@ impl App {
                                 .stderr(std::process::Stdio::null())
                                 .status();
                         }
-                        // Return to draft
-                        let feedback_dir = self.projects_dir.join(".feedback");
-                        let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
-                        if let Some(meta) = status_map.get_mut(&item.filename) {
-                            meta.status = FeedbackStatus::Draft;
-                            meta.routes.clear();
-                            meta.submitted_at = None;
-                            meta.tmux_session = None;
-                        }
-                        orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
-                        self.reload_feedback();
-                        self.notify("Cancelled — returned to draft".into());
-                    }
-                }
-            }
-            KeyCode::Char('u') => {
-                // Recall — remove any unexecuted entries from projects, return to draft
-                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Routed || item.status == FeedbackStatus::Processed {
                         let filename = item.filename.clone();
                         let routes = item.routes.clone();
 

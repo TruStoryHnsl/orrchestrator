@@ -473,244 +473,56 @@ Executed: 2026-03-29 — Plan mode implemented. p key toggles in Feedback tab an
 
 ---
 
-## Entry: 2026-03-29 — inline feedback (agent profile management)
+## Entry: 2026-03-31 — plan document (beta redesign → agent orchestration platform)
 
 ### Raw Input
-Orrchestrator needs to be able to manage different claude.md and gemini.md AGENT.md files etc as swappable profiles. There are downloadable claude.md and agent files that are decked out with skills.
+Full redesign_plan document: "ORRCHESTRATOR BETA REDESIGN — A full service AI powered software development hypervisor that unifies AI workflow and enables node-based corporate emulation models for AI agents."
+
+Key concepts from the redesign:
+- 4 departments of AI agents (Admin, Development, Marketing, Legal) with 19 defined roles
+- Workforce templates as node graphs: agents + connections + operation step sequences
+- Operation modules with trigger/blocker/interrupt/step pipelines
+- Multi-provider AI (all major distributors + Ollama)
+- Token optimization via layered abstraction/recompilation
+- Node-based visual workforce designer (may need native window)
+- 4 panels: Design (Project Design + Workforce Design), Oversee, Hypervise, Library
+- Input type classification: instructions, plans, ideas, knowledge — each routed to a type-specific workforce
+- Dynamic API usage throttling via Intelligence Resources Manager
 
 ### Optimized Prompt
 
 ## Objective
-Add an agent profile management system to orrchestrator. Users should be able to maintain multiple CLAUDE.md / GEMINI.md / AGENT.md configurations as named profiles and swap between them per-project or globally. This supports the ecosystem of downloadable skill-packed agent configurations.
+Transform orrchestrator from a session manager (1.0.0) into an agent orchestration platform (2.0.0). The redesign adds agent profiles, workforce templates, operation module pipelines, multi-provider AI, a component library, and a visual workflow designer — all while preserving the existing Rust/ratatui codebase and building incrementally.
 
-## Requirements
-1. **Profile storage** — profiles stored in `~/.config/orrchestrator/profiles/` as named directories, each containing configuration files (CLAUDE.md, GEMINI.md, etc.)
-2. **Profile listing** — viewable from orrchestrator, shows profile name + description + which files it contains
-3. **Profile switching** — per-project: symlink or copy a profile's CLAUDE.md into the project directory. Global: set a default profile applied to new projects
-4. **Import profiles** — import a CLAUDE.md or profile bundle from a URL, file path, or clipboard
-5. **Active profile indicator** — projects panel shows which profile is active for each project (if non-default)
-6. **Profile diffing** — before switching, show what would change (added skills, removed sections, modified behavior)
-7. **Backup on switch** — before replacing a CLAUDE.md, back up the current one as `CLAUDE.md.bak` or in a `.profiles/` archive
+## Deliverable
+A fresh PLAN.md with:
+- 8 open questions that gate specific phases
+- 8 development phases from 1.1.0 → 2.0.0
+- 43 roadmap items + 2 carried forward
+- Architecture docs: crate structure, department hierarchy, operation module schema, backend config, key workflows
+- SemVer versioning throughout (no v1/v2 labels)
 
-## Constraints
-- Must not break existing projects that have hand-written CLAUDE.md files
-- Profile switching is a file operation, not a runtime config — the AI backend reads the file at session start
-- Profiles are per-backend (a CLAUDE.md profile doesn't affect Gemini)
+## Phase Summary
+- Phase 0 (1.1.0): Foundation prep — panel restructuring, 3 new crates, config migration
+- Phase 1 (1.2.0): Agent framework — profiles, library, execution binding, COO optimizer
+- Phase 2 (1.3.0): Workforce templates — data model, built-ins, selector, grouped sessions
+- Phase 3 (1.4.0): Operation modules — step engine, INSTRUCTION INTAKE, DEVELOP FEATURE
+- Phase 4 (1.5.0): Multi-provider — Ollama, raw APIs, usage monitoring, throttling, token optimization
+- Phase 5 (1.6.0): Library — storage, panel UI, MCP server, AI-assisted creation, Mentor auto-assignment
+- Phase 6 (1.7.0): Node-based designer — workforce format, TUI node list, nesting, import/export
+- Phase 7 (1.8.0): Native window mode — window spawning, visual node editor, non-TUI mode
+- Phase 8 (2.0.0-rc): Intake workforces — instruction/plan/idea/knowledge processing pipelines
 
-## Technical Decisions
-- Store: `~/.config/orrchestrator/profiles/<profile_name>/CLAUDE.md` etc.
-- Active tracking: `<project>/.orrprofile` file containing the active profile name (absent = custom/manual)
-- Default profile: `~/.config/orrchestrator/default_profile` (one line: profile name)
-- Import: download to temp, let user name it, copy into profiles dir
-
-## Open Questions
-- Should profile switching be a hard copy or a symlink? Symlinks are cleaner but break if the profile dir is moved. Copy is safer but means manual updates don't propagate.
-
-## Acceptance Criteria
-- User can list, create, import, and switch agent profiles from orrchestrator
-- Projects show their active profile in the panel display
-- Switching backs up the existing config before replacing
-- Profiles work across CLAUDE.md, GEMINI.md, and any future agent config files
-
-### Status
-Generated: 2026-03-29
-Executed: pending — queued as future feature (not blocking current roadmap)
-
----
-
-## Entry: 2026-04-13 04:14 — 2026-04-13 04:14.md (BETA REDESIGN — v2 Vision Document)
-
-### Raw Input
-Source: `~/projects/.feedback/2026-04-13 04:14.md` (165 lines)
-Also supersedes: `~/projects/orrchestrator/v2_user_design.md` (earlier draft of same vision)
-
-### Optimized Prompt
-
-## Objective
-Redesign orrchestrator from a TUI session manager into a **full AI-powered software development hypervisor** with a corporate-style agent hierarchy, node-based workforce design tools, configurable operation modules, multi-provider API management, and token optimization pipelines. This is a v2-scale architectural transformation.
-
-## Requirements
-
-### 1. Agent Library — Departmental AI Workforce
-Build a structured agent system organized into departments, each with specialized roles:
-
-**Admin Department:**
-1. **Executive Assistant** — default user interface. Triages input: routes software development instructions to the COO, handles everything else directly
-2. **Chief Operations Officer (COO)** — processes raw dev instructions into concise, de-duplicated, token-optimized prompts. Determines project routing and distributes to job queues
-3. **Intelligence Resources Manager** — monitors API usage across all configured AI providers. Decides whether projects can continue processing their queues or must pause until API resources free up
-4. **Mentor** — advises user on strategy decisions. Analyzes agent `.md` profile files and augments agents with additional tools or skills
-
-**Development Department — Leadership:**
-5. **Project Manager** — runs the heuristic development loop: plan → build → test → break → repeat. Maintains broad project view. Recommends agent team configurations. Instructs agents at each development step with explicit skill/tool suggestions. Has department-specific identity to recognize misrouted instructions. Aware of other projects' featuresets to identify code reuse opportunities
-6. **Talent Scout** — reads instructions and creates specialty agents. Pairs new specialists with a Researcher to compile comprehensive narrow-topic knowledge sets. Maintains a specialist database for reuse
-
-**Development Department — Engineering:**
-7. **Software Engineer** — works with Researcher to design optimal implementations. Maintains the development roadmap as instructions and designs arrive. Broad application perspective
-8. **Developer** — implements software solutions per supervisor instructions
-9. **Feature-Tester** — validates developer work by creating test environments: VMs, Playwright, network-isolated hotspots, SSH-controlled remote machines. NEVER signs off untested features. If unable to test something, designs a manual test guide for the user and collects results
-10. **Researcher** — conducts comprehensive research on software engineering solutions. Produces up-to-date ecosystem reports for the dev team
-11. **UI Designer** — designs useful, fast, and beautiful interfaces following the UX design established by the user
-12. **Specialist** — works with a Researcher to build comprehensive knowledge of a narrow topic into their agent profile
-
-**Development Department — QA:**
-13. **Penetration Tester** — attempts to compromise program security and reports results
-14. **Beta-Tester** — tries to break things to find failure points and report them
-
-**Development Department — DevOps:**
-15. **Versioning Manager** — uses git MCP and similar tools to keep the project backed up, organized, and semantically versioned. Submits well-packaged commits
-
-**Marketing Department:**
-16. **UX Specialist** — audits application interface design across all target platforms. Writes state-of-interface reports with improvement recommendations
-17. **Market Researcher** — conducts thorough online investigation into target markets for software packages
-
-**Legal Department:**
-18. **Licensing Auditor** — analyzes project dependencies and creates legal compliance reports
-19. **Copyright Investigator** — researches relevant copyrights and reports conflicts with the development plan
-
-### 2. Agent Execution Model
-- Each agent is defined by a `.md` profile file containing its role description, capabilities, and domain knowledge
-- Agents are assumed to have access to whatever tools or skills they need to perform an action (tool access is not gated at the agent level)
-- Agents can be dynamically created (Talent Scout), augmented (Mentor), and reused (Specialist database)
-- Agent execution happens through the existing backend system (Claude Code, Gemini CLI, Ollama, API providers)
-
-### 3. Workforce Templates — Node-Based Team Organization
-Treat every agent as a **node** and every node as a **logical operation**. Workforce templates define how agents are organized into efficient, independent teams for different project types:
-
-- **Personal Tech Support** — minimal: assistant + developer
-- **General Software Development** — full department hierarchy
-- **Experimental Software Development** — research-heavy, more Researchers and Specialists
-- **Commercial Software Development** — full departments including Legal and Marketing
-- **Private Software Development** — lean development team, no Marketing/Legal
-- **Curriculum Design** — education-focused workflow
-
-Users can create custom workforce templates or modify existing ones via an **integrated node-based AI labor design tool**.
-
-### 4. Operation Modules — Structured Pipelines
-Formalized pipeline definitions with:
-- **Trigger** — event that starts the operation
-- **Blocker** — conditions that prevent execution
-- **Order of Operations** — indexed steps: `<index> | <agent> | <tool/skill> | <operation>`
-- **Interrupts** — conditions that cancel an in-progress operation
-
-**Built-in operations:**
-
-**INSTRUCTION INTAKE** (Trigger: user submits a prompt)
-1. Executive Assistant → separate dev instructions from other input, pass to COO
-1B. Executive Assistant → immediately handle non-dev input
-2. COO → process raw instructions into optimized prompts
-2B. COO → determine project routing
-2C. COO → distribute to appropriate project queues
-3. Project Manager → incorporate new instructions into project plan
-
-**DEVELOP FEATURE** (Type: togglable loop)
-Trigger: unincorporated instructions in queue
-Blocker: Intelligence Resources Manager pause order
-1. Project Manager (synthesize_instructions) → check for and incorporate new instructions
-2. Project Manager (delegate_work) → read plan, distribute tasks with skill recommendations
-3. (parallel) Developer + Researcher + Software Engineer + Feature Tester → execute assigned tasks
-4. (loop back to 1)
-
-### 5. Multi-Provider AI Backend Expansion
-Expand beyond Claude + Gemini to support:
-- All primary AI distributors (OpenAI, Google, Anthropic, etc.) via their APIs
-- Ollama for local model execution
-- API usage monitoring per provider with automatic throttling
-- When a provider's rate limit is approached, the Intelligence Resources Manager pauses that provider's queue and shifts work to available providers
-
-### 6. Token Optimization Pipeline
-- Layered processes of abstraction and recompilation to minimize token length of executable dev prompts
-- The COO applies optimization before distributing to project queues
-- The goal: user can "pump out new instructions with no regard for pacing" because every submission is processed, optimized, and queued efficiently
-
-### 7. UX Philosophy
-- User designs and tests constantly while development happens automatically
-- The user operates as a hypervisor — simultaneously managing several different software solutions
-- Minimal user input required once a plan is submitted
-- Dynamic development throttling respects API usage limits automatically
-
-## Constraints
-- Scope is `private` — build incrementally, don't over-engineer the agent framework before proving the core loop works
-- Must build on top of the existing Rust/ratatui TUI — this is an expansion, not a rewrite of the existing session management
-- The existing feedback pipeline, retrospect engine, and session management remain as the foundation
-- Agent "execution" must map to real backend sessions (Claude Code in tmux, Gemini CLI, API calls) — agents are not abstract; they are prompts sent to real AI backends
-- The node-based workflow designer is a significant UI feature — may need its own development phase
-- Must not break the existing "continue development" workflow — it becomes the simplest workforce template (1 supervisor + 1 developer)
-
-## Technical Decisions
-- Agent profiles stored as `.md` files (human-readable, Claude-readable) — user explicitly wants this
-- Workforce templates define agent composition as node graphs
-- Operation modules are the pipeline engine — they replace ad-hoc session spawning for complex workflows
-- Token optimization is a preprocessing step in the feedback pipeline, not a runtime concern
-- API monitoring is centralized in the Intelligence Resources Manager agent/module
-
-## Open Questions
-1. **"monitors API usage and stops sending new ___"** — user's sentence was cut off. Stops sending new prompts? New sessions? New tasks? (Likely: stops dispatching new work to rate-limited providers)
-2. **"creates a report of legal ___"** — Licensing Auditor description cut off. Creates a report of legal compliance? Legal risks? (Likely: legal compliance/license compatibility)
-3. **"an unincorporated ___"** — DEVELOP FEATURE trigger is incomplete. Trigger is "an unincorporated" what? (Likely: unincorporated instructions/feedback in the queue)
-4. **DEVELOP FEATURE steps 3-4+** — the operation module is partially defined. Steps after the parallel execution block are blank. What happens after parallel work completes? (Likely: Feature-Tester validates → Project Manager reviews → loop back or sign off)
-5. **Scope of node-based workflow designer** — is this a visual TUI tool within orrchestrator, or a separate application? How complex should the node editor be for v2 launch?
-6. **Relationship to v1** — should this trigger `/versioning-init` to archive the current 35-feature build as v1 and scaffold v2? Or should v2 features be built incrementally on top of v1?
-7. **Agent execution granularity** — does each agent get its own AI session (own PTY/tmux window), or do multiple agents share a session with role-switching prompts?
-8. **Ollama integration** — is this a priority for v2 launch, or a later addition? What models are intended for local execution?
-
-## Acceptance Criteria
-- Agent library is defined with all 19 roles as executable agent profiles
-- At least 2 workforce templates are functional (Personal Tech Support + General Software Development)
-- INSTRUCTION INTAKE operation module works end-to-end: user input → COO optimization → project routing → queue
-- DEVELOP FEATURE loop runs autonomously for at least one iteration: plan → build → test → report
-- API usage monitoring tracks at least one provider and pauses work when limits are approached
-- Node-based workflow designer exists in at least a basic form (view/edit workforce templates)
-- Token optimization measurably reduces prompt length vs raw user input
-- Existing v1 features (session management, feedback pipeline, retrospect) continue to work
+## Open Questions (must resolve before gated phases)
+Q1: Versioning strategy — tag 1.0.0 and build incrementally, or archive and scaffold fresh?
+Q2: Agent execution model — PTY per agent? shared context? inter-agent communication?
+Q3: Workforce step execution — parallel branches? blocker polling? data handoff format?
+Q4: Native window mode — TUI-only? egui? web-based? defer?
+Q5: Ollama integration — PTY interactive mode? HTTP API wrapper? API-only?
+Q6: Token optimization specifics — which layers get compressed, with what strategies?
+Q7: Library storage — flat files? SQLite? git-backed? auto vs manual tool assignment?
+Q8: Workforce definition format — YAML/TOML? structured markdown? TUI wizard?
 
 ### Status
-Generated: 2026-04-13
-Executed: pending
-Queued: 1 of 2 — **VERSION-LEVEL CHANGE**: This is a v2 redesign. Consider `/versioning-init orrchestrator` before execution.
-
----
-
-## Entry: 2026-04-12 10:20 — .feedback/2026-04-12 10:20.md
-
-### Raw Input
-1. Instead of creating a new file every time feedback is created lets have one feedback document per project that acts as a master append-only persistent document. When I open a feedback session from orrchestrator it will open the feedback log on top and a vim instance below to recieve the users new addition to the feedback list.
-2. When the user is done writing their new feedback it is appended to the feedback doc and then a diff function is run against the feedback doc to extract the new content. Then claude processes only the new content the same way it does now.
-3. The feedback drafts need to be stored in the project directory somewhere easily accessed by me. I want to be able to bypass orchestrator when it is misbehaving and start the feedback processing by simply loading the file into the project directory.
-
-### Optimized Prompt
-
-## Objective
-Redesign orrchestrator's feedback intake from ephemeral per-draft files to a **per-project persistent append-only feedback log**. The feedback editor opens the existing log for reference with a vim instance below for new input. New content is appended and extracted via diff for processing. Feedback logs live in the project directory so users can bypass orrchestrator entirely.
-
-## Requirements
-1. **Per-project feedback log** — each project gets a single persistent feedback document (e.g., `<project>/.feedback/feedback.md`) that is append-only. All feedback for that project accumulates here chronologically instead of spawning individual draft files.
-2. **Split-view feedback session** — when the user opens a feedback session from orrchestrator, vim opens with the existing feedback log displayed on top (read-only reference) and a fresh input buffer below for the new addition. On save, the new text is appended to the log.
-3. **Diff-based extraction** — after the new content is appended to the feedback log, a diff function compares the pre-append and post-append states to extract only the new content. This new content is then processed through the existing pipeline (optimize → route → update fb2p.md/PLAN.md) exactly as today.
-4. **Project-local storage** — feedback drafts/logs must be stored inside the project directory (not centralized in `~/projects/.feedback/`). This allows the user to bypass orrchestrator when it misbehaves — they can manually edit the feedback log, and Claude picks it up during "continue development".
-5. **Bypass path** — if a user edits the feedback log directly (outside orrchestrator), the next "continue development" session or orrchestrator scan should detect new unprocessed content and offer to process it.
-
-## Constraints
-- The existing `~/projects/.feedback/` directory may still be used for workspace-level feedback that isn't project-specific, but project feedback moves to `<project>/.feedback/`
-- The append-only model means previous feedback entries are never edited or deleted from the log — only new content is appended
-- The diff extraction must be robust against whitespace/formatting variations in vim
-
-## Technical Decisions
-- Feedback log path: `<project>/.feedback/feedback.md` (easily found, `.feedback/` keeps it out of source tree noise)
-- Diff mechanism: snapshot the file's byte length or line count before vim opens, then extract everything after that offset on save
-- Vim split-view: can be achieved with `vim -c "split <feedback.md> | wincmd j"` or similar — opens log in top split, empty buffer below
-- The `.feedback/` directory in each project replaces the per-timestamp draft files for that project's feedback
-
-## Open Questions
-- **Log format**: Should each append be delimited with a timestamp header (`## 2026-04-12 10:30`) automatically, or should the user structure it themselves? (Timestamp headers would make diff extraction and chronological scanning easier.)
-
-## Acceptance Criteria
-- Pressing `f` on a project opens vim with existing feedback log visible + new input area
-- New text is appended to the project's persistent feedback log on save
-- Only the new content is extracted and sent through the processing pipeline
-- Feedback logs live in `<project>/.feedback/feedback.md`
-- User can manually edit the feedback log outside orrchestrator and have it detected
-
-### Status
-Generated: 2026-04-12
-Executed: pending
-Queued: 2 of 2
+Generated: 2026-03-31
+Executed: 2026-03-31 — PLAN.md rewritten. 8-phase roadmap with SemVer milestones. 8 open questions flagged. Awaiting user resolution of open questions before Phase 0 begins.

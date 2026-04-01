@@ -3,8 +3,7 @@ ORRCHESTRATOR BETA REDESIGN
 A full service ai powered software development hypervisor that unifies my ai workflow and enables me to design complicated and thorough node-based corporate emulation models for ai agents. 
 
 
-# UX #
- 
+# UX # 
 - the user can be desiging and testing constantly while the development happens automatically. This allows the user to simultaneously manage the development of several different software solutions like a hypervisor. 
 - The user can also create workflow templates that define how ai development teams organize their agents into different workflows that are optimized for different kinds of projects.
 - A user can choose to use a simple development workflow with only a supervisor and developer agent if they need to make a single function bash script, or perform some basic system configuration change. 
@@ -20,6 +19,51 @@ A full service ai powered software development hypervisor that unifies my ai wor
 - uses layered processes of abstraction and recompilation to minimize the token length of the executable dev prompts 
 
 
+# UI #
+- orrchestrator is a tui application first. It is also capable of running in a standard window with a desktop aligned interface design. The tui can spawn these windows to facilitate things that the tui doesnt do well, like the node based visual code editor.
+- the tabbed pages from left to right are design, oversee, hypervise, and library.
+
+    ## Oversee ##
+    - This is just the projects page so can stay essentially how it is. I have changes I want to make to it but they are not within the scope of this redesign. 
+    - one addition to the projects page we need to make is a popup menu for executing workflows. 
+    
+    ## Hypervise ##
+    - This page is designed to allow the user to work interactively with as many parallel ai sessions as possible. 
+    - session displays and interactions need to be simple and clear.
+    - the user can expand a prompt input field to send prompts to sessions without navigating away from the rest of the sessions displays 
+    - Each session on this page displays just three things, session goal, busy/idle/waiting status indicators, and a printout of the most recent message. This recent message is expandable and scrollable to view the last few minutes of the sessions raw log.
+    - there are reccomendations for changes to make to the workforce based on workflow performance.
+    - when workflows are run the display containerizes them into a single process that only reports the interaction with the agent designated to be userfacing. In other words group sessions that are children of the same workflow together and make that workflow expandable into its own display. The entry in the menu for this group should display essentially the same as the others but with an arrow nest to it indicating there is something collapsed underneath it. 
+    - this is intended as a way for the user to facilitte the workflows by helping the workforce along. 
+  
+    ## Design ##
+    - Please node that these design intentions may not translate well to a tui. I would like orrchestrator to have the ability to open in a native window with a ui rendered in the standard fashion to offer a different interface than what the tui can provide. Ultimately these will be utilized to create a non-tui version of orrchestrator for terminal-averse users. in the meantime implement whatever functionality does make sense in a tui. 
+    - This page is really two pages 
+
+      ### PROJECT DESIGN ###
+        - . There is a global hotkey for opening a fresh nvim instance for the user to start writing into. whatever they write is saved and sorted as raw user input. When the user is ready they define the type and send it through the appropriate workforce pipeline. The first few lines of each doc should be searched for an indicator of the input type, and autofilled for the user when they go to set the type.+
+        - every type of raw input is processed by a different workforce. 
+          a. project dev instructions - workforce:instruction-intake
+          b. designs/plans for a new peoject - workforce:plan-intake
+          c. ideas that arent complete enough to be their own project yet - workforce:idea-intake
+          d. custom agents, skills, tools, etc. to be saved to the library - workforce:knowledge-intake 
+        - This page does essentailly the same thing that the feedback page does now just with a more complete and polished featureset. 
+
+      ### WORKFORCE DESIGN ###
+        - design new agent workforces in a node based visual code editor inspired interface        
+        - This is where the user engages with the node based workforce system. 
+        - Use the workflow node template I created and the nodes that I pre-configured to design the visual workflow editor. 
+        - The true power of workflow sytems is found in nesting workforces inside of each other. 
+        - the user can also have an ai agent design workforces for them using the contents of the library as the logical pieces. It configures existing agents into teams with hierarchies that can accomplish more complex tasks. These configurations are called workforces and they are very customizable.   
+        - the feedback and ideas tabs combine together here to organise all user-written .md files. This includes ideas, plans, bug reports, etc.
+        - The user should feel like theyre using a visual code editor with a natural language logic interpreter. claude sessions are the logic interpreters and the transformation executors.  
+
+    ## Library ##
+    - All Agents have access to any tool in the library that applies to their intended workloads. The mentor agent is designed to automatically assess the tool needs of an agent and update their instructions to include new tools/skills/etc. 
+    - This is a database of workflows, agents, skills, tools, MCP servers, API keys, everything that aims to improve the efficency of ai workloads.
+    - The library hosts an MCP server for custom user specific tools.
+    - lets the user create new skills, tools, agents or other with the help of an ai session
+ 
 
 # AGENT LIBRARY # 
  * it is assumed, as of now, that agents have access to whatever tools or skills they might need to perform an action. 
@@ -66,8 +110,10 @@ A full service ai powered software development hypervisor that unifies my ai wor
 
 
 # WORKFORCES #
-
 These workforces are worker organization templates that treat every agent as a node and every node as a logical operation that can be used to design efficent and independant ai workforces to autonomously complete any kind of complex project.
+
+The workforces that process the different types of user input still need to be created. Create them for me and I will use the editor to modify them after the editor is complete. 
+
 
 We will start with a small number of templates, the following being potential examples. 
 - Personal Tech Support
@@ -76,15 +122,16 @@ We will start with a small number of templates, the following being potential ex
 - Commercial Software Development
 - Private Software Development
 - Curriculum Design
-	
+	* not all of these examples exist yet. 
 
-# OPERATION MODULES #
-These are automated ai powered workflows available to orrchestrator to utilize.  
-* Any skills referenced here that dont already exist should be created upon ingest of this planning document *
+## WORKFORCE MODULES ##
+These are automated ai powered workforces available to orrchestrator to utilize.  
+* Any skills, tools, or agents referenced in this plan that dont already exist should be created upon ingest of this planning document *
+* asterisks in a field in a step means that no skill is necessary, or many skills are necessary. Each should be evaluated and replaced by any appropriate tool found. 
 
 	## Template ##
 		
-		Basic_Operation{
+		Basic_Operation_Template{
 
 		## OPERATION NAME ## 
 
@@ -121,17 +168,17 @@ These are automated ai powered workflows available to orrchestrator to utilize.
 		Trigger: user submits a prompt
 
 			#### Order of Operations ####
-			##### <index> | <agent> | <tool or skill> | <operation> ####
+			##### <index> | <agent> | <tool or skill> | <operation> #####
 
 			1 | Executive Assistant | * | seperate development instructions from other input and pass them to COO.
 
 			1B | Executive Assistant | * | immediately address input unrelated to direct software development
 
-			2 | Chief Operations Officer | * | process raw instructions into optimized instructions
+			2 | Chief Operations Officer | skill:clarify | process raw instructions into optimized instructions
 		
-			3 | Chief Operations Officer | * | determine which project each instruction should be sent to
+			3 | Chief Operations Officer | skill:parse | determine which project each instruction should be sent to
 
-			4 | Chief Operations Officer || pass the new instructions to the appropriate projects 
+			4 | Chief Operations Officer | tool:copy-file | pass the new instructions to the appropriate projects 
 			
 			5 | Project Manager | skill:synthesize_instructions | incorporate the new instructions into the project plan
 
@@ -143,7 +190,7 @@ These are automated ai powered workflows available to orrchestrator to utilize.
 		Blocker: instructions from the Intelligence Resource Manager to pause development. 
 
 			#### Order of Operations ####
-			##### <index> | <agent> | <tool or skill> | <operation> ####
+			##### <index> | <agent> | <tool or skill> | <operation> #####
 
 			1 | Project Manager | skill:synthesize_instructions | check for new instructions and incorporate any that exist into the project plan.
 
@@ -155,18 +202,23 @@ These are automated ai powered workflows available to orrchestrator to utilize.
 
 				- | Software Engineer | * | design architecture 
 
-				- | UI Designer | * | design UX elements 
+				- | UI Designer | *, uses stitch if possible | design UX elements 
 
-		 		- | Feature Tester | * | design tests that verify successful implementation
+		 		- | Feature Tester | skill:test-design | design tests that verify successful implementation
 
-				- | Penetration Tester | skill:pen_test | attempts to exploit the program to exfiltrate data, infiltrate viruses, and execute arbitrary code.  
+				- | Penetration Tester | skill:pen-test | attempts to exploit the program to exfiltrate data, infiltrate viruses, and execute arbitrary code.  
 			
-				- | Beta Tester | * | attempts to break the implementation
+				- | Beta Tester | skill:go-nuts | attempts to break the implementation
 
-			3 | Project Manager | * | continue facillitating development until all relevant testers report acceptable result
+			3 | Project Manager | skill:dev-loop | continue facillitating development until all relevant testers report acceptable result
 			
-			4 | Project Manager | * | write a report of the session to the development log signed with an appropriate version tag
+      4 | Project Manager | skill:compare-instructions-to-deliverable | verify that the work the team completed is high quality and functional
 
-			5 | Repository Manager | mcp:github | stage the new version and commit to the repository 
+      5 | Project Manager | skill:log-dev | write a report of the session to the development log signed with an appropriate version tag
 
-		
+      6 | Repository Manager | skill:versioning | determine the appropriate version tag to give this commit using semantic versioning
+
+			7 | Repository Manager | mcp:github | stage the new version and commit to the appropriate branch in the repository
+
+
+		## MORE MODULES COMING SOON ##

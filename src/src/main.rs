@@ -63,10 +63,19 @@ async fn main() -> Result<()> {
 
     let result = run_loop(&mut terminal, &mut app).await;
 
+    // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
     let _ = terminal.show_cursor();
+
+    // Clean up managed sessions (non-blocking)
     app.pm.cleanup();
+
+    // Force exit — don't wait for background tokio tasks (remote discovery, timers)
+    // They're all detached and will die with the process.
+    if result.is_ok() {
+        std::process::exit(0);
+    }
     result
 }
 
@@ -163,7 +172,7 @@ async fn run_loop(
                 terminal.show_cursor()?;
                 // Use the same orrchestrator-branded vim args as the windowed path
                 let vim_args = orrch_tui::editor::vim_title_args_pub(&req.title);
-                let _ = std::process::Command::new("vim")
+                let _ = std::process::Command::new("nvim")
                     .args(&vim_args)
                     .arg(&req.file)
                     .status();

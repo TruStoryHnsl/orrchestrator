@@ -1,0 +1,9 @@
+# cargo-watch: ignore non-source files that change during runtime
+*.md
+plans/
+.feedback/
+.retrospect/
+.orrtag
+.orrtemp
+.scope
+fb2p.md

@@ -43,6 +43,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::SessionFocus(idx) => draw_session_focus(frame, app, layout[1], idx),
         SubView::ExternalSessionView(pid) => draw_external_session(frame, app, layout[1], pid),
         SubView::SpawnGoal => { draw_panel_content(frame, app, layout[1]); draw_spawn_goal(frame, app); }
+        SubView::SpawnAgent => { draw_panel_content(frame, app, layout[1]); draw_spawn_agent(frame, app); }
         SubView::SpawnBackend => { draw_panel_content(frame, app, layout[1]); draw_spawn_backend(frame, app); }
         SubView::SpawnHost => { draw_panel_content(frame, app, layout[1]); draw_spawn_host(frame, app); }
         SubView::RoutingSummary => { draw_panel_content(frame, app, layout[1]); draw_routing_summary(frame, app); }
@@ -50,6 +51,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::ConfirmComplete(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_complete(frame, app, idx); }
         SubView::ConfirmDeleteFeedback(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_delete_feedback(frame, app, idx); }
         SubView::DeprecatedBrowser => draw_deprecated_browser(frame, app, layout[1]),
+        SubView::AppMenu => { draw_panel_content(frame, app, layout[1]); draw_app_menu(frame, app); }
         SubView::ActionMenu => { draw_panel_content(frame, app, layout[1]); draw_action_menu(frame, app); }
         SubView::ConfirmDeleteDeprecated => { draw_deprecated_browser(frame, app, layout[1]); draw_confirm_delete_deprecated(frame, app); }
         SubView::NewProjectName => { draw_panel_content(frame, app, layout[1]); draw_new_project_name(frame, app); }
@@ -1035,6 +1037,45 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
         .wrap(Wrap { trim: false }), popup);
 }
 
+fn draw_spawn_agent(frame: &mut Frame, app: &App) {
+    let height = 8 + app.agent_profiles.len() as u16;
+    let popup = centered_popup(frame.area(), 55, height.min(18));
+    frame.render_widget(Clear, popup);
+    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let mut lines = vec![
+        Line::from(vec![Span::raw("Goal: "), Span::styled(goal_display, Style::default().fg(GREEN))]),
+        Line::raw(""),
+        Line::styled("Agent profile (Tab/arrows to select, Enter to confirm):", Style::default().fg(TEXT_DIM)),
+    ];
+
+    // Option 0: no agent (direct session)
+    let no_agent_sel = app.spawn_agent_idx == 0;
+    lines.push(Line::styled(
+        format!("{} (none) — direct session", if no_agent_sel { "▶" } else { " " }),
+        if no_agent_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+    ));
+
+    // Agent profiles
+    for (i, profile) in app.agent_profiles.iter().enumerate() {
+        let sel = app.spawn_agent_idx == i + 1;
+        let marker = if sel { "▶ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}{}", marker, profile.name),
+                if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
+            Span::styled(format!("  {}", profile.role), Style::default().fg(TEXT_MUTED)),
+        ]));
+    }
+
+    if app.agent_profiles.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled("  No agent profiles found in agents/", Style::default().fg(TEXT_MUTED)));
+    }
+
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Agent ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+        .wrap(Wrap { trim: false }), popup);
+}
+
 fn draw_spawn_backend(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 50, 10);
     frame.render_widget(Clear, popup);
@@ -1190,20 +1231,49 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("↑↓", "select"), ("q", "quit"),
         ]),
         (Panel::Ideas, SubView::List) => hint_line(&[
-            ("n", "new idea"), ("Enter", "view"),
+            ("Enter", "open"), ("n", "new"), ("d", "delete"),
             ("|", ""),
-            ("←→", "panels"), ("q", "quit"),
+            ("←→", "panels"), ("Esc", "menu"),
         ]),
-        (Panel::Sessions, SubView::List) => hint_line(&[
-            ("Enter", "focus"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
-            ("|", ""),
-            ("↑↓", "select"), ("q", "quit"),
-        ]),
-        (Panel::Feedback, SubView::List) => hint_line(&[
-            ("f", "new"), ("s", "submit"), ("c", "commit"), ("p", "plan"),
-            ("|", ""),
-            ("Esc", "cancel"), ("u", "recall"), ("r", "resume"), ("d", "delete"),
-        ]),
+        (Panel::Sessions, SubView::List) => {
+            let has_sessions = !app.managed_sessions.is_empty();
+            if has_sessions {
+                hint_line(&[
+                    ("Enter", "focus"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
+                ])
+            } else {
+                hint_line(&[
+                    ("R", "refresh"), ("Esc", "menu"),
+                ])
+            }
+        }
+        (Panel::Feedback, SubView::List) => {
+            // Dynamic hints based on selected item's status
+            let selected_status = app.feedback_items.get(app.feedback_selected).map(|i| i.status);
+            match selected_status {
+                Some(FeedbackStatus::Draft) => hint_line(&[
+                    ("s", "submit"), ("r", "resume"), ("p", "plan"), ("d", "delete"), ("f", "new"),
+                ]),
+                Some(FeedbackStatus::Processing) => hint_line(&[
+                    ("u", "cancel+draft"),
+                    ("|", ""),
+                    ("f", "new"),
+                ]),
+                Some(FeedbackStatus::Processed) => hint_line(&[
+                    ("c", "review+commit"), ("u", "recall to draft"),
+                    ("|", ""),
+                    ("f", "new"),
+                ]),
+                Some(FeedbackStatus::Routed) => hint_line(&[
+                    ("u", "recall to draft"),
+                    ("|", ""),
+                    ("f", "new"),
+                ]),
+                None => hint_line(&[
+                    ("f", "new feedback"),
+                ]),
+            }
+        }
         (_, SubView::ProjectDetail(_)) => hint_line(&[
             ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
             ("|", ""),
@@ -1214,6 +1284,9 @@ fn build_hint_line(app: &App) -> Line<'static> {
         ]),
         (_, SubView::DeprecatedBrowser) => hint_line(&[
             ("←→", "navigate"), ("Enter", "open"), ("d", "delete"), ("Esc", "back"),
+        ]),
+        (_, SubView::AppMenu) => hint_line(&[
+            ("↑↓", "select"), ("Enter", "run"), ("Esc", "close"),
         ]),
         (_, SubView::CommitReview(_)) if app.commit_typing_correction => hint_line(&[
             ("Enter", "send correction"), ("Esc", "cancel"),
@@ -1353,6 +1426,48 @@ fn draw_commit_correcting(frame: &mut Frame, app: &App) {
 
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Correcting ").borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+}
+
+// ─── App Menu (Esc) ──────────────────────────────────────────────────
+
+fn draw_app_menu(frame: &mut Frame, app: &App) {
+    let items = &[
+        ("q", "Quit orrchestrator"),
+        ("r", "Reload all projects"),
+        ("g", "Git commit all projects"),
+        ("v", "Version info"),
+    ];
+
+    let popup = centered_popup(frame.area(), 40, (items.len() as u16) + 5);
+    frame.render_widget(Clear, popup);
+
+    let mut lines = vec![
+        Line::styled("orrchestrator", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::styled("v0.1.0", Style::default().fg(TEXT_MUTED)),
+        Line::raw(""),
+    ];
+
+    for (i, (key, label)) in items.iter().enumerate() {
+        let sel = i == app.app_menu_selected;
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", if sel { "▶" } else { " " }),
+                Style::default().fg(ACCENT),
+            ),
+            Span::styled(
+                key.to_string(),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  {label}"),
+                if sel { Style::default().fg(TEXT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+            ),
+        ]));
+    }
+
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Menu ").borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
 }
 

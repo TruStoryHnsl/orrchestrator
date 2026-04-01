@@ -41,6 +41,8 @@ pub struct Session {
     pub state: SessionState,
     pub backend: BackendKind,
     pub goal: Option<String>,
+    /// Name of the agent profile driving this session (e.g., "Hypervisor").
+    pub agent_profile: Option<String>,
     pub started_at: Instant,
     pub output_buffer: Vec<u8>,
     pub last_output_time: Option<Instant>,
@@ -63,6 +65,7 @@ impl Session {
             state: SessionState::Working,
             backend,
             goal,
+            agent_profile: None,
             started_at: Instant::now(),
             output_buffer: Vec::new(),
             last_output_time: None,
