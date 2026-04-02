@@ -20,35 +20,39 @@ use crate::editor::{VimKind, VimRequest, PendingEditor};
 /// Top-level panels navigable with left/right arrows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
-    Ideas,    // 0
-    Projects, // 1 — hot/cold/production/facilities
-    Sessions, // 2 — tmux session manager
-    Feedback, // 3 — feedback pipeline
+    Design,    // 0 — intentions + workforce editor + library browser
+    Oversee,   // 1 — project tracker
+    Hypervise, // 2 — interactive multi-session management
+    Analyze,   // 3 — token efficiency calibration (placeholder)
+    Publish,   // 4 — release packaging + marketing (placeholder)
 }
 
 impl Panel {
-    pub const ALL: [Panel; 4] = [
-        Panel::Ideas,
-        Panel::Projects,
-        Panel::Sessions,
-        Panel::Feedback,
+    pub const ALL: [Panel; 5] = [
+        Panel::Design,
+        Panel::Oversee,
+        Panel::Hypervise,
+        Panel::Analyze,
+        Panel::Publish,
     ];
 
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Ideas => "Ideas",
-            Self::Projects => "Projects",
-            Self::Sessions => "Sessions",
-            Self::Feedback => "Feedback",
+            Self::Design => "Design",
+            Self::Oversee => "Oversee",
+            Self::Hypervise => "Hypervise",
+            Self::Analyze => "Analyze",
+            Self::Publish => "Publish",
         }
     }
 
     pub fn index(&self) -> usize {
         match self {
-            Self::Ideas => 0,
-            Self::Projects => 1,
-            Self::Sessions => 2,
-            Self::Feedback => 3,
+            Self::Design => 0,
+            Self::Oversee => 1,
+            Self::Hypervise => 2,
+            Self::Analyze => 3,
+            Self::Publish => 4,
         }
     }
 
@@ -103,6 +107,135 @@ pub enum SubView {
     NewProjectConfirm,
     /// Feedback submission confirmation — shows routing targets, lets user edit.
     FeedbackConfirm(usize), // index into feedback_items
+}
+
+/// Sub-panels within the Design panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesignSub {
+    Intentions, // feedback intake + ideas (was ProjectDesign)
+    Workforce,  // full-stack .md editor for workflows, teams, agents, skills, tools, etc.
+    Library,    // read-only browser (right-justified in tab bar)
+}
+
+impl DesignSub {
+    pub const ALL: [DesignSub; 3] = [
+        DesignSub::Intentions,
+        DesignSub::Workforce,
+        DesignSub::Library,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Intentions => "Intentions",
+            Self::Workforce => "Workforce",
+            Self::Library => "Library",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        match self {
+            Self::Intentions => 0,
+            Self::Workforce => 1,
+            Self::Library => 2,
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+/// Tabs within the Workforce editor (Design > Workforce).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkforceTab {
+    Workflows,     // workforce templates (pipelines)
+    Teams,         // operation modules (alias)
+    Agents,
+    Skills,
+    Tools,
+    McpServers,
+    Profiles,      // system-prompt profiles
+    TrainingData,  // model training data (coming soon)
+    Models,        // model definitions (coming soon)
+}
+
+impl WorkforceTab {
+    pub const ALL: [WorkforceTab; 9] = [
+        WorkforceTab::Workflows, WorkforceTab::Teams, WorkforceTab::Agents,
+        WorkforceTab::Skills, WorkforceTab::Tools, WorkforceTab::McpServers,
+        WorkforceTab::Profiles, WorkforceTab::TrainingData, WorkforceTab::Models,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Workflows => "Workflows",
+            Self::Teams => "Teams",
+            Self::Agents => "Agents",
+            Self::Skills => "Skills",
+            Self::Tools => "Tools",
+            Self::McpServers => "MCP",
+            Self::Profiles => "Profiles",
+            Self::TrainingData => "Training",
+            Self::Models => "Models",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+/// Tabs within the Library browser (Design > Library). Read-only view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibrarySub {
+    Agents,
+    Models,
+    Harnesses,
+    McpServers,
+    Skills,
+    Tools,
+}
+
+impl LibrarySub {
+    pub const ALL: [LibrarySub; 6] = [
+        LibrarySub::Agents, LibrarySub::Models, LibrarySub::Harnesses,
+        LibrarySub::McpServers, LibrarySub::Skills, LibrarySub::Tools,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Agents => "Agents",
+            Self::Models => "Models",
+            Self::Harnesses => "Harnesses",
+            Self::McpServers => "MCP",
+            Self::Skills => "Skills",
+            Self::Tools => "Tools",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
 }
 
 /// Focus within the project detail view.
@@ -217,6 +350,9 @@ pub struct App {
     /// Preview content for the currently selected tree file.
     pub tree_preview: String,
 
+    // Design panel sub-navigation
+    pub design_sub: DesignSub,
+
     // Spawn wizard
     pub spawn_project_idx: usize,
     pub spawn_goal_text: String,
@@ -227,6 +363,32 @@ pub struct App {
 
     // Agent profiles
     pub agent_profiles: Vec<orrch_core::AgentProfile>,
+
+    // Design > Workforce editor
+    pub workforce_tab: WorkforceTab,
+    pub wf_selected: usize,
+    pub wf_preview_scroll: usize,
+
+    // Design > Library browser (read-only)
+    pub library_sub: LibrarySub,
+    pub library_selected: usize,
+    pub library_scroll: usize,
+    pub library_preview_scroll: usize,
+
+    // Shared data (used by both Workforce editor and Library browser)
+    pub library_models: Vec<orrch_library::ModelEntry>,
+    pub library_harnesses: Vec<orrch_library::HarnessEntry>,
+    pub library_mcp_servers: Vec<orrch_library::McpServerEntry>,
+    pub library_skills: Vec<(String, PathBuf)>,  // (name, path) from library/skills/
+    pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
+    pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
+    pub valve_store: orrch_library::ValveStore,
+
+    // Workforce Design
+    pub workforce_files: Vec<(String, std::path::PathBuf)>, // (name, path)
+    pub workforce_selected: usize,
+    pub operation_files: Vec<(String, std::path::PathBuf)>, // (name, path)
+    pub operation_selected: usize,
 
     // File browser (two-column: parent dir + child dir/preview)
     pub browser_parent_entries: Vec<orrch_core::DirEntry>,
@@ -349,10 +511,20 @@ impl App {
         let ideas = orrch_core::vault::load_ideas(&vault);
         let feedback_items = orrch_core::load_feedback_items(&projects_dir);
         let deprecated_path = projects_dir.join("deprecated");
+        let workforce_files = scan_md_dir(&projects_dir.join("orrchestrator").join("workforces"));
+        let operation_files = scan_md_dir(&projects_dir.join("orrchestrator").join("operations"));
+        let library_root = projects_dir.join("orrchestrator").join("library");
+        let library_models = orrch_library::load_models(&library_root.join("models"));
+        let library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
+        let library_mcp_servers = orrch_library::load_mcp_servers(&library_root.join("mcp_servers"));
+        let library_skills = scan_md_dir(&library_root.join("skills"));
+        let library_tools = scan_md_dir(&library_root.join("tools"));
+        let library_profiles = scan_md_dir(&library_root.join("profiles"));
+        let valve_store = orrch_library::ValveStore::load();
 
         let mut app = Self {
             pm: ProcessManager::new(tx),
-            panel: Panel::Projects,
+            panel: Panel::Oversee,
             sub: SubView::List,
             tab_focused: false,
             should_quit: false,
@@ -376,6 +548,7 @@ impl App {
             tree_browsing: false,
             tree_project: None,
             tree_preview: String::new(),
+            design_sub: DesignSub::Intentions,
             spawn_project_idx: 0,
             spawn_goal_text: String::new(),
             spawn_goal_from_roadmap: None,
@@ -383,6 +556,24 @@ impl App {
             spawn_backend: BackendKind::Claude,
             spawn_host_idx: 0,
             agent_profiles: load_agents(&agents_dir()),
+            workforce_tab: WorkforceTab::Workflows,
+            wf_selected: 0,
+            wf_preview_scroll: 0,
+            library_sub: LibrarySub::Agents,
+            library_selected: 0,
+            library_scroll: 0,
+            library_preview_scroll: 0,
+            library_models,
+            library_harnesses,
+            library_mcp_servers,
+            library_skills,
+            library_tools,
+            library_profiles,
+            valve_store,
+            workforce_files,
+            workforce_selected: 0,
+            operation_files,
+            operation_selected: 0,
             browser_parent_entries: Vec::new(),
             browser_parent_selected: 0,
             browser_child_entries: Vec::new(),
@@ -959,7 +1150,39 @@ impl App {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                // Generic scroll for Design sub-panels
+                match self.panel {
+                    Panel::Design => match self.design_sub {
+                        DesignSub::Workforce => {
+                            let count = self.wf_items_for_tab().len();
+                            if delta < 0 {
+                                self.wf_selected = self.wf_selected.saturating_sub((-delta) as usize);
+                            } else {
+                                self.wf_selected = (self.wf_selected + delta as usize).min(count.saturating_sub(1));
+                            }
+                            self.wf_preview_scroll = 0;
+                        }
+                        DesignSub::Library => {
+                            let count = self.library_item_count();
+                            if delta < 0 {
+                                self.library_selected = self.library_selected.saturating_sub((-delta) as usize);
+                            } else {
+                                self.library_selected = (self.library_selected + delta as usize).min(count.saturating_sub(1));
+                            }
+                            self.library_preview_scroll = 0;
+                        }
+                        DesignSub::Intentions => {
+                            if delta < 0 {
+                                self.idea_selected = self.idea_selected.saturating_sub((-delta) as usize);
+                            } else {
+                                self.idea_selected = (self.idea_selected + delta as usize).min(self.ideas.len().saturating_sub(1));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -1022,10 +1245,11 @@ impl App {
 
         match &self.sub {
             SubView::List => match self.panel {
-                Panel::Ideas => self.key_ideas(key),
-                Panel::Projects => self.key_projects(key),
-                Panel::Sessions => self.key_sessions_tab(key),
-                Panel::Feedback => self.key_feedback_tab(key),
+                Panel::Design => self.key_design(key),
+                Panel::Oversee => self.key_projects(key),
+                Panel::Hypervise => self.key_sessions_tab(key),
+                Panel::Analyze => self.key_placeholder(key),
+                Panel::Publish => self.key_placeholder(key),
             },
             SubView::ProjectDetail(_) => self.key_project_detail(key),
             SubView::SessionFocus(_) => self.key_session_focus(key),
@@ -1176,17 +1400,245 @@ impl App {
         Ok(())
     }
 
+    fn key_design(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Left | KeyCode::BackTab => {
+                self.design_sub = self.design_sub.prev();
+                return Ok(());
+            }
+            KeyCode::Right => {
+                self.design_sub = self.design_sub.next();
+                return Ok(());
+            }
+            _ => {}
+        }
+        match self.design_sub {
+            DesignSub::Intentions => self.key_design_project(key),
+            DesignSub::Workforce => self.key_design_workforce(key),
+            DesignSub::Library => self.key_library(key),
+        }
+    }
+
+    fn key_design_project(&mut self, key: KeyCode) -> Result<()> {
+        // Project Design merges Ideas + Feedback functionality.
+        // For now, delegate to the ideas view (feedback items are also accessible via 'f').
+        self.key_ideas(key)
+    }
+
+    fn key_design_workforce(&mut self, key: KeyCode) -> Result<()> {
+        // Tab/Shift+Tab switches between workforce sub-tabs
+        match key {
+            KeyCode::Tab => {
+                self.workforce_tab = self.workforce_tab.next();
+                self.wf_selected = 0;
+                self.wf_preview_scroll = 0;
+                return Ok(());
+            }
+            _ => {}
+        }
+
+        let items = self.wf_items_for_tab();
+        let count = items.len();
+
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Up => {
+                if self.wf_selected == 0 { self.tab_focused = true; }
+                else { self.wf_selected -= 1; self.wf_preview_scroll = 0; }
+            }
+            KeyCode::Down => {
+                if count > 0 && self.wf_selected < count - 1 {
+                    self.wf_selected += 1;
+                    self.wf_preview_scroll = 0;
+                }
+            }
+            KeyCode::PageDown => { self.wf_preview_scroll += 10; }
+            KeyCode::PageUp => { self.wf_preview_scroll = self.wf_preview_scroll.saturating_sub(10); }
+            KeyCode::Char('n') => {
+                // New from template for current tab
+                use orrch_library::templates::{TemplateCategory, create_from_template};
+                let category = match self.workforce_tab {
+                    WorkforceTab::Workflows => TemplateCategory::Workforce,
+                    WorkforceTab::Teams => TemplateCategory::Operation,
+                    WorkforceTab::Agents => TemplateCategory::Agent,
+                    WorkforceTab::Skills => TemplateCategory::Skill,
+                    WorkforceTab::Tools => TemplateCategory::Tool,
+                    WorkforceTab::McpServers => TemplateCategory::McpServer,
+                    WorkforceTab::Profiles => TemplateCategory::Agent, // reuse agent template for profiles
+                    WorkforceTab::TrainingData | WorkforceTab::Models => {
+                        self.notify("Coming soon".into());
+                        return Ok(());
+                    }
+                };
+                let orrch_dir = self.projects_dir.join("orrchestrator");
+                match create_from_template(category, &orrch_dir) {
+                    Ok(path) => {
+                        let title = format!("[new {}]", self.workforce_tab.label());
+                        self.vim_request = Some(VimRequest {
+                            file: path,
+                            kind: VimKind::NewIdea,
+                            title,
+                        });
+                    }
+                    Err(e) => self.notify(format!("Failed: {e}")),
+                }
+            }
+            KeyCode::Char('d') => {
+                let items = self.wf_items_for_tab();
+                if let Some((_, path)) = items.get(self.wf_selected) {
+                    let p = path.clone();
+                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    if std::fs::remove_file(&p).is_ok() {
+                        self.notify(format!("Deleted {name}"));
+                        self.reload_all_library_data();
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let items = self.wf_items_for_tab();
+                if let Some((_, path)) = items.get(self.wf_selected) {
+                    let p = path.clone();
+                    let title = format!("[{}] {}", self.workforce_tab.label(), p.file_name().unwrap_or_default().to_string_lossy());
+                    self.vim_request = Some(VimRequest {
+                        file: p,
+                        kind: VimKind::NewIdea,
+                        title,
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Get the list of (name, path) items for the current workforce tab.
+    pub fn wf_items_for_tab(&self) -> Vec<(String, PathBuf)> {
+        match self.workforce_tab {
+            WorkforceTab::Workflows => self.workforce_files.clone(),
+            WorkforceTab::Teams => self.operation_files.clone(),
+            WorkforceTab::Agents => self.agent_profiles.iter().map(|a| (a.name.clone(), a.path.clone())).collect(),
+            WorkforceTab::Skills => self.library_skills.clone(),
+            WorkforceTab::Tools => self.library_tools.clone(),
+            WorkforceTab::McpServers => self.library_mcp_servers.iter().map(|s| (s.name.clone(), s.path.clone())).collect(),
+            WorkforceTab::Profiles => self.library_profiles.clone(),
+            WorkforceTab::TrainingData | WorkforceTab::Models => Vec::new(),
+        }
+    }
+
+    /// Reload all library/workforce data from disk.
+    fn reload_all_library_data(&mut self) {
+        let orrch_dir = self.projects_dir.join("orrchestrator");
+        let library_root = orrch_dir.join("library");
+        self.agent_profiles = load_agents(&agents_dir());
+        self.library_models = orrch_library::load_models(&library_root.join("models"));
+        self.library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
+        self.library_mcp_servers = orrch_library::load_mcp_servers(&library_root.join("mcp_servers"));
+        self.library_skills = scan_md_dir(&library_root.join("skills"));
+        self.library_tools = scan_md_dir(&library_root.join("tools"));
+        self.library_profiles = scan_md_dir(&library_root.join("profiles"));
+        self.workforce_files = scan_md_dir(&orrch_dir.join("workforces"));
+        self.operation_files = scan_md_dir(&orrch_dir.join("operations"));
+    }
+
+    fn key_library(&mut self, key: KeyCode) -> Result<()> {
+        // Library is a read-only browser within Design. Tab switches sub-tabs.
+        // Valve controls (v/V) and MCP toggle (e) are operational, not content editing.
+        let count = self.library_item_count();
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Tab => {
+                self.library_sub = self.library_sub.next();
+                self.library_selected = 0;
+                self.library_preview_scroll = 0;
+            }
+            KeyCode::Up => {
+                if self.library_selected == 0 { self.tab_focused = true; }
+                else { self.library_selected -= 1; self.library_preview_scroll = 0; }
+            }
+            KeyCode::Down => {
+                if count > 0 && self.library_selected < count - 1 {
+                    self.library_selected += 1;
+                    self.library_preview_scroll = 0;
+                }
+            }
+            KeyCode::PageDown => { self.library_preview_scroll += 10; }
+            KeyCode::PageUp => { self.library_preview_scroll = self.library_preview_scroll.saturating_sub(10); }
+            KeyCode::Char('v') if self.library_sub == LibrarySub::Models => {
+                if let Some(model) = self.library_models.get(self.library_selected) {
+                    let provider = model.provider.clone();
+                    if self.valve_store.is_blocked(&provider) {
+                        self.valve_store.open(&provider);
+                        self.notify(format!("Valve OPENED: {}", provider));
+                    } else {
+                        self.valve_store.close(&provider, "manual shutoff", None);
+                        self.notify(format!("Valve CLOSED: {}", provider));
+                    }
+                }
+            }
+            KeyCode::Char('V') if self.library_sub == LibrarySub::Models => {
+                if let Some(model) = self.library_models.get(self.library_selected) {
+                    let provider = model.provider.clone();
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let reopen_at = now + 86400;
+                    self.valve_store.close(&provider, "timed shutoff (24h)", Some(reopen_at));
+                    self.notify(format!("Valve CLOSED: {} — reopens in 24h", provider));
+                }
+            }
+            KeyCode::Char('e') if self.library_sub == LibrarySub::McpServers => {
+                let idx = self.library_selected;
+                if idx < self.library_mcp_servers.len() {
+                    self.library_mcp_servers[idx].enabled = !self.library_mcp_servers[idx].enabled;
+                    let name = self.library_mcp_servers[idx].name.clone();
+                    let status = if self.library_mcp_servers[idx].enabled { "enabled" } else { "disabled" };
+                    self.notify(format!("{} {}", name, status));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Reload all library data from disk (after create/delete/edit).
+    fn reload_library(&mut self) {
+        self.reload_all_library_data();
+        let count = self.library_item_count();
+        self.library_selected = self.library_selected.min(count.saturating_sub(1));
+    }
+
+    fn library_item_count(&self) -> usize {
+        match self.library_sub {
+            LibrarySub::Agents => self.agent_profiles.len(),
+            LibrarySub::Models => self.library_models.len(),
+            LibrarySub::Harnesses => self.library_harnesses.len(),
+            LibrarySub::McpServers => self.library_mcp_servers.len(),
+            LibrarySub::Skills => self.library_skills.len(),
+            LibrarySub::Tools => self.library_tools.len(),
+        }
+    }
+
+    fn key_placeholder(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Up => { self.tab_focused = true; }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn key_ideas(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
                 self.request_vim(VimKind::NewIdea);
             }
-            KeyCode::Enter | KeyCode::Char('r') => {
-                // Open selected idea in vim
+            KeyCode::Enter => {
+                // Open selected idea in vim for editing
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     let path = idea.path.clone();
-                    let title = format!("[orrchestrator] Idea: {}", idea.title);
+                    let title = format!("[intentions] {}", idea.title);
                     self.vim_request = Some(VimRequest {
                         file: path,
                         kind: VimKind::NewIdea,
@@ -1194,15 +1646,36 @@ impl App {
                     });
                 }
             }
-            KeyCode::Char('d') => {
-                // Delete selected idea
+            KeyCode::Char('s') => {
+                // Submit selected idea to instruction intake pipeline
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
-                    let path = idea.path.clone();
-                    let _ = std::fs::remove_file(&path);
-                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
-                    self.ideas = orrch_core::vault::load_ideas(&vault);
-                    self.idea_selected = self.idea_selected.min(self.ideas.len().saturating_sub(1));
-                    self.notify("Idea deleted".into());
+                    if idea.pipeline.is_submitted() {
+                        self.notify(format!("Already submitted ({}%)", idea.pipeline.progress));
+                    } else {
+                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        match orrch_core::vault::submit_to_pipeline(&vault, idea) {
+                            Ok(_) => {
+                                self.notify(format!("Submitted: {}", idea.title));
+                                self.ideas = orrch_core::vault::load_ideas(&vault);
+                            }
+                            Err(e) => self.notify(format!("Submit failed: {e}")),
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                // Delete only if duplicate (warn otherwise)
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    if idea.pipeline.is_submitted() {
+                        self.notify("Cannot delete: already in pipeline. Use only for duplicates.".into());
+                    } else {
+                        let path = idea.path.clone();
+                        let _ = std::fs::remove_file(&path);
+                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        self.ideas = orrch_core::vault::load_ideas(&vault);
+                        self.idea_selected = self.idea_selected.min(self.ideas.len().saturating_sub(1));
+                        self.notify("Deleted (duplicate cleanup)".into());
+                    }
                 }
             }
             KeyCode::Up => {
@@ -2106,7 +2579,7 @@ impl App {
         let saved_sub = self.sub.clone();
 
         match (&self.panel, &self.sub) {
-            (Panel::Projects, SubView::List) => {
+            (Panel::Oversee, SubView::List) => {
                 items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
                 items.push(ActionItem { key: 'N', label: "Spawn all open roadmap items".into(), action: ActionKind::SpawnAll });
                 items.push(ActionItem { key: 'P', label: "Create new project".into(), action: ActionKind::NewProject });
@@ -2130,7 +2603,7 @@ impl App {
                 items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
                 items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
             }
-            (Panel::Feedback, SubView::List) => {
+            (Panel::Design, SubView::List) => {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     let fname = item.filename.clone();
                     if item.status == FeedbackStatus::Draft {
@@ -2938,7 +3411,7 @@ impl App {
                 // Save as draft — user submits from Feedback tab
                 self.reload_feedback();
                 self.notify("Feedback saved as draft".into());
-                self.panel = Panel::Feedback;
+                self.panel = Panel::Design;
                 self.sub = SubView::List;
             }
             VimKind::ProjectFeedback(proj_idx) => {
@@ -2977,9 +3450,11 @@ impl App {
                 // Already saved in vault dir by request_vim
                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                 self.ideas = orrch_core::vault::load_ideas(&vault);
-                self.notify("Idea saved".into());
+                self.notify("Saved".into());
             }
         }
+        // Always reload library + workforce data after any vim edit
+        self.reload_all_library_data();
     }
 
     /// Check if any pending vim editors have finished (called each tick by main loop).
@@ -3336,6 +3811,35 @@ fn tmux_spawn_session(session_name: &str, runner_path: &Path) -> anyhow::Result<
 fn default_projects_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
     PathBuf::from(home).join("projects")
+}
+
+/// Scan a directory for .md files and return (title, path) pairs.
+/// Title is extracted from the first `## ` heading or the filename.
+fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut items = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                let name = if let Ok(content) = std::fs::read_to_string(&path) {
+                    // Try to extract name from frontmatter or heading
+                    content.lines()
+                        .find_map(|line| {
+                            let t = line.trim();
+                            if let Some(h) = t.strip_prefix("## ") { Some(h.to_string()) }
+                            else if let Some(n) = t.strip_prefix("name:") { Some(n.trim().to_string()) }
+                            else { None }
+                        })
+                        .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string())
+                } else {
+                    path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+                };
+                items.push((name, path));
+            }
+        }
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    items
 }
 
 /// Spawn a hidden tmux session that runs Claude to process feedback.

@@ -1,0 +1,12 @@
+{
+  "progress": 50,
+  "targets": [
+    {
+      "project": "orrchestrator",
+      "instruction_count": 9,
+      "implemented_count": 0
+    }
+  ],
+  "package_name": "UI Polish & Infrastructure Fixes",
+  "submitted_at": 1743465600
+}

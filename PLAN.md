@@ -2,9 +2,9 @@
 
 A full-service AI-powered software development hypervisor that unifies AI workflow management and enables design of node-based corporate emulation models for AI agent workforces.
 
-## Open Questions
+## Design Decisions (all resolved 2026-03-31)
 
-These must be resolved before their respective phases begin. Phases are blocked until their questions are answered.
+Resolved during initial planning session. Preserved here as architectural reference.
 
 ### Q1 — Versioning Strategy ~~(blocks Phase 0)~~ RESOLVED
 **Decision:** Tag `1.0.0` on the current codebase and build incrementally. The Rust workspace is modular enough — add new crates, restructure panels. No archive/scaffold needed.
@@ -34,38 +34,62 @@ The file inbox separation enables throttling: COO can keep appending while PM is
 - **Data handoff within workflow** — prompt injection between subagents (the hypervisor captures output and injects it into the next subagent's prompt).
 - **Data handoff between operations** — file inbox. Separate operations are decoupled by design to enable independent throttling.
 
-### Q4 — Native Window Mode Scope (blocks Phase 7)
-The redesign acknowledges the node editor may not translate well to TUI. Options:
-- a) TUI-only MVP with a simplified node list (no visual graph)
-- b) Spawn a native window (GTK/egui) for the node editor only
-- c) Web-based node editor served locally (like Node-RED)
-- d) Defer entirely — design workforces via `.md` templates first, visual editor later
+### Q4 — Native Window Mode Scope ~~(blocks Phase 7)~~ RESOLVED
+**Decision:** All four approaches, implemented in order:
+1. **TUI node list** (Phase 6) — simplified non-visual representation, proves the data model
+2. **`.md` template files** (Phase 6) — structured markdown for workforce definitions, power-user editing path
+3. **Web-based editor** (Phase 7) — local web UI with drag-and-drop node graph, rich visual editing
+4. **Native egui window** (Phase 7+) — fully integrated native window, no browser dependency
 
-### Q5 — Ollama Integration (blocks Phase 4)
-Ollama doesn't have a `claude`-like interactive CLI. Options:
-- a) Wrap `ollama run <model>` in a PTY (it does have an interactive mode)
-- b) Use the Ollama HTTP API directly (localhost:11434) — would need a thin CLI wrapper
-- c) Support Ollama only via API provider integration, not as a PTY session
+Each layer validates the next. The TUI list and templates ship first; visual editors come after the data model is proven.
 
-### Q6 — Token Optimization Specifics (blocks Phase 4)
-"Layered abstraction and recompilation to minimize token length" — what gets compressed?
-- a) The user's raw feedback before it enters fb2p.md (already partially done by COO)
-- b) The accumulated PLAN.md / fb2p.md context that "continue development" loads
-- c) Inter-agent handoff messages within a workforce
-- d) All of the above, with different compression strategies per layer
+### Q5 — Ollama Integration ~~(blocks Phase 4)~~ RESOLVED
+**Decision:** Use existing agentic coding tools that support Ollama natively, NOT raw Ollama.
 
-### Q7 — Library Storage & Distribution (blocks Phase 5)
-Skills, tools, agents, MCP configs — how are they stored and made available?
-- a) Flat files in `~/.config/orrchestrator/library/` with subdirs per type
-- b) SQLite database with full-text search
-- c) Git-backed repository (versionable, shareable)
-- Which agents get which tools? Auto-assigned by Mentor, or user-configured per workforce?
+1. **Crush** — primary. Agentic coding CLI powered by Ollama. Added as `BackendKind::Crush`, same PTY spawn model as Claude/Gemini. Provides file editing, tool use, codebase awareness.
+2. **OpenCode** — fallback if Crush doesn't work.
+3. **Native modules** — last resort. Build Claude Code-like agentic capabilities (file read/write, shell exec, codebase search) directly in orrchestrator as modules wrapping Ollama's API.
 
-### Q8 — Workforce Design Input Format (blocks Phase 6)
-Before the visual node editor exists, how does the user define custom workforces?
-- a) YAML/TOML template files (machine-parseable, human-editable)
-- b) Markdown with structured sections (matches existing .md patterns)
-- c) Interactive TUI wizard (guided step-by-step)
+The goal is full agentic coding from Ollama-powered sessions, not just chat.
+
+### Q6 — Token Optimization Specifics ~~(blocks Phase 4)~~ RESOLVED
+**Decision:** Three compression layers:
+
+- **(a) User feedback → optimized instructions** — COO processes raw feedback into optimized instructions once during intake. This is a one-time transformation, not repeated.
+- **(b) Project instruction queue management** — `fb2p.md` is deprecated, replaced by `instructions_inbox.md` per project. The COO manages these inboxes: appends optimized instructions, trims completed/outdated entries on version publish, truncates excessively long files. The intake process is formalized as four workforce modules (instruction-intake, plan-intake, idea-intake, knowledge-intake) per the redesign plan.
+- **(c) Inter-agent handoff compression** — the hypervisor trims verbose reasoning from agent output before injecting into the next subagent's prompt. Keeps only actionable conclusions.
+
+**Deprecated:** `fb2p.md` model, `/interpret-user-instructions` skill. Both replaced by the `workforce:instruction-intake` module (Executive Assistant → COO → PM pipeline).
+
+### Q7 — Library Storage & Distribution ~~(blocks Phase 5)~~ RESOLVED
+**Decision:**
+- **Git-backed GitHub repo** for the library — versionable, shareable, synced across machines.
+- **MCP server** hosted by orrchestrator exposes library contents to all managed sessions for easy access.
+- **Tool assignment:** Workforce template defines the baseline tool set per agent role. Mentor agent suggests additions on top of the baseline by reviewing agent profiles against library contents.
+
+### Q8 — Workforce Design Input Format ~~(blocks Phase 6)~~ RESOLVED
+**Decision:** Structured markdown matching the pipe-delimited format from the redesign plan.
+
+```markdown
+## INSTRUCTION INTAKE
+
+Trigger: user submits a prompt
+Blocker: none
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation>
+
+1  | Executive Assistant | * | separate dev instructions from other input
+1B | Executive Assistant | * | immediately address non-dev input
+2  | COO | skill:clarify | process raw instructions into optimized instructions
+3  | COO | skill:parse | determine which project each instruction goes to
+4  | COO | tool:copy-file | append to appropriate project instruction_inbox.md
+5  | Project Manager | skill:synthesize_instructions | incorporate into project plan
+
+Interrupts: none
+```
+
+This format is human-writable, Claude-readable, and already proven by the redesign plan document itself. The workforce engine parses these structured sections.
 
 ---
 
@@ -121,6 +145,7 @@ Development Department
   Leadership
     Project Manager      — plan/build/test/break loop, delegates to team, cross-project awareness
     Talent Scout         — creates specialist agents, maintains specialist database
+    Resource Optimizer   — assesses task complexity, annotates plan with model/harness recommendations
   Engineering
     Software Engineer    — architecture design, roadmap maintenance
     Developer            — implements code per supervisor instructions
@@ -236,55 +261,55 @@ The completed feature set below constitutes `1.0.0`. The roadmap below builds to
 ### Phase 0: Foundation Prep (1.1.0)
 _Restructure the existing codebase to support the new architecture. No new features — just plumbing._
 
-1. [ ] **Panel restructuring** — rename/remap panels: Ideas+Feedback → Design, Projects → Oversee, Sessions → Hypervise, new Library panel. Update `Panel` enum, tab bar labels, keybindings.
-2. [ ] **Design panel sub-navigation** — split Design into two sub-panels: "Project Design" (feedback intake + type routing) and "Workforce Design" (placeholder). Left/right or tab toggles between them.
-3. [ ] **New crate: `orrch-agents`** — cargo workspace member with agent profile struct, department enum, capability list. No execution yet — just the data model.
-4. [ ] **New crate: `orrch-workforce`** — workforce template struct, operation module struct, step struct. Data model only.
-5. [ ] **New crate: `orrch-library`** — library item types (agent, skill, tool, mcp_server, api_key, workforce_template), storage backend trait, filesystem implementation.
-6. [ ] **Configuration migration** — move from hardcoded backend detection to `~/.config/orrchestrator/config.toml` with backends, library paths, agent directories.
+1. [x] **Panel restructuring** — Design (Project+Workforce sub-panels), Oversee, Hypervise, Library. Panel enum + all match arms + tab labels + key handlers + UI rendering updated.
+2. [x] **Design panel sub-navigation** — DesignSub enum with Shift+Tab toggle. ProjectDesign shows ideas (feedback intake). WorkforceDesign is placeholder.
+3. [x] **New crate: `orrch-agents`** — agent profile struct (extracted from core), Department enum, AgentRole enum (20 roles across 4 departments), department→role mapping.
+4. [x] **New crate: `orrch-workforce`** — Workforce template, AgentNode, Connection, Operation, Step, trigger/blocker/interrupt types. Markdown parser for pipe-delimited step tables with auto-detected parallel groups.
+5. [x] **New crate: `orrch-library`** — ItemKind (6 types), LibraryItem struct, LibraryStore with filesystem backend, frontmatter parsing.
+6. [x] **Configuration migration** — Config struct wrapping backends + agents_dir + library_dir + projects_dir. Loads from config.json, falls back to legacy backends.yaml.
 
 ### Phase 1: Agent Framework (1.2.0)
 _Agents become first-class entities. Each agent is a `.md` profile that can be bound to a real AI session._
 
-7. [ ] **Agent profile format** — `.md` files in `~/.config/orrchestrator/agents/` with YAML frontmatter: name, department, role, capabilities, preferred_backend, tool_requirements. Body is the agent's system prompt / identity instructions.
-8. [ ] **Agent library — 19 predefined agents** — create `.md` profiles for all agents listed in the department hierarchy. Each with tailored system prompts, domain knowledge, and skill references.
-9. [ ] **Agent execution binding** — `AgentRunner` that takes an agent profile + task instruction → spawns a session with the agent's system prompt prepended. Maps to existing `ProcessManager::spawn()`.
-10. [ ] **Agent status tracking** — extend `Session` struct with `agent_id: Option<String>`, display agent role badge in Hypervise panel.
-11. [ ] **COO instruction optimizer** — implement the token-efficient prompt compression pipeline. Takes raw user feedback → deduplicates, strips filler, normalizes references, outputs optimized instruction set. Replaces raw feedback passthrough in the routing pipeline.
-12. [ ] **Mentor agent integration** — background task that periodically reviews agent profiles against the Library. Suggests tool/skill additions. User confirms before modifying agent `.md` files.
+7. [x] **Agent profile format** — `.md` files with YAML frontmatter (name, department, role, description, capabilities, preferred_backend). Body is the agent's system prompt. Profile loader in orrch-agents crate.
+8. [x] **Agent library — 20 agent profiles** — all 19 roles + Hypervisor created in `agents/` directory with tailored system prompts, behavioral rules, and domain constraints.
+9. [x] **Agent execution binding** — `AgentRunner` with `build_prompt()`, `build_verification_prompt()` (context isolation), and `build_handoff_prompt()` (inter-agent data flow). `is_verification_role()` helper for isolation gating.
+10. [x] **Agent status tracking** — `Session.agent_profile: Option<String>` field. Agent selection step in spawn wizard (SpawnAgent). Profile prepended to goal on spawn.
+11. [ ] **COO instruction optimizer** — *requires live AI session to test*. Profile created (`chief_operations_officer.md`). Optimization logic is embedded in the COO's prompt instructions.
+12. [ ] **Mentor agent integration** — *requires Library (Phase 5) + live sessions*. Profile created (`mentor.md`). Background task deferred until Library storage exists.
 
 ### Phase 2: Workforce Templates (1.3.0)
 _Agents are organized into teams with defined operation flows._
 
-13. [ ] **Workforce template data model** — `Workforce { name, agents: Vec<AgentRef>, connections: Vec<Connection>, operations: Vec<Operation> }`. Serialized as YAML/TOML (pending Q8).
-14. [ ] **Built-in workforce templates** — create templates for: Personal Tech Support, General Software Development, Experimental Software Development, Commercial Software Development, Private Software Development, Curriculum Design.
-15. [ ] **Template selector in spawn flow** — when spawning from Oversee panel, offer: "Single agent" (existing flow) or "Workforce: <template>" which instantiates the full team.
-16. [ ] **Workforce-aware session management** — sessions spawned by a workforce are grouped. Hypervise panel shows the group as a collapsible entry displaying only the user-facing agent's output.
+13. [x] **Workforce template data model** — Workforce, AgentNode, Connection, DataFlow structs in orrch-workforce crate. Supports agent teams with directed connections and operation references.
+14. [x] **Built-in workforce templates** — 3 created as structured markdown in `workforces/`: Personal Tech Support, General Software Development, Commercial Software Development.
+15. [ ] **Template selector in spawn flow** — *deferred: needs workforce-aware session spawning (item 16) to be meaningful*.
+16. [ ] **Workforce-aware session management** — *deferred: requires live hypervisor execution to test grouped session display*.
 
 ### Phase 3: Operation Modules (1.4.0)
 _Workforces execute structured pipelines with triggers, blockers, and interrupts._
 
-17. [ ] **Operation module engine** — runtime that executes operation steps in order, respects parallel groups, checks blockers before starting, monitors interrupt conditions.
-18. [ ] **INSTRUCTION INTAKE module** — Executive Assistant → COO → Project Manager pipeline. Triggered by user feedback submission.
-19. [ ] **DEVELOP FEATURE module** — PM-led heuristic loop: synthesize → delegate → parallel dev/test → dev-loop until pass → compare → log → commit. Triggered by unprocessed instructions in project queue.
-20. [ ] **Module status display** — Hypervise panel shows running modules with step progress: "DEVELOP FEATURE [3/7] — Developer executing"
-21. [ ] **Module editor** — view/edit operation modules in Design > Workforce Design sub-panel. Add/remove steps, change agents, set triggers.
+17. [x] **Operation module engine** — OperationExecution runtime: tracks state (Idle/Blocked/Running/Complete/Interrupted), next_steps() returns parallel batches, advance() moves pointer, progress_display() for UI. load_operations() reads .md files.
+18. [x] **INSTRUCTION INTAKE module** — `operations/instruction_intake.md`. EA → COO (clarify, parse) → PM (synthesize). Parser auto-detects parallel group at step 1 (EA handles two tasks concurrently).
+19. [x] **DEVELOP FEATURE module** — `operations/develop_feature.md`. 9-step pipeline with parallel group at step 3 (Dev+Researcher+Engineer+UIDesigner+FeatureTester) and step 4 (PenTester+BetaTester).
+20. [ ] **Module status display** — *deferred: needs live operation execution to display*. progress_display() method ready.
+21. [ ] **Module editor** — *deferred: needs Workforce Design sub-panel implementation (Phase 6 TUI node list)*.
 
 ### Phase 4: Multi-Provider & Resource Management (1.5.0)
 _Expand beyond Claude+Gemini. Add API usage intelligence._
 
 22. [ ] **Provider abstraction layer** — unified `Provider` trait with `cli_pty` and `api_http` variants. CLI providers use existing PTY spawn. API providers use `reqwest` with streaming response parsing.
-23. [ ] **Ollama backend** — `ollama run <model>` PTY integration or HTTP API wrapper (pending Q5).
+23. [ ] **Ollama backend via Crush/OpenCode** — integrate Crush (primary) or OpenCode (fallback) as `BackendKind::Crush`, same PTY model. If neither works, build native agentic modules wrapping Ollama's API.
 24. [ ] **Raw API backends** — Anthropic Messages API, OpenAI Chat Completions API. Direct HTTP, no CLI dependency.
 25. [ ] **Intelligence Resources Manager** — background task tracking per-provider: requests/minute, tokens/minute, remaining quota (where APIs report it). Stores in `~/.config/orrchestrator/usage.jsonl`.
 26. [ ] **Dynamic throttling** — when a provider approaches rate limits, the IRM pauses workforce queues using that provider. Shifts work to alternative providers when possible. Resumes automatically.
-27. [ ] **Token optimization pipeline** — layered compression (pending Q6): feedback compression (COO), context compression (PLAN.md summarization for long projects), handoff compression (inter-agent message trimming).
+27. [ ] **Token optimization pipeline** — three layers: (a) COO one-time feedback compression during intake, (b) COO manages `instructions_inbox.md` lifecycle (trim on version publish, truncate long files), (c) hypervisor trims verbose reasoning from inter-agent handoffs, keeps actionable conclusions only.
 
 ### Phase 5: Library (1.6.0)
 _Centralized database of reusable AI workflow components._
 
-28. [ ] **Library storage backend** — filesystem-based (pending Q7): `~/.config/orrchestrator/library/{agents,skills,tools,mcp_servers,workforce_templates,api_keys}/`. Each item is a file with YAML frontmatter + content.
-29. [ ] **Library panel UI** — browseable/searchable list in the Library tab. Filter by type. Preview pane. Create/edit/delete actions.
+28. [ ] **Library storage backend** — git-backed GitHub repository. Structure: `{agents,skills,tools,mcp_servers,workforce_templates}/`. Each item is a `.md` file with YAML frontmatter + content. Synced across machines via git.
+29. [x] **Library panel UI** — 4 sub-panels (Agents/Models/Harnesses/MCP) with Shift+Tab navigation. Split-pane layout (40/60 list+preview). Models show tier badge (color-coded enterprise/mid-tier/local), pricing, context size, capabilities, limitations. Harnesses show availability status (auto-detected via `which`), supported models, flags. 8 model definitions + 5 harness definitions seeded. Enter opens items in vim for editing.
 30. [ ] **Library MCP server** — orrchestrator hosts an MCP server that exposes library items as tools/resources. Managed sessions can query the library for available tools.
 31. [ ] **AI-assisted creation** — "New skill/tool/agent" action spawns a Claude session that helps the user define the item interactively. Result is saved to the library.
 32. [ ] **Auto-assignment via Mentor** — when an agent is bound to a session, the Mentor reviews its profile against Library contents and injects relevant tool/skill references into the agent's prompt.
@@ -292,16 +317,16 @@ _Centralized database of reusable AI workflow components._
 ### Phase 6: Node-Based Workforce Designer (1.7.0)
 _Visual agent-as-node workflow editor._
 
-33. [ ] **Workforce definition format** — finalize the file format for custom workforces (pending Q8). Must support: agents as nodes, directed connections between nodes, operation step sequences, nested sub-workforces.
-34. [ ] **TUI node list view** — simplified non-visual representation: ordered agent list with connection arrows, step assignments, trigger/blocker display. Editable in the TUI.
+33. [x] **Workforce definition format** — structured markdown with pipe-delimited step tables. Parser in orrch-workforce handles trigger/blocker/steps/interrupts. Auto-detects parallel groups from duplicate step indices.
+34. [x] **TUI node list view** — Workforce Design sub-panel in Design tab shows workforce templates and operation modules as navigable lists. Enter opens in vim for editing. Shift+Tab toggles between Project Design and Workforce Design.
 35. [ ] **Nested workforces** — a workforce node can contain another workforce. The inner workforce runs as a unit, reporting only its designated output agent's results to the parent.
 36. [ ] **Workforce import/export** — save/load workforce designs as files. Share between orrchestrator instances.
 
-### Phase 7: Native Window Mode (1.8.0, pending Q4)
-_Escape the TUI for features that need richer interfaces._
+### Phase 7: Visual Editors & Native Window Mode (1.8.0)
+_Web-based visual editing, then native window integration._
 
-37. [ ] **Window spawning infrastructure** — ability for orrchestrator TUI to spawn a native window (egui or web-based) for specific sub-features. TUI continues running alongside.
-38. [ ] **Visual node editor** — drag-and-drop agent nodes, draw connections, set properties. Full visual workforce designer in the native window.
+37. [ ] **Web-based node editor** — local HTTP server serving a drag-and-drop node graph UI (JS canvas library). TUI opens browser. Reads/writes structured markdown workforce files. TUI continues running alongside.
+38. [ ] **Native egui window** — orrchestrator TUI can spawn a native egui window for the node editor. Fully integrated, no browser dependency.
 39. [ ] **Non-TUI mode** — orrchestrator can optionally launch entirely as a windowed application for terminal-averse users.
 
 ### Phase 8: Intake Workforces (2.0.0-rc)
@@ -312,9 +337,41 @@ _The predefined workforces that process different types of user input. Completin
 42. [ ] **workforce:idea-intake** — processes incomplete ideas. Stores in Ideas vault as unattached. Tags with domain, potential project associations.
 43. [ ] **workforce:knowledge-intake** — processes custom agents, skills, tools. Validates, formats, saves to Library. Updates relevant agent profiles.
 
+### Cross-Cutting: Interactive Dev Map (Oversee panel)
+_Feature tracking interface in the project focus view. Plan.md becomes a live, interactive development map._
+
+44. [ ] **Plan.md syntax parser for dev map** — parse Plan.md into a structured feature tree: phases → features → status (planned/in-progress/tested/verified/removed). Display as interactive list in Oversee project detail view.
+45. [ ] **Feature state machine** — each feature tracks: planned → implementing → implemented → testing → verified → user-confirmed. Visual indicators for each state. Removed features show as strikethrough with removal context (removed-before-impl vs removed-after-impl vs failing-verification).
+46. [ ] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
+47. [ ] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
+48. [ ] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
+49. [ ] **Diff log persistence** — all changes to the dev map are tracked. Features display visual badges: modified since last verification, newly added, reordered, removed.
+50. [ ] **User verification tracking** — user marks features as manually tested/confirmed. Confirmation persists until any code change affects that feature. Previously confirmed features are re-flagged when implementation changes. Release readiness view shows unconfirmed features.
+51. [ ] **Direct PM interaction** — open a live session with the Project Manager agent for natural-language plan changes. PM updates Plan.md, dev map reflects changes in real time.
+52. [ ] **Git commit grouping display** — show how the workforce intends to package commits by phase. Repository Manager reviews and advises on the PM's chosen feature grouping for optimal git workflow.
+
+### Cross-Cutting: AI Tooling Management (Library)
+_Model hierarchy, harness management, and cost-optimized workforce assignment._
+
+53. [x] **Model registry in Library** — ModelEntry struct with tier, pricing, capabilities, limitations, max_context, API key env. 8 models seeded. Loaded from `library/models/*.md`. Displayed in Library > Models sub-panel with tier color badges and preview pane.
+54. [ ] **Three-tier workforce profiles** — enterprise (Claude, GPT-4o — existing workflows), mid-tier (Mistral Large API — more structured instructions), local/free (Ollama Mistral, Gemini free — rigid logic, scope-limited tasks). Each tier has its own workforce micromanagement template adjusting instruction directness and scope boundaries.
+55. [x] **Resource Optimizer agent** — profile created (`agents/resource_optimizer.md`), AgentRole added, DEVELOP FEATURE module updated with step 2 (optimize) and step 7 (commit review). Prompt includes model tier guidelines and harness awareness.
+56. [x] **Harness registry in Library** — HarnessEntry struct with auto-detection (`which`), supported models, flags, capabilities. 5 harnesses seeded. Displayed in Library > Harnesses sub-panel with availability status badge.
+57. [ ] **Mixed-model workflow support** — a single workforce execution can use different models for different steps. The hypervisor passes the model/harness assignment from the Resource Optimizer to each subagent spawn.
+58. [ ] **Mentor resource updates** — Mentor periodically dispatches Researcher to investigate changes to available models, harnesses, and tools. Researcher reports back, Mentor updates Library entries. PM uses these updated entries for optimization decisions.
+
+### Cross-Cutting: API Valves & MCP Management
+
+59. [x] **API valves (manual provider shutoff)** — per-provider on/off toggle in Library > Models. `v` = instant toggle, `V` = timed close (24h default). ValveStore persisted to `~/.config/orrchestrator/valves.json`. Visual `BLOCKED` badges on affected models. Auto-reopen ticker with countdown display.
+60. [x] **MCP server config management** — McpServerEntry struct with stdio/sse transport, enable/disable toggle (`e` key), role assignment. Loaded from `library/mcp_servers/*.md`. Displayed in Library > MCP sub-panel.
+61. [ ] **orrch-mcp server** — unified MCP server exposing orrchestrator internals: library_search, library_get, project_state, inbox_append, operation_status, session_list. Single server, connected to all agent sessions.
+62. [ ] **External MCP server management** — configure connections to user's existing MCP servers (github, context7, etc.) through the Library > MCP panel. Assign servers to agent roles.
+63. [ ] **Syntax translation engine** — research session to catalog prompt/tool-call syntax differences across models and harnesses. Generate translated versions of context files (agent profiles, CLAUDE.md equivalents) per model/harness combination. Stored in Library.
+64. [ ] **Valve integration with Resource Optimizer** — Resource Optimizer checks valve state before recommending a model. Blocked providers are excluded from optimization suggestions. IRM auto-closes valves when rate limits are detected.
+
 ### Carried Forward (from 1.0.0 queued items)
 - [ ] **Agent profile management** — swappable CLAUDE.md/GEMINI.md profiles per project
-- [ ] **Feedback pipeline redesign** — per-project persistent append-only feedback logs, vim split-view, diff-based extraction
+- [ ] **Instruction inbox migration** — replace `fb2p.md` with per-project `instructions_inbox.md` managed by COO. Deprecate `/interpret-user-instructions` skill. Intake handled by `workforce:instruction-intake` module (EA → COO → PM). COO trims on version publish, truncates long files.
 
 ---
 
@@ -391,4 +448,4 @@ _The predefined workforces that process different types of user input. Completin
 | `q` | Global | Quit |
 
 ## Recent Changes
-- 2026-03-31: **FRESH PLAN.md written.** Processed redesign_plan into 8-phase roadmap toward 2.0.0 (43 items + 2 carried forward). 8 open questions identified for user resolution. Architecture expanded: 3 new crates, 4-panel layout, 19 agent roles, workforce templates, operation modules, multi-provider AI, node-based designer.
+- 2026-03-31: **FRESH PLAN.md written.** Processed redesign_plan into 8-phase roadmap toward 2.0.0 (43 items + 2 carried forward). All 8 design decisions resolved. Architecture expanded: 3 new crates, 4-panel layout, 19 agent roles, workforce templates, operation modules, multi-provider AI, node-based designer. Hypervisor agent profile created + agent profile system implemented (new spawn wizard step). fb2p.md model deprecated in favor of per-project `instructions_inbox.md` managed by COO via intake workforces. Ollama via Crush/OpenCode, library as git-backed GitHub repo + MCP server, workforce format is structured markdown.

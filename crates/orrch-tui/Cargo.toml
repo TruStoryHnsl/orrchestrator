@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 orrch-core = { path = "../orrch-core" }
+orrch-library = { path = "../orrch-library" }
 orrch-retrospect = { path = "../orrch-retrospect" }
 tokio.workspace = true
 ratatui.workspace = true
