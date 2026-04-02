@@ -526,3 +526,58 @@ Q8: Workforce definition format — YAML/TOML? structured markdown? TUI wizard?
 ### Status
 Generated: 2026-03-31
 Executed: 2026-03-31 — PLAN.md rewritten. 8-phase roadmap with SemVer milestones. 8 open questions flagged. Awaiting user resolution of open questions before Phase 0 begins.
+
+---
+
+## Entry: 2026-03-31 — feedback (Interactive Dev Map + AI Tooling Management)
+
+### Raw Input
+Two major features:
+1. Interactive dev map in Oversee panel — Plan.md syntax parser that tracks features through states (planned → implementing → tested → verified → user-confirmed). Reorder features, add via popup, quick-spawn sessions, diff log persistence, user verification tracking, direct PM interaction, git commit grouping display.
+2. AI tooling management in Library — model registry with pricing/capabilities/tiers, three-tier workforce profiles (enterprise/mid-tier/local), Resource Optimizer agent (assesses task complexity, annotates plan with model+harness suggestions), harness registry (Claude Code/OpenCode/Crush/Codex/Gemini), mixed-model workflows, Mentor periodic resource updates.
+
+Also: new Resource Optimizer agent injected into DEVELOP FEATURE module after instruction ingest (step 2), before PM delegates. Repository Manager now reviews PM's commit packaging (step 7).
+
+### Optimized Prompt
+
+## Objective
+Two cross-cutting feature sets that span multiple existing phases.
+
+**Feature 1: Interactive Dev Map** — transform the Oversee project detail view into a live development tracking interface. Plan.md is parsed into a structured feature tree with visual state tracking, reordering, quick-spawn, diff persistence, and user verification. 9 roadmap items (44-52).
+
+**Feature 2: AI Tooling Management** — add model/harness registries to the Library, three-tier workforce micromanagement profiles, a Resource Optimizer agent that annotates tasks with cost-optimal model assignments, and Mentor-driven resource updates. 6 roadmap items (53-58).
+
+## Changes Made
+- Resource Optimizer agent profile created (`agents/resource_optimizer.md`)
+- AgentRole::ResourceOptimizer added to department hierarchy (21 roles total)
+- DEVELOP FEATURE operation updated: Resource Optimizer at step 2, Repository Manager commit review at step 7
+- 15 new roadmap items added to PLAN.md (items 44-58)
+- PLAN.md department hierarchy updated
+
+### Status
+Generated: 2026-03-31
+Executed: 2026-03-31 — Agent profile, department hierarchy, operation module, and PLAN.md all updated. Feature implementation is queued in roadmap.
+
+---
+
+## Entry: 2026-03-31 — feedback (Library priority: model + harness management + MCP)
+
+### Raw Input
+1. Library panel is top priority. Model and harness management via APIs/logins.
+2. MCP server management page in Library. Question: one monolithic server vs specialized array?
+
+### Optimized Prompt
+Build out the Library panel as the immediate priority. Four sub-panels: Agents, Models, Harnesses, MCP Servers. Models include tier (enterprise/mid-tier/local), pricing, capabilities, API keys. Harnesses include availability detection, supported models, flags. MCP architecture: specialized servers (orrch-tools, orrch-research, orrch-library, orrch-project).
+
+### Changes Made
+- Library panel restructured with 4 sub-panels (LibrarySub enum, Shift+Tab navigation)
+- Model registry: ModelEntry struct with tier, pricing model, capabilities, limitations, max context, API key env
+- Harness registry: HarnessEntry struct with auto-detection (which), supported models, flags
+- 8 model seed files (Claude Opus/Sonnet, Gemini Pro/Flash, Mistral Large/Codestral/Local, GPT-4o)
+- 5 harness seed files (Claude Code, Gemini CLI, Crush CLI, OpenCode, Codex CLI)
+- Preview pane shows full details per item type
+- MCP sub-panel is placeholder awaiting user confirmation on server architecture
+
+### Status
+Generated: 2026-03-31
+Executed: 2026-03-31 — Library panel fully functional with 4 sub-panels. 13 seed files. 81 tests pass. MCP architecture question pending user answer.

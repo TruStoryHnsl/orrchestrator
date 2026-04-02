@@ -4,7 +4,7 @@ Cargo.lock
 
 # Python prototype (archived)
 python-prototype/venv/
-python-prototype/__pycache__/
+python-prototype/**/__pycache__/
 python-prototype/*.pyc
 python-prototype/*.egg-info/
 

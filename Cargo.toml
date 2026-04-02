@@ -1,9 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/orrch-agents",
     "crates/orrch-core",
+    "crates/orrch-library",
     "crates/orrch-retrospect",
     "crates/orrch-tui",
+    "crates/orrch-workforce",
     "src",
 ]
 

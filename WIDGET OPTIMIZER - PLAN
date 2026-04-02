@@ -1,0 +1,28 @@
+Widget Position Optimizer
+NEW PROJECT : hypeland custom widget distributer - Neural Network trained to identify the path of least action. 
+
+I am going to have to take a few stabs at explaining the order of operations to take to train a neural network to accomplish this. I would like to solve this problem while making some kind of a meaningful contribution to the understanding of path of least action as a leverageable metric in the optimization of neural networks like this one as well as neural networks used by concord. Concords mech map is a nural network in much the same way as as this simple optimizer algorithm 
+
+Okay this means the the true goal must be a neural network that can instantly identify all of the configurations that describe a local minima action or a local maxima action. Its not enough to find the single path of least action, we need to find all of the local paths of least action. And on top of this we need to be able to change the standard deviation that determines the resulution at which we search for local minima in order to generate a local minima maxima heatmap that can be used to create a 3d rendering tht describes the path of least action as it is determined with more and more confidence. That is so fucking cool. Im so excited. I cant belive I actually know how I want to go about implementhing this. 
+
+The instructions to take the weight distribution matrix, dither it with a randomized matrix and then train that as an independant layer are genius. This frees me up to hone the various traingin parameters in parallel on discreet layers and then composite their outputs theough another neural layer to compile my final solution. This way I have much finer control over the training process and can experiment with asyncronous trianing and other kinds of interesting proptocols. 
+
+I intend to iterate on "path of least action" optimizers until I create one that is so efficent it can power the networking protocol that the mesh network relied on for stability and speed. Creating a networking protocol that can make mesh networks performant would be an existence-justifying accompolishment. Hopefully I wont feel too justied if I do succeed.
+* correction this needs to be more than an optimizer, it needs to be as determinate as possible. 
+
+
+I am imagining a desktop covered in custom status widgets that dynamically change their display tile shapes, sizes, and
+  positions to maximize the usefulness of the transparency that all of my terminal windows use. I often have two displays of just
+  terminal windows but one displays is half or a quarter taken by firefox which is opaque. I am imagining this dekstop dashboard
+  using aneural network to algorithmically determine the layout that maximizes the utility of a window. Different widget tiles will
+  have differnt size break points where their functionality is truncated. Each of these truncated displays provides less utility
+  then the previous ones. Widgets also present differing levels of utility. This neural network, or matrix transformation train,
+  needs to be explicitely designed to mathematically derive the configuratioin of least action in consideration of all of the
+  weighted parameters. With just a couple matrixes I already know how to implement training to improve the matrix's ability to
+  pinpoint the optimal pathway. We need to randomize the neural weight matrix. This dithers the crude "importance-points" system I
+  slapped together and blanks the canvas as prep for training. from here we need to procedurally create a massive dataset of
+  preoptimized layouts. This process should be semi-manual, where I rate the composition of a few hundred layouts subjectively and
+  those answers are extrapolated to stretch my choices to color the rest of the layouts based on how mathematically similar or
+  differnt they are. I know how this works, but I am not explaining it well. If I apply this process as its own layer of weights my
+  aesthetic sensibilities will embedded into the neural network Whatever mathematical model I create will be literally imbued with
+  my gut feeling reaction to some shapes on a screen. Thats kinda wild.

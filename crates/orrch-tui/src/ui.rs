@@ -67,10 +67,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let focused = app.tab_focused;
+    let panel_count = Panel::ALL.len();
+    let width = area.width as usize;
+    // Evenly distribute panel labels across the tab bar
+    let cell_width = if panel_count > 0 { width / panel_count } else { width };
+
     let titles: Vec<Line> = Panel::ALL.iter().map(|p| {
+        let label = p.label();
+        let pad_total = cell_width.saturating_sub(label.len());
+        let pad_left = pad_total / 2;
+        let pad_right = pad_total - pad_left;
+        let padded = format!("{}{}{}", " ".repeat(pad_left), label, " ".repeat(pad_right));
+
         let style = if *p == app.panel {
             if focused {
-                // Tab bar is focused — bright accent with underline
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -78,7 +88,7 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(TEXT_MUTED)
         };
-        Line::styled(p.label(), style)
+        Line::styled(padded, style)
     }).collect();
 
     let bg = if focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
@@ -96,10 +106,11 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.panel {
-        Panel::Ideas => draw_ideas(frame, app, area),
-        Panel::Projects => draw_projects(frame, app, area),
-        Panel::Sessions => draw_sessions_tab(frame, app, area),
-        Panel::Feedback => draw_feedback_tab(frame, app, area),
+        Panel::Design => draw_design(frame, app, area),
+        Panel::Oversee => draw_projects(frame, app, area),
+        Panel::Hypervise => draw_sessions_tab(frame, app, area),
+        Panel::Analyze => draw_placeholder(frame, area, "Analyze", "Token efficiency calibration — coming soon.\n\nWill display cost metrics, model usage stats, and optimization recommendations."),
+        Panel::Publish => draw_placeholder(frame, area, "Publish", "Release packaging & marketing — coming soon.\n\n• Legal analysis of packages\n• Monetization strategy tools\n• Marketing campaign designer\n• Ad broker integration\n• Distribution platform management"),
     }
 }
 
@@ -163,29 +174,497 @@ fn draw_deprecated_browser(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(preview, hsplit[2]);
 }
 
-// ─── Ideas Panel ──────────────────────────────────────────────────────
+// ─── Design Panel ────────────────────────────────────────────────────
+
+fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
+    let msg = Paragraph::new(message)
+        .style(Style::default().fg(TEXT_DIM))
+        .block(Block::default().title(format!(" {} ", title)).borders(Borders::ALL));
+    frame.render_widget(msg, area);
+}
+
+fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
+    use crate::app::DesignSub;
+
+    // Sub-panel selector bar: Intentions + Workforce left, Library right-justified
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    let width = chunks[0].width as usize;
+    let mut left_spans: Vec<Span> = Vec::new();
+    for sub in &[DesignSub::Intentions, DesignSub::Workforce] {
+        let sel = *sub == app.design_sub;
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_MUTED)
+        };
+        left_spans.push(Span::styled(format!(" {} ", sub.label()), style));
+        left_spans.push(Span::styled(" │ ", Style::default().fg(TEXT_MUTED)));
+    }
+    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let lib_sel = app.design_sub == DesignSub::Library;
+    let lib_style = if lib_sel {
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
+    let lib_label = " Library ";
+    let gap = width.saturating_sub(left_width + lib_label.len());
+    left_spans.push(Span::raw(" ".repeat(gap)));
+    left_spans.push(Span::styled(lib_label, lib_style));
+
+    frame.render_widget(Paragraph::new(Line::from(left_spans)), chunks[0]);
+
+    match app.design_sub {
+        DesignSub::Intentions => draw_ideas(frame, app, chunks[1]),
+        DesignSub::Workforce => draw_workforce_editor(frame, app, chunks[1]),
+        DesignSub::Library => draw_library(frame, app, chunks[1]),
+    }
+}
+
+fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::WorkforceTab;
+
+    // Layout: tab bar (1 line) + content (split list + preview)
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Tab bar for workforce sub-tabs
+    let tab_spans: Vec<Span> = WorkforceTab::ALL.iter()
+        .flat_map(|tab| {
+            let sel = *tab == app.workforce_tab;
+            let style = if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_MUTED)
+            };
+            vec![
+                Span::styled(format!(" {} ", tab.label()), style),
+                Span::styled("│", Style::default().fg(TEXT_MUTED)),
+            ]
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), outer[0]);
+
+    // "Coming soon" tabs
+    if matches!(app.workforce_tab, WorkforceTab::TrainingData | WorkforceTab::Models) {
+        let msg = Paragraph::new(format!("{} — coming soon.", app.workforce_tab.label()))
+            .style(Style::default().fg(TEXT_DIM))
+            .block(Block::default().borders(Borders::ALL));
+        frame.render_widget(msg, outer[1]);
+        return;
+    }
+
+    // Split: list (40%) + preview (60%)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(outer[1]);
+
+    let items_data = app.wf_items_for_tab();
+    let visible_rows = chunks[0].height.saturating_sub(2) as usize;
+    let scroll_offset = if app.wf_selected >= visible_rows { app.wf_selected - visible_rows + 1 } else { 0 };
+
+    let mut list_items = Vec::new();
+    for (i, (name, _)) in items_data.iter().enumerate().skip(scroll_offset) {
+        let sel = app.wf_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        list_items.push(ListItem::new(Line::styled(format!("{marker}{name}"), style)));
+    }
+    if list_items.is_empty() {
+        list_items.push(ListItem::new(Line::styled("  (empty — press n to create)", Style::default().fg(TEXT_MUTED))));
+    }
+
+    let title = format!(" {} ({}) — n=new Enter=edit d=del ", app.workforce_tab.label(), items_data.len());
+    frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
+
+    // Preview: show file contents
+    let preview = if let Some((_, path)) = items_data.get(app.wf_selected) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            content.lines().map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT_DIM))).collect()
+        } else {
+            vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
+        }
+    } else {
+        vec![Line::styled("Select an item to preview", Style::default().fg(TEXT_MUTED))]
+    };
+
+    frame.render_widget(Paragraph::new(preview)
+        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((app.wf_preview_scroll as u16, 0)), chunks[1]);
+}
+
+// ─── Library Panel ───────────────────────────────────────────────────
+
+fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
+    use crate::app::LibrarySub;
+
+    // Layout: sub-panel selector (1 line) + content
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Sub-panel selector bar
+    let sub_labels: Vec<Span> = LibrarySub::ALL.iter()
+        .flat_map(|sub| {
+            let sel = *sub == app.library_sub;
+            let count = match sub {
+                LibrarySub::Agents => app.agent_profiles.len(),
+                LibrarySub::Models => app.library_models.len(),
+                LibrarySub::Harnesses => app.library_harnesses.len(),
+                LibrarySub::McpServers => app.library_mcp_servers.len(),
+                LibrarySub::Skills => app.library_skills.len(),
+                LibrarySub::Tools => app.library_tools.len(),
+            };
+            let style = if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_MUTED)
+            };
+            vec![
+                Span::styled(format!(" {} ({}) ", sub.label(), count), style),
+                Span::styled(" │ ", Style::default().fg(TEXT_MUTED)),
+            ]
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(Line::from(sub_labels)), outer[0]);
+
+    // Split content: list (40%) + preview (60%)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(outer[1]);
+
+    match app.library_sub {
+        LibrarySub::Agents => draw_library_agents(frame, app, chunks[0], chunks[1]),
+        LibrarySub::Models => draw_library_models(frame, app, chunks[0], chunks[1]),
+        LibrarySub::Harnesses => draw_library_harnesses(frame, app, chunks[0], chunks[1]),
+        LibrarySub::McpServers => draw_library_mcp(frame, app, chunks[0], chunks[1]),
+        LibrarySub::Skills => draw_library_generic(frame, app, &app.library_skills, "Skills", chunks[0], chunks[1]),
+        LibrarySub::Tools => draw_library_generic(frame, app, &app.library_tools, "Tools", chunks[0], chunks[1]),
+    }
+}
+
+fn draw_library_agents(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let visible_rows = list_area.height.saturating_sub(2) as usize; // minus borders
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else { 0 };
+
+    let mut items = Vec::new();
+    for (i, profile) in app.agent_profiles.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{marker}{}", profile.name), style),
+            Span::styled(format!(" [{}]", profile.department), Style::default().fg(TEXT_MUTED)),
+        ])));
+    }
+    let title = format!(" Agents ({}) — n=new Enter=edit d=del ", app.agent_profiles.len());
+    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(p) = app.agent_profiles.get(app.library_selected) {
+        let mut lines = vec![
+            Line::styled(&p.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("Role: {}", p.role), Style::default().fg(TEXT)),
+            Line::styled(format!("Dept: {}", p.department), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+        ];
+        for line in p.prompt.lines() {
+            lines.push(Line::styled(line.to_string(), Style::default().fg(TEXT_DIM)));
+        }
+        lines
+    } else { vec![Line::styled("No agents loaded — press n to create", Style::default().fg(TEXT_MUTED))] };
+    frame.render_widget(Paragraph::new(preview)
+        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let mut items = Vec::new();
+    for (i, model) in app.library_models.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let blocked = app.valve_store.is_blocked(&model.provider);
+        let style = if blocked {
+            Style::default().fg(TEXT_MUTED).add_modifier(Modifier::DIM)
+        } else if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
+        let marker = if sel { "■ " } else { "  " };
+        let tier_color = match model.tier {
+            orrch_library::ModelTier::Enterprise => ACCENT,
+            orrch_library::ModelTier::MidTier => CYAN,
+            orrch_library::ModelTier::Local => GREEN,
+        };
+        let valve_badge = if blocked {
+            Span::styled(" ⊘ BLOCKED", Style::default().fg(ACCENT))
+        } else {
+            Span::raw("")
+        };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{marker}{}", model.name), style),
+            Span::styled(format!(" {}", model.tier.label()), Style::default().fg(tier_color)),
+            valve_badge,
+        ])));
+    }
+    if items.is_empty() { items.push(ListItem::new(Line::styled("  No models in library/models/", Style::default().fg(TEXT_MUTED)))); }
+    let title = format!(" Models ({}) — v=valve n=new Enter=edit ", app.library_models.len());
+    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(m) = app.library_models.get(app.library_selected) {
+        let blocked = app.valve_store.is_blocked(&m.provider);
+        let valve_info = if blocked {
+            let valve = app.valve_store.valves.get(&m.provider);
+            let reason = valve.map(|v| v.reason.as_str()).unwrap_or("unknown");
+            let reopen = valve.map(|v| v.reopen_display()).unwrap_or_else(|| "manual".into());
+            vec![
+                Line::styled(format!("⊘ VALVE CLOSED — {}", reason), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Line::styled(format!("  Reopens: {}", reopen), Style::default().fg(WAITING_COLOR)),
+                Line::raw(""),
+            ]
+        } else {
+            vec![]
+        };
+        let mut lines = valve_info;
+        lines.extend(vec![
+            Line::styled(&m.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("Provider: {}", m.provider), Style::default().fg(TEXT)),
+            Line::styled(format!("Model ID: {}", m.model_id), Style::default().fg(TEXT)),
+            Line::styled(format!("Tier: {}", m.tier.label()), Style::default().fg(TEXT)),
+            Line::styled(format!("Pricing: {}", m.pricing.display()), Style::default().fg(TEXT)),
+            Line::styled(format!("Context: {}",
+                m.max_context.map(|c| if c >= 1_000_000 { format!("{}M", c / 1_000_000) } else { format!("{}K", c / 1000) }).unwrap_or("unknown".into())),
+                Style::default().fg(TEXT)),
+            Line::styled(format!("API Key: {}", m.api_key_env.as_deref().unwrap_or("none")), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled("Capabilities:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("  {}", m.capabilities.join(", ")), Style::default().fg(GREEN)),
+            Line::raw(""),
+            Line::styled("Limitations:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("  {}", m.limitations.join(", ")), Style::default().fg(WAITING_COLOR)),
+            Line::raw(""),
+            Line::styled(&m.notes, Style::default().fg(TEXT_DIM)),
+        ]);
+        lines
+    } else { vec![Line::styled("No model selected", Style::default().fg(TEXT_MUTED))] };
+    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let mut items = Vec::new();
+    for (i, h) in app.library_harnesses.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        let status = if h.available { Span::styled(" ●", Style::default().fg(GREEN)) } else { Span::styled(" ○", Style::default().fg(TEXT_MUTED)) };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{marker}{}", h.name), style),
+            status,
+        ])));
+    }
+    if items.is_empty() { items.push(ListItem::new(Line::styled("  No harnesses in library/harnesses/", Style::default().fg(TEXT_MUTED)))); }
+    frame.render_widget(List::new(items).block(Block::default().title(" Harnesses ").borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(h) = app.library_harnesses.get(app.library_selected) {
+        let status_line = if h.available {
+            Line::styled("● Installed", Style::default().fg(GREEN))
+        } else {
+            Line::styled("○ Not found", Style::default().fg(WAITING_COLOR))
+        };
+        vec![
+            Line::styled(&h.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            status_line,
+            Line::styled(format!("Command: {}", h.command), Style::default().fg(TEXT)),
+            Line::styled(&h.description, Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled("Capabilities:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("  {}", h.capabilities.join(", ")), Style::default().fg(GREEN)),
+            Line::raw(""),
+            Line::styled("Supported Models:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("  {}", h.supported_models.join(", ")), Style::default().fg(CYAN)),
+            Line::raw(""),
+            Line::styled(format!("Flags: {}", if h.flags.is_empty() { "(none)".into() } else { h.flags.join(" ") }), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled(&h.notes, Style::default().fg(TEXT_DIM)),
+        ]
+    } else { vec![Line::styled("No harness selected", Style::default().fg(TEXT_MUTED))] };
+    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let mut items = Vec::new();
+    for (i, server) in app.library_mcp_servers.iter().enumerate() {
+        let sel = app.library_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        let status = if server.enabled {
+            Span::styled(" ●", Style::default().fg(GREEN))
+        } else {
+            Span::styled(" ○", Style::default().fg(TEXT_MUTED))
+        };
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{marker}{}", server.name), style),
+            status,
+        ])));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled("  No MCP servers configured", Style::default().fg(TEXT_MUTED))));
+        items.push(ListItem::new(Line::styled("  Add .md files to library/mcp_servers/", Style::default().fg(TEXT_MUTED))));
+    }
+    frame.render_widget(List::new(items).block(Block::default().title(" MCP Servers (e=toggle) ").borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(s) = app.library_mcp_servers.get(app.library_selected) {
+        let transport_info = match &s.transport {
+            orrch_library::McpTransport::Stdio { command, args, .. } => {
+                format!("stdio: {} {}", command, args.join(" "))
+            }
+            orrch_library::McpTransport::Sse { url } => format!("sse: {}", url),
+        };
+        let mut lines = vec![
+            Line::styled(&s.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(if s.enabled { "● Enabled" } else { "○ Disabled" },
+                Style::default().fg(if s.enabled { GREEN } else { TEXT_MUTED })),
+            Line::styled(&s.description, Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled(format!("Transport: {}", transport_info), Style::default().fg(TEXT)),
+        ];
+        if !s.assigned_roles.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Assigned to:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)));
+            lines.push(Line::styled(format!("  {}", s.assigned_roles.join(", ")), Style::default().fg(CYAN)));
+        } else {
+            lines.push(Line::styled("  Available to all agents", Style::default().fg(TEXT_DIM)));
+        }
+        if !s.notes.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled(&s.notes, Style::default().fg(TEXT_DIM)));
+        }
+        lines
+    } else {
+        vec![
+            Line::styled("orrch-mcp (planned)", Style::default().fg(TEXT_MUTED)),
+            Line::raw(""),
+            Line::styled("Unified MCP server exposing:", Style::default().fg(TEXT_DIM)),
+            Line::styled("  library_search, library_get", Style::default().fg(TEXT_DIM)),
+            Line::styled("  project_state, inbox_append", Style::default().fg(TEXT_DIM)),
+            Line::styled("  operation_status, session_list", Style::default().fg(TEXT_DIM)),
+        ]
+    };
+    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std::path::PathBuf)], label: &str, list_area: Rect, preview_area: Rect) {
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let mut items = Vec::new();
+    for (i, (name, _)) in items_data.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        items.push(ListItem::new(Line::styled(format!("{marker}{name}"), style)));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled(format!("  No {label} — create in Workforce editor"), Style::default().fg(TEXT_MUTED))));
+    }
+    let title = format!(" {} ({}) ", label, items_data.len());
+    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+
+    let preview = if let Some((_, path)) = items_data.get(app.library_selected) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            content.lines().map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT_DIM))).collect()
+        } else {
+            vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
+        }
+    } else {
+        vec![Line::styled("Select an item to preview", Style::default().fg(TEXT_MUTED))]
+    };
+    frame.render_widget(Paragraph::new(preview)
+        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+// ─── Ideas (Design > Intentions) ────────────────────────────────────
 
 fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
     if app.ideas.is_empty() {
-        let msg = Paragraph::new("No ideas yet. Press 'n' to create one.")
+        let msg = Paragraph::new("No ideas yet. Press 'n' to create one.\n\nWrite feedback, ideas, or instructions here.\nPress 's' to submit through the instruction intake pipeline.")
             .style(Style::default().fg(TEXT_DIM))
-            .block(Block::default().title(" Ideas ").borders(Borders::ALL));
+            .block(Block::default().title(" Intentions — n=new s=submit Enter=edit ").borders(Borders::ALL));
         frame.render_widget(msg, area);
         return;
     }
 
+    // Color constants for gradient
+    let default_rgb = (230, 230, 240); // TEXT
+    let yellow_rgb = (255, 200, 50);   // WAITING_COLOR
+    let green_rgb = (80, 200, 120);    // GREEN
+
     let items: Vec<ListItem> = app.ideas.iter().map(|idea| {
-        ListItem::new(vec![
-            Line::styled(&idea.title, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  {}", idea.preview), Style::default().fg(TEXT_DIM)),
-        ])
+        let (r, g, b) = idea.pipeline.gradient_color(default_rgb, yellow_rgb, green_rgb);
+        let title_style = Style::default().fg(Color::Rgb(r, g, b)).add_modifier(Modifier::BOLD);
+
+        // Build status badge
+        let badge = if idea.pipeline.is_complete() {
+            " ✓ 100%".to_string()
+        } else if idea.pipeline.is_submitted() {
+            let pct = idea.pipeline.progress;
+            if pct >= 50 {
+                let impl_ratio = idea.pipeline.implementation_ratio();
+                format!(" {}% impl", (impl_ratio * 100.0) as u8)
+            } else {
+                format!(" {}% intake", pct)
+            }
+        } else {
+            String::new()
+        };
+
+        // Package name header (shown when instructions distributed, progress >= 50)
+        let package_line = if let Some(ref pkg) = idea.pipeline.package_name {
+            let counts: Vec<String> = idea.pipeline.targets.iter()
+                .map(|t| format!("{}:{}", t.project, t.instruction_count))
+                .collect();
+            format!("  ⟦{}⟧ → {}", pkg, counts.join(", "))
+        } else {
+            String::new()
+        };
+
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled(&idea.title, title_style),
+                Span::styled(badge, Style::default().fg(Color::Rgb(r, g, b))),
+            ]),
+        ];
+        if !package_line.is_empty() {
+            lines.push(Line::styled(package_line, Style::default().fg(CYAN)));
+        }
+        lines.push(Line::styled(format!("  {}", idea.preview), Style::default().fg(TEXT_DIM)));
+
+        ListItem::new(lines)
     }).collect();
 
+    let title = format!(" Intentions ({}) — n=new s=submit Enter=edit ", app.ideas.len());
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Ideas ").borders(Borders::ALL))
+        .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_style(Style::default().bg(BG_HIGHLIGHT))
-        .highlight_symbol("▶ ");
+        .highlight_symbol("■ ");
     let mut state = ListState::default().with_selected(Some(app.idea_selected));
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -1020,7 +1499,7 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
             lines.push(Line::raw(""));
             for (i, item) in open.iter().enumerate() {
                 let sel = app.spawn_goal_from_roadmap == Some(i);
-                let marker = if sel { "▶ " } else { "  " };
+                let marker = if sel { "■ " } else { "  " };
                 // Show existing session count next to each roadmap item
                 let existing = app.duplicate_goal_count(&proj.path, &item.title);
                 let badge = if existing > 0 { format!(" ({existing}▶)") } else { String::new() };
@@ -1058,7 +1537,7 @@ fn draw_spawn_agent(frame: &mut Frame, app: &App) {
     // Agent profiles
     for (i, profile) in app.agent_profiles.iter().enumerate() {
         let sel = app.spawn_agent_idx == i + 1;
-        let marker = if sel { "▶ " } else { "  " };
+        let marker = if sel { "■ " } else { "  " };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{}", marker, profile.name),
                 if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
@@ -1220,22 +1699,25 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// Build a styled hint line with highlighted keys grouped by function.
 fn build_hint_line(app: &App) -> Line<'static> {
     match (&app.panel, &app.sub) {
-        (Panel::Projects, SubView::List) if app.tree_browsing => hint_line(&[
+        (Panel::Oversee, SubView::List) if app.tree_browsing => hint_line(&[
             ("←", "back/collapse"), ("→", "expand"), ("Enter", "open"),
             ("|", ""),
             ("n", "spawn"), ("x", "kill"), ("a", "actions"),
         ]),
-        (Panel::Projects, SubView::List) => hint_line(&[
+        (Panel::Oversee, SubView::List) => hint_line(&[
             ("→", "enter project"), ("Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
             ("|", ""),
             ("↑↓", "select"), ("q", "quit"),
         ]),
-        (Panel::Ideas, SubView::List) => hint_line(&[
-            ("Enter", "open"), ("n", "new"), ("d", "delete"),
+        (Panel::Design, SubView::List) => hint_line(&[
+            ("Enter", "open"), ("n", "new"), ("d", "delete"), ("f", "feedback"),
             ("|", ""),
+            ("Shift+Tab", "sub-panel"), ("←→", "panels"),
+        ]),
+        (Panel::Analyze, SubView::List) | (Panel::Publish, SubView::List) => hint_line(&[
             ("←→", "panels"), ("Esc", "menu"),
         ]),
-        (Panel::Sessions, SubView::List) => {
+        (Panel::Hypervise, SubView::List) => {
             let has_sessions = !app.managed_sessions.is_empty();
             if has_sessions {
                 hint_line(&[
@@ -1247,33 +1729,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 ])
             }
         }
-        (Panel::Feedback, SubView::List) => {
-            // Dynamic hints based on selected item's status
-            let selected_status = app.feedback_items.get(app.feedback_selected).map(|i| i.status);
-            match selected_status {
-                Some(FeedbackStatus::Draft) => hint_line(&[
-                    ("s", "submit"), ("r", "resume"), ("p", "plan"), ("d", "delete"), ("f", "new"),
-                ]),
-                Some(FeedbackStatus::Processing) => hint_line(&[
-                    ("u", "cancel+draft"),
-                    ("|", ""),
-                    ("f", "new"),
-                ]),
-                Some(FeedbackStatus::Processed) => hint_line(&[
-                    ("c", "review+commit"), ("u", "recall to draft"),
-                    ("|", ""),
-                    ("f", "new"),
-                ]),
-                Some(FeedbackStatus::Routed) => hint_line(&[
-                    ("u", "recall to draft"),
-                    ("|", ""),
-                    ("f", "new"),
-                ]),
-                None => hint_line(&[
-                    ("f", "new feedback"),
-                ]),
-            }
-        }
+        // Feedback hints are now part of the Design panel
         (_, SubView::ProjectDetail(_)) => hint_line(&[
             ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
             ("|", ""),
