@@ -167,6 +167,27 @@ pub fn spawn_vim_in_tmux(file_path: &Path, window_name: &str) -> anyhow::Result<
     spawn_in_category(SessionCategory::Edit, window_name, &cmd)
 }
 
+/// Spawn the develop-feature workflow dispatcher in the Proc category.
+/// The workflow script is a bash dispatcher that spawns claude -p subprocesses
+/// for each agent step. The Hypervisor is the script, not an LLM.
+pub fn spawn_workflow(project_dir: &Path, goal: &str) -> anyhow::Result<String> {
+    let dir_str = project_dir.to_string_lossy();
+
+    // Locate the workflow script relative to the orrchestrator project
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
+    let script = format!("{home}/projects/orrchestrator/library/tools/run_workflow.sh");
+
+    let cmd = format!(
+        "cd {} && bash {} {} {}",
+        shell_escape(&dir_str),
+        shell_escape(&script),
+        shell_escape(&dir_str),
+        shell_escape(goal),
+    );
+
+    spawn_in_category(SessionCategory::Proc, "workflow", &cmd)
+}
+
 // ─── Hub Edit Window ────────────────────────────────────────────────
 
 /// The canonical hub window name used for the shared editor hub.
