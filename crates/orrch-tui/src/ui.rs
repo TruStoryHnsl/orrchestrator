@@ -62,6 +62,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::FeedbackConfirm(_) => { draw_panel_content(frame, app, layout[1]); draw_feedback_confirm(frame, app); }
         SubView::CommitReview(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_review(frame, app); }
         SubView::CommitCorrecting(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_correcting(frame, app); }
+        SubView::WorkflowPicker => { draw_panel_content(frame, app, layout[1]); draw_workflow_picker(frame, app); }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -1874,6 +1875,51 @@ fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Workforce ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
         .wrap(Wrap { trim: false }), popup);
+}
+
+fn draw_workflow_picker(frame: &mut Frame, app: &App) {
+    let height = 5 + app.workflow_choices.len() as u16;
+    let popup = centered_popup(frame.area(), 50, height.min(14));
+    frame.render_widget(Clear, popup);
+
+    let mut lines = vec![
+        Line::styled("Run Workflow (↑/↓ select, Enter to launch, Esc cancel)", Style::default().fg(TEXT_DIM)),
+        Line::raw(""),
+    ];
+
+    for (i, (_script, display)) in app.workflow_choices.iter().enumerate() {
+        let sel = i == app.workflow_picker_idx;
+        let marker = if sel { "▶ " } else { "  " };
+        lines.push(Line::styled(
+            format!("{marker}{display}"),
+            if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT)
+            },
+        ));
+    }
+
+    // Show the selected project name at the bottom
+    if let Some(pidx) = app.selected_project_index() {
+        if let Some(proj) = app.projects.get(pidx) {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::styled("Project: ", Style::default().fg(TEXT_DIM)),
+                Span::styled(&proj.name, Style::default().fg(GREEN)),
+            ]));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default()
+                .title(" Workflow ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
 }
 
 fn draw_spawn_agent(frame: &mut Frame, app: &App) {
