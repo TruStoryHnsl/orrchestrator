@@ -223,7 +223,7 @@ pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> 
         shell_escape(goal),
     );
 
-    spawn_in_category(SessionCategory::Proc, window_name, &cmd)
+    spawn_in_category(SessionCategory::Dev, window_name, &cmd)
 }
 
 // ─── Hub Edit Window ────────────────────────────────────────────────
