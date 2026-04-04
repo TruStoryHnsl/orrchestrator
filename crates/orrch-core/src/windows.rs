@@ -213,8 +213,6 @@ pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> 
         .strip_prefix("run_").unwrap_or(workflow_script)
         .strip_suffix(".sh").unwrap_or(workflow_script);
 
-    // The script logs to .orrch/workflow.log itself and has a read prompt
-    // at the end to keep the tmux window alive after completion/error.
     let cmd = format!(
         "cd {} && bash {} {} {}",
         shell_escape(&dir_str),
@@ -223,7 +221,16 @@ pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> 
         shell_escape(goal),
     );
 
-    spawn_in_category(SessionCategory::Dev, window_name, &cmd)
+    // Set remain-on-exit so the window stays visible after the script finishes
+    // (otherwise bash -c exits and the pane disappears before user can read output)
+    let result = spawn_in_category(SessionCategory::Dev, window_name, &cmd)?;
+    let target = format!("{}:{}", SessionCategory::Dev.tmux_name(), result);
+    let _ = Command::new("tmux")
+        .args(["set-option", "-t", &target, "remain-on-exit", "on"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    Ok(result)
 }
 
 // ─── Hub Edit Window ────────────────────────────────────────────────
