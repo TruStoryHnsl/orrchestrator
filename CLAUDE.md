@@ -6,7 +6,7 @@ AI-powered software development hypervisor. Rust TUI managing parallel AI coding
 
 ```bash
 cargo build              # compile (warnings OK)
-cargo test               # 88 tests across 6 crates
+cargo test               # 119 tests across 7 crates
 cargo watch -x run       # live-reload dev
 cargo build --release    # ~5MB native binary
 ```
@@ -45,9 +45,11 @@ Workforce tabs:  Workflows | Teams | Agents | Skills | Tools | MCP | Profiles | 
 ## Key Architecture Decisions
 
 - **One session per workflow, NOT per agent** — token efficiency is a core design principle
-- **Hypervisor agent** orchestrates workforces via subagent nesting (unlimited depth)
+- **Hypervisor is a thin dispatcher, NOT an LLM agent** — it mechanically executes a step table, spawning agents and piping compressed output. Zero reasoning overhead. All orchestration logic lives in the workflow definition and deterministic tools.
 - **Context isolation** — verification agents (testers) never see other verifiers' results on the same task
-- **File inbox between operations** (`instructions_inbox.md`), prompt injection within workflows
+- **File-cluster batching** — tasks grouped by shared files, not agent role. One agent reads each file. Duplicate roles (3 Developers) are fine if they reduce file overlap.
+- **Deterministic tools between steps** — `codebase_brief.sh` (API surface extraction), `compress_output.sh` (structured data extraction from agent output), `cluster_tasks.sh` (union-find file clustering). These replace LLM-based "compression" and "batching" reasoning.
+- **File inbox between operations** (`instructions_inbox.md`)
 - **fb2p.md is deprecated** — replaced by per-project `instructions_inbox.md` managed by COO
 - **Three-tier model system**: enterprise (Claude/GPT-4o), mid-tier (Mistral Large), local (Ollama)
 - **Workforce format**: structured markdown with pipe-delimited step tables (auto-detects parallel groups)
