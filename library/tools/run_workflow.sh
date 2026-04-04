@@ -41,33 +41,40 @@ run_agent() {
     log "spawning agent: ${name}"
     echo "────────────────── ${name} ──────────────────"
 
+    # Write prompt to a temp file — passing large prompts as shell args
+    # exceeds argument limits and causes claude -p to hang.
+    local prompt_file="${ORRCH_DIR}/.prompt_${RANDOM}.txt"
+    echo "${prompt}" > "${prompt_file}"
+
     # claude -p runs the full agentic loop (tool use, file edits, reasoning)
-    # and exits when done. Output goes directly to the terminal so the user
-    # can watch. We capture a copy to file via tee for downstream steps.
-    # Use --output-format text (default) for readable terminal output.
+    # and exits when done. Pipe prompt via stdin. Output visible via tee.
     "${CLAUDE_BASE[@]}" \
         --allowed-tools "${tools}" \
         --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
-        "${prompt}" \
+        < "${prompt_file}" \
         2>&1 | tee "${output_file}"
 
+    rm -f "${prompt_file}"
     echo ""
     echo "────────────────── /${name} ──────────────────"
     log "agent done: ${name} ($(wc -l < "${output_file}" 2>/dev/null || echo 0) lines)"
 }
 
 run_agent_bg() {
-    # Same as run_agent but backgrounded — no spinner. Caller must wait.
+    # Same as run_agent but backgrounded. Output goes to file only.
     local name="$1"
     local tools="$2"
     local prompt="$3"
     local output_file="$4"
 
+    local prompt_file="${ORRCH_DIR}/.prompt_bg_${RANDOM}.txt"
+    echo "${prompt}" > "${prompt_file}"
+
     log "spawning agent (background): ${name}"
     "${CLAUDE_BASE[@]}" \
         --allowed-tools "${tools}" \
         --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
-        "${prompt}" \
+        < "${prompt_file}" \
         > "${output_file}" 2>/dev/null &
 }
 
