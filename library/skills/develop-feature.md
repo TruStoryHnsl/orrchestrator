@@ -27,9 +27,9 @@ echo '{"workflow":"develop-feature","step":0,"status":"init"}' > .orrch/workflow
 
 Read `.scope` if it exists → store as `$SCOPE` (default: "private").
 
-**Parse input**: If $ARGUMENTS provided, use that as `$INSTRUCTIONS`. Otherwise read `instructions_inbox.md` and collect unimplemented entries.
+**Parse input**: If $ARGUMENTS is a specific goal, use that as `$INSTRUCTIONS`. If $ARGUMENTS is "continue development" or "continue", read `PLAN.md` and collect unchecked `[ ]` items from the lowest incomplete phase.
 
-**If no instructions found: STOP.** Say "Instruction inbox is empty — no work to dispatch. Add instructions to instructions_inbox.md or call with an explicit goal." Do not search for work elsewhere.
+**If no unchecked items: STOP.** Say "Dev map is complete — no unchecked items in PLAN.md." Do not search elsewhere.
 
 Write `$INSTRUCTIONS` to `.orrch/instructions.md`.
 

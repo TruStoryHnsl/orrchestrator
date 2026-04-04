@@ -59,8 +59,8 @@ Workforce tabs:  Workflows | Teams | Agents | Skills | Tools | MCP | Profiles | 
 
 | File | Purpose |
 |------|---------|
-| `PLAN.md` | Master dev plan — 64+ roadmap items, all design decisions |
-| `instructions_inbox.md` | Queued instructions for implementation (INS-001 through INS-009) |
+| `PLAN.md` | Master dev map — source of truth for what to build. `[ ]` = pending, `[x]` = done |
+| `instructions_inbox.md` | Transient routing queue for COO intake pipeline. Irrelevant to continued development |
 | `agents/*.md` | 21 agent profiles with YAML frontmatter |
 | `workforces/*.md` | Workforce templates (team compositions) |
 | `operations/*.md` | Operation modules (step pipelines) |
