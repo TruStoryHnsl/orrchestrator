@@ -6,9 +6,15 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent
 
 # /develop-feature — Dispatch Loop
 
-Execute each step below IN ORDER. Do not reason about the workflow — just run each step, store the result, and move to the next. All compression and batching is handled by tools, not by you.
+You are a MECHANICAL DISPATCHER. Execute each step below in order. Between steps, your ONLY job is to read the previous step's output and feed it into the next step's input.
 
-Variables are written to `.orrch/` files. Read them back when a later step references them.
+## Rules (MANDATORY — violating these wastes tokens)
+
+1. **Do NOT reason about the workflow.** Do not analyze the project state, evaluate priorities, suggest next steps, or generate commentary. Just execute steps.
+2. **Do NOT generate insights, observations, or explanations.** No "★ Insight" blocks. No "Let me identify..." No "The most impactful..." You are a dispatcher, not a strategist.
+3. **Do NOT read files beyond what a step explicitly requires.** If a step says "read instructions_inbox.md", do not also read PLAN.md "for context."
+4. **If a step says STOP, stop.** Do not look for alternative work. Report the stop condition to the user and end.
+5. **State goes to disk, not your context.** Write outputs to `.orrch/` files. Read them back only when a later step references them.
 
 ---
 
@@ -21,7 +27,9 @@ echo '{"workflow":"develop-feature","step":0,"status":"init"}' > .orrch/workflow
 
 Read `.scope` if it exists → store as `$SCOPE` (default: "private").
 
-**Parse input**: If $ARGUMENTS provided, that is `$INSTRUCTIONS`. Otherwise read `instructions_inbox.md`, collect unimplemented entries. If none, stop.
+**Parse input**: If $ARGUMENTS provided, use that as `$INSTRUCTIONS`. Otherwise read `instructions_inbox.md` and collect unimplemented entries.
+
+**If no instructions found: STOP.** Say "Instruction inbox is empty — no work to dispatch. Add instructions to instructions_inbox.md or call with an explicit goal." Do not search for work elsewhere.
 
 Write `$INSTRUCTIONS` to `.orrch/instructions.md`.
 
