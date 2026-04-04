@@ -1,5 +1,7 @@
+use regex::Regex;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::server::OrrchMcpServer;
 
@@ -160,6 +162,37 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["agent", "task"]
             }
         }),
+        serde_json::json!({
+            "name": "module_api",
+            "description": "Extract the public API surface (pub structs, enums, fns, consts, mods) from a Rust source file. Returns a compact summary instead of the full file contents.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "crate_name": {
+                        "type": "string",
+                        "description": "Crate name (e.g. 'orrch-tui', 'orrch-core')"
+                    },
+                    "module": {
+                        "type": "string",
+                        "description": "Module filename without .rs extension (e.g. 'app', 'windows', 'lib')"
+                    }
+                },
+                "required": ["crate_name", "module"]
+            }
+        }),
+        serde_json::json!({
+            "name": "codebase_brief",
+            "description": "Generate a compact summary of the orrchestrator codebase: module map with pub API surface, color scheme, conventions, and crate dependencies. Use this at the start of any task instead of reading source files for orientation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name (default: 'orrchestrator')"
+                    }
+                }
+            }
+        }),
     ]
 }
 
@@ -177,6 +210,8 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "project_state" => project_state(server, args),
         "inbox_append" => inbox_append(server, args),
         "agent_invoke" => agent_invoke(server, args),
+        "module_api" => module_api(server, args),
+        "codebase_brief" => codebase_brief(server, args),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -483,7 +518,404 @@ fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
     format!("{body}\n\n---\n\n## Your Task\n\n{task}")
 }
 
+fn module_api(server: &OrrchMcpServer, args: &Value) -> String {
+    let crate_name = match args.get("crate_name").and_then(|v| v.as_str()) {
+        Some(c) => c,
+        None => return "Error: 'crate_name' parameter is required".into(),
+    };
+    let module = match args.get("module").and_then(|v| v.as_str()) {
+        Some(m) => m,
+        None => return "Error: 'module' parameter is required".into(),
+    };
+
+    let orrch_dir = server.projects_dir.join("orrchestrator");
+    let file_path = orrch_dir
+        .join("crates")
+        .join(crate_name)
+        .join("src")
+        .join(format!("{module}.rs"));
+
+    let content = match std::fs::read_to_string(&file_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read {}: {e}", file_path.display()),
+    };
+
+    let line_count = content.lines().count();
+    let api = extract_pub_api(&content);
+
+    format!("# {crate_name}::{module} ({line_count} lines)\n\n{api}")
+}
+
+fn codebase_brief(server: &OrrchMcpServer, args: &Value) -> String {
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_str())
+        .unwrap_or("orrchestrator");
+
+    let project_dir = server.projects_dir.join(project);
+    if !project_dir.is_dir() {
+        return format!("Error: project directory '{}' not found", project_dir.display());
+    }
+
+    let crates_dir = project_dir.join("crates");
+    let mut output = format!("# {project} codebase brief\n\n");
+    let mut total_lines = 0usize;
+
+    // Collect crate dirs sorted.
+    let mut crate_dirs: Vec<_> = match std::fs::read_dir(&crates_dir) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.path())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    crate_dirs.sort();
+
+    for crate_path in &crate_dirs {
+        let crate_name = crate_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        // Read Cargo.toml for dependency list.
+        let deps = {
+            let cargo_toml = crate_path.join("Cargo.toml");
+            if let Ok(toml_content) = std::fs::read_to_string(&cargo_toml) {
+                extract_cargo_deps(&toml_content)
+            } else {
+                Vec::new()
+            }
+        };
+
+        output.push_str(&format!("## {crate_name}"));
+        if !deps.is_empty() {
+            output.push_str(&format!(" (deps: {})", deps.join(", ")));
+        }
+        output.push('\n');
+
+        // Enumerate .rs source files under src/.
+        let src_dir = crate_path.join("src");
+        let mut rs_files: Vec<_> = match std::fs::read_dir(&src_dir) {
+            Ok(rd) => rd
+                .flatten()
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext == "rs")
+                })
+                .map(|e| e.path())
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        rs_files.sort();
+
+        for rs_path in &rs_files {
+            let module_name = rs_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
+            let content = match std::fs::read_to_string(rs_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let line_count = content.lines().count();
+            total_lines += line_count;
+
+            let api = extract_pub_api(&content);
+
+            output.push_str(&format!("\n### {crate_name}::{module_name} ({line_count} lines)\n"));
+            output.push_str(&api);
+            output.push('\n');
+
+            // Cap total output to keep it manageable.
+            if output.lines().count() >= 380 {
+                output.push_str("\n... (truncated — use module_api for remaining modules)\n");
+                break;
+            }
+        }
+
+        if output.lines().count() >= 380 {
+            break;
+        }
+    }
+
+    // Append conventions footer.
+    output.push_str(&format!(
+        "\n---\n\n## Conventions\n\
+         - Language: Rust (edition 2024), private scope — iterate fast\n\
+         - Commits: conventional format (feat/fix/refactor/chore)\n\
+         - One session per workflow — token efficiency is a core principle\n\
+         - Workforce format: structured markdown with pipe-delimited step tables\n\
+         - TUI: ratatui + crossterm, depth-level nav (Up/Down between bars, Left/Right within bars)\n\
+         - Total indexed: ~{total_lines} lines across {} crates\n",
+        crate_dirs.len()
+    ));
+
+    output
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Extract the public API surface from Rust source content.
+/// Uses simple line-by-line regex matching — not a full parser.
+fn extract_pub_api(content: &str) -> String {
+    // Compile patterns once per call via OnceLock not possible in fn scope easily,
+    // so we use local Regex::new (cheap for short-lived calls; cached via OnceLock at module level).
+    static PUB_ITEM: OnceLock<Regex> = OnceLock::new();
+    static FIELD_LINE: OnceLock<Regex> = OnceLock::new();
+    static VARIANT_LINE: OnceLock<Regex> = OnceLock::new();
+    static COLOR_RGB: OnceLock<Regex> = OnceLock::new();
+
+    let pub_item = PUB_ITEM.get_or_init(|| {
+        Regex::new(r"^\s*pub\s+(fn|struct|enum|const|static|type|mod|trait)\s+(\w+)").unwrap()
+    });
+    let field_line = FIELD_LINE.get_or_init(|| {
+        Regex::new(r"^\s+pub\s+(\w+)\s*:").unwrap()
+    });
+    let variant_line = VARIANT_LINE.get_or_init(|| {
+        Regex::new(r"^\s+([A-Z][A-Za-z0-9_]*)\s*[,\{(]?$").unwrap()
+    });
+    let color_rgb = COLOR_RGB.get_or_init(|| {
+        Regex::new(r"(?:const\s+\w+.*Rgb|Color::Rgb\s*\()").unwrap()
+    });
+
+    let lines: Vec<&str> = content.lines().collect();
+    let n = lines.len();
+
+    let mut fns: Vec<String> = Vec::new();
+    let mut structs: Vec<String> = Vec::new();
+    let mut enums: Vec<String> = Vec::new();
+    let mut consts: Vec<String> = Vec::new();
+    let mut mods: Vec<String> = Vec::new();
+    let mut colors: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < n {
+        let line = lines[i];
+
+        // Color constants.
+        if color_rgb.is_match(line) {
+            let trimmed = line.trim().to_string();
+            if !trimmed.is_empty() {
+                colors.push(trimmed);
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some(cap) = pub_item.captures(line) {
+            let kind = cap.get(1).map_or("", |m| m.as_str());
+            let name = cap.get(2).map_or("", |m| m.as_str());
+
+            match kind {
+                "fn" => {
+                    // Collect the full signature up to the opening `{`.
+                    let mut sig = line.trim().to_string();
+                    // If line already contains `{`, truncate there.
+                    if let Some(brace) = sig.find('{') {
+                        sig = sig[..brace].trim_end().to_string();
+                    } else {
+                        // Multi-line sig — keep collecting until we hit `{` or `;`.
+                        let mut j = i + 1;
+                        while j < n && j < i + 8 {
+                            let cont = lines[j].trim();
+                            if cont.starts_with("//") {
+                                j += 1;
+                                continue;
+                            }
+                            let combined = format!("{sig} {cont}");
+                            if cont.contains('{') {
+                                let brace = combined.find('{').unwrap_or(combined.len());
+                                sig = combined[..brace].trim_end().to_string();
+                                break;
+                            }
+                            if cont.ends_with(';') {
+                                sig = combined;
+                                break;
+                            }
+                            sig = combined;
+                            j += 1;
+                        }
+                    }
+                    fns.push(sig);
+                }
+                "struct" => {
+                    // Try to collect public field names.
+                    let mut fields: Vec<String> = Vec::new();
+                    // Check if it's a tuple/unit struct on one line.
+                    if line.contains(';') || line.contains('(') {
+                        structs.push(format!("struct {name} {{ ... }}"));
+                    } else {
+                        let mut j = i + 1;
+                        while j < n && j < i + 40 {
+                            let cont = lines[j];
+                            if cont.trim() == "}" {
+                                break;
+                            }
+                            if let Some(fcap) = field_line.captures(cont) {
+                                fields.push(
+                                    fcap.get(1).map_or("", |m| m.as_str()).to_string(),
+                                );
+                            }
+                            j += 1;
+                        }
+                        if fields.is_empty() {
+                            structs.push(format!("struct {name} {{ ... }}"));
+                        } else if fields.len() > 8 {
+                            let preview: Vec<_> = fields[..6].to_vec();
+                            structs.push(format!(
+                                "struct {name} {{ {}, ... }}",
+                                preview.join(", ")
+                            ));
+                        } else {
+                            structs.push(format!("struct {name} {{ {} }}", fields.join(", ")));
+                        }
+                    }
+                }
+                "enum" => {
+                    // Collect variant names.
+                    let mut variants: Vec<String> = Vec::new();
+                    let mut j = i + 1;
+                    while j < n && j < i + 60 {
+                        let cont = lines[j];
+                        if cont.trim() == "}" {
+                            break;
+                        }
+                        if let Some(vcap) = variant_line.captures(cont) {
+                            variants.push(
+                                vcap.get(1).map_or("", |m| m.as_str()).to_string(),
+                            );
+                        }
+                        j += 1;
+                    }
+                    if variants.is_empty() {
+                        enums.push(format!("enum {name} {{ ... }}"));
+                    } else if variants.len() > 10 {
+                        let preview: Vec<_> = variants[..8].to_vec();
+                        enums.push(format!(
+                            "enum {name} {{ {}, ... ({} total) }}",
+                            preview.join(", "),
+                            variants.len()
+                        ));
+                    } else {
+                        enums.push(format!("enum {name} {{ {} }}", variants.join(", ")));
+                    }
+                }
+                "const" | "static" => {
+                    consts.push(line.trim().trim_end_matches('{').trim().to_string());
+                }
+                "type" => {
+                    consts.push(line.trim().trim_end_matches('{').trim().to_string());
+                }
+                "mod" => {
+                    mods.push(format!("mod {name}"));
+                }
+                "trait" => {
+                    structs.push(format!("trait {name} {{ ... }}"));
+                }
+                _ => {}
+            }
+        }
+
+        i += 1;
+    }
+
+    let mut out = String::new();
+
+    if !enums.is_empty() {
+        out.push_str("## pub enums\n");
+        for e in &enums {
+            out.push_str(e);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if !structs.is_empty() {
+        out.push_str("## pub structs / traits\n");
+        for s in &structs {
+            out.push_str(s);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if !fns.is_empty() {
+        out.push_str("## pub fns\n");
+        for f in &fns {
+            out.push_str(f);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if !consts.is_empty() {
+        out.push_str("## pub consts / types\n");
+        for c in &consts {
+            out.push_str(c);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if !mods.is_empty() {
+        out.push_str("## pub mods\n");
+        for m in &mods {
+            out.push_str(m);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if !colors.is_empty() {
+        out.push_str("## color constants\n");
+        for c in colors.iter().take(20) {
+            out.push_str(c);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    if out.is_empty() {
+        out.push_str("(no pub items found)\n");
+    }
+
+    out
+}
+
+/// Extract `[dependencies]` keys from a Cargo.toml content string.
+fn extract_cargo_deps(toml_content: &str) -> Vec<String> {
+    let mut in_deps = false;
+    let mut deps: Vec<String> = Vec::new();
+
+    for line in toml_content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[dependencies]" {
+            in_deps = true;
+            continue;
+        }
+        if trimmed.starts_with('[') {
+            in_deps = false;
+        }
+        if in_deps {
+            if let Some(raw_key) = trimmed.split('=').next() {
+                // Strip workspace-style suffix: "tokio.workspace" → "tokio"
+                let key = raw_key.trim().trim_matches('"');
+                let key = key.split('.').next().unwrap_or(key).trim();
+                if !key.is_empty() && !key.starts_with('#') {
+                    deps.push(key.to_string());
+                }
+            }
+        }
+    }
+
+    deps
+}
 
 /// Parse YAML frontmatter and return a specific field value.
 fn extract_frontmatter_field(content: &str, key: &str) -> Option<String> {
@@ -660,7 +1092,7 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        assert_eq!(tool_definitions().len(), 10);
+        assert_eq!(tool_definitions().len(), 12);
     }
 
     #[test]
@@ -733,5 +1165,86 @@ mod tests {
         let args = serde_json::json!({"project_dir": "/tmp/nonexistent_dir_xyz"});
         let result = workflow_status(&args);
         assert_eq!(result, "No active workflow.");
+    }
+
+    #[test]
+    fn test_module_api_missing_crate_name() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({"module": "lib"});
+        let result = module_api(&server, &args);
+        assert!(result.starts_with("Error:"), "result: {result}");
+    }
+
+    #[test]
+    fn test_module_api_missing_module() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({"crate_name": "orrch-core"});
+        let result = module_api(&server, &args);
+        assert!(result.starts_with("Error:"), "result: {result}");
+    }
+
+    #[test]
+    fn test_module_api_nonexistent_file() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({"crate_name": "orrch-core", "module": "nonexistent_xyz"});
+        let result = module_api(&server, &args);
+        assert!(result.starts_with("Error:"), "result: {result}");
+    }
+
+    #[test]
+    fn test_codebase_brief_nonexistent_project() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({"project": "nonexistent_project_xyz_123"});
+        let result = codebase_brief(&server, &args);
+        assert!(result.starts_with("Error:"), "result: {result}");
+    }
+
+    #[test]
+    fn test_extract_pub_api_basic() {
+        let src = r#"
+pub struct Foo {
+    pub name: String,
+    pub count: u32,
+}
+
+pub enum Bar {
+    Alpha,
+    Beta,
+    Gamma,
+}
+
+pub fn do_thing(x: u32) -> bool {
+    x > 0
+}
+
+pub const MAX: u32 = 100;
+
+pub mod inner;
+"#;
+        let api = extract_pub_api(src);
+        assert!(api.contains("struct Foo"), "missing struct Foo: {api}");
+        assert!(api.contains("name") || api.contains("count"), "missing fields: {api}");
+        assert!(api.contains("enum Bar"), "missing enum Bar: {api}");
+        assert!(api.contains("Alpha"), "missing variant Alpha: {api}");
+        assert!(api.contains("do_thing"), "missing fn: {api}");
+        assert!(api.contains("MAX"), "missing const: {api}");
+        assert!(api.contains("mod inner"), "missing mod: {api}");
+    }
+
+    #[test]
+    fn test_extract_pub_api_empty() {
+        let src = "fn private_fn() {}\nstruct PrivateStruct {}\n";
+        let api = extract_pub_api(src);
+        assert!(api.contains("(no pub items found)"), "result: {api}");
+    }
+
+    #[test]
+    fn test_extract_cargo_deps_basic() {
+        let toml = "[dependencies]\ntokio.workspace = true\nserde_json = \"1\"\n\n[dev-dependencies]\ntempfile = \"3\"\n";
+        let deps = extract_cargo_deps(toml);
+        assert!(deps.contains(&"tokio".to_string()), "deps: {deps:?}");
+        assert!(deps.contains(&"serde_json".to_string()), "deps: {deps:?}");
+        // dev-dependencies should not be included.
+        assert!(!deps.contains(&"tempfile".to_string()), "deps: {deps:?}");
     }
 }

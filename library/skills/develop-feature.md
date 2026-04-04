@@ -18,6 +18,43 @@ You are the Hypervisor — the orchestrator of the develop-feature workflow. You
    ```
 4. Read the project's `.scope` file if it exists. This calibrates rigor expectations.
 5. Locate the orrchestrator agents directory at `~/projects/orrchestrator/agents/`. You will read agent profiles from here before each spawn.
+6. **Generate the codebase brief.** Run: `~/projects/orrchestrator/library/tools/codebase_brief.sh <project_dir>` OR call the `codebase_brief` MCP tool. Store the output as `CODEBASE_BRIEF`. This is a ~200-400 line compact summary of the project's module map, pub API surface, color scheme, and conventions. It replaces the need for agents to read full source files for orientation.
+7. **Initialize the workspace state document.** Create an empty `WORKSPACE_STATE` string. This accumulates changes across workflow steps — as each agent completes work, append a summary of what they changed so downstream agents see the current state without re-reading files.
+
+## Token Efficiency Rules (MANDATORY)
+
+These rules reduce redundant context across agent spawns. Violating them wastes tokens.
+
+### Rule 1: Codebase brief replaces exploratory reads
+Every agent spawn MUST include `CODEBASE_BRIEF` in its briefing instead of the instruction "Read the project's existing codebase structure." Agents should only read specific files they need to edit, not read files for orientation. The brief provides orientation.
+
+### Rule 2: Compress inter-step handoffs
+When passing an agent's output to the next step, the Hypervisor MUST compress it:
+- **Strip**: reasoning, analysis, "I read file X and found...", rationale paragraphs, codebase observations
+- **Keep**: task list with file paths, acceptance criteria, agent assignments, specific decisions, code changes made
+- A 3000-word PM plan should compress to ~400 words of actionable task list
+
+### Rule 3: Workspace state accumulates
+After each implementation agent completes, append a summary to `WORKSPACE_STATE`:
+```
+[Developer] Modified: app.rs (+WorkforceTab::Harnesses), windows.rs (+kill_all_managed_tmux_sessions)
+[Software Engineer] Created: markdown.rs (pub fn markdown_to_lines), audit.rs (AuditEntry struct)
+```
+Later agents receive `WORKSPACE_STATE` so they see prior changes without re-reading files.
+
+### Rule 4: Agent profiles are NOT pasted in full
+Do NOT paste the full body of agent `.md` profiles into spawn prompts. Instead, include a 2-3 line behavioral summary:
+- PM: "You are the Project Manager. Plan, delegate, review — never write code. Cross-project awareness."
+- Developer: "You are the Developer. Implement code per instructions. Read files before editing. Follow existing conventions."
+- Software Engineer: "You are the Software Engineer. Design architecture, produce technical specs with file paths and function signatures."
+This saves ~500-800 tokens per agent spawn × 8+ spawns = ~4000-6000 tokens.
+
+### Rule 5: Verification agents get targeted scope
+Instead of telling verification agents "examine the codebase for newly implemented features" (which causes them to read every file), provide a file list from `WORKSPACE_STATE`:
+```
+Files changed in this session: app.rs, ui.rs, windows.rs, markdown.rs, audit.rs, main.rs
+Focus your review on these files only.
+```
 
 ## Parse $ARGUMENTS
 
@@ -39,24 +76,33 @@ Read the agent profile from `~/projects/orrchestrator/agents/project_manager.md`
 
 Spawn an Agent with the following briefing:
 
-> **Role**: Project Manager
+> **Role**: Project Manager — plan, delegate, review. Never write code. Cross-project awareness.
 >
-> {paste the full body of project_manager.md here, starting from "# Project Manager Agent"}
->
-> **Your task**: You have received new development instructions. Synthesize them into a structured development plan.
+> **Your task**: Synthesize new development instructions into a structured development plan.
 >
 > **Instructions to synthesize**:
 > {INSTRUCTIONS}
 >
-> **Context**: Read the project's existing codebase structure to understand conventions, architecture, and current state. Check if a PLAN.md exists and incorporate existing plans. Check other projects in ~/projects/ for reuse opportunities.
+> **Codebase context** (do NOT re-read these files — use this summary for orientation):
+> {CODEBASE_BRIEF}
 >
-> **Output**: A structured development plan with:
-> 1. Each instruction broken into discrete, delegatable tasks
-> 2. For each task: which agent should execute it, what tools/skills to use, acceptance criteria, execution order
-> 3. Dependencies between tasks identified
-> 4. Cross-project reuse opportunities noted
+> **Additional context**: Read the project's PLAN.md if it exists. Only read specific source files if a task requires understanding a particular function's implementation — the codebase brief above covers the API surface.
+>
+> **Output format** — keep this COMPACT (the Hypervisor will compress it further):
+> For each task, one block:
+> ```
+> TASK <id>: <one-line description>
+> Agent: <role>
+> Files: <comma-separated paths>
+> Work: <2-3 sentences max>
+> Acceptance: <one line>
+> Depends: <task ids or "none">
+> ```
+> Also list: execution phases (which tasks can run in parallel) and cross-project reuse notes if any.
 
 Store the Agent's output as `DEV_PLAN`.
+
+**Compression checkpoint**: Before passing `DEV_PLAN` to Step 2, verify it follows the compact format above. If the PM produced verbose analysis, extract only the task blocks and discard reasoning.
 
 ---
 
@@ -68,112 +114,89 @@ Read the agent profile from `~/projects/orrchestrator/agents/resource_optimizer.
 
 Spawn an Agent:
 
-> **Role**: Resource Optimizer
+> **Role**: Resource Optimizer — assess task complexity, recommend model tier and harness per task.
 >
-> {paste the full body of resource_optimizer.md}
->
-> **Your task**: Read the development plan below and annotate each task with optimization recommendations.
+> **Your task**: Annotate each task with optimization recommendations.
 >
 > **Development plan**:
 > {DEV_PLAN}
 >
-> **Available resources**: Check `~/projects/orrchestrator/library/models/` for available model definitions and `~/projects/orrchestrator/library/harnesses/` for available harness definitions. Read these files to understand capabilities and costs.
+> **Available resources**: Check `~/projects/orrchestrator/library/models/` for available model definitions and `~/projects/orrchestrator/library/harnesses/` for available harness definitions.
 >
-> **Output**: The same plan with optimization annotations appended to each task (model tier, suggested model, harness, rationale, estimated savings).
+> **Output**: For each task, append ONE line: `Optimization: <tier> | <model> | <harness> | <one-line rationale>`
 
 Store the Agent's output as `OPTIMIZED_PLAN`.
 
 ---
 
-## Step 3: PM delegates
+## Step 3: PM delegates (Hypervisor-synthesized)
 
 Update `.orrch/workflow.json` — step 3, Project Manager running.
 
-Spawn an Agent with the PM profile:
+**Optimization**: If the PM's plan in Step 1 is already delegation-quality (specific files, acceptance criteria, agent assignments per task), the Hypervisor MAY skip spawning a separate PM agent for delegation and instead synthesize the briefs directly from `OPTIMIZED_PLAN`. This saves one full agent round-trip (~30-50K tokens).
 
-> **Role**: Project Manager
->
-> {paste the full body of project_manager.md}
->
-> **Your task**: Read the optimized plan and produce explicit delegation briefs for each agent that needs to execute work in step 4.
->
-> **Optimized plan**:
-> {OPTIMIZED_PLAN}
->
-> **Output**: For each agent that will execute in step 4 (Developer, Researcher, Software Engineer, UI Designer, Feature Tester), produce a delegation brief containing:
-> 1. Exactly what they must do (specific files, patterns, modules)
-> 2. Acceptance criteria
-> 3. Relevant context (related files, previous decisions, constraints)
-> 4. Tool/skill recommendations from the optimization annotations
->
-> If a particular agent has no work for this feature, say so explicitly. Not every agent is needed for every feature.
+**If delegation agent IS needed** (plan is high-level, lacks specific file/function detail), spawn an Agent with the PM profile to produce delegation briefs.
 
-Store the Agent's output as `DELEGATION_BRIEFS`. Parse it to identify which agents have work assigned.
+For each implementing agent, prepare a brief containing:
+1. Their assigned tasks (extracted from `OPTIMIZED_PLAN`)
+2. `CODEBASE_BRIEF` — so they don't need to read files for orientation
+3. `WORKSPACE_STATE` — currently empty, will accumulate after Step 4
+4. Specific files they need to READ (not just know about — actual files to open for editing)
+5. Acceptance criteria per task
+
+Store as `DELEGATION_BRIEFS`.
 
 ---
 
-## Step 4: Implementation (PARALLEL)
+## Step 4: Implementation (PARALLEL, MULTI-WAVE)
 
 Update `.orrch/workflow.json` — step 4, with an entry for each active agent.
 
-For each agent that has work in `DELEGATION_BRIEFS`, read their profile from `~/projects/orrchestrator/agents/` and spawn them **in parallel** using simultaneous Agent tool calls.
+For each agent that has work in `DELEGATION_BRIEFS`, spawn them using the **compact briefing pattern**:
 
-**Developer** (if assigned work):
+### Compact Agent Briefing Pattern
 
-> **Role**: Developer
->
-> {paste the full body of developer.md}
->
-> **Your assignment from the Project Manager**:
-> {Developer's delegation brief from DELEGATION_BRIEFS}
->
-> **Instructions**: Implement the assigned tasks. Read existing code first to understand conventions. Write tests for your implementation. Report what files you created/modified, tests written, and any concerns.
+Every implementation agent receives:
 
-**Researcher** (if assigned work):
+```
+**Role**: <role name> — <2-3 line behavioral summary, NOT full profile>
 
-> **Role**: Researcher
->
-> {paste the full body of researcher.md}
->
-> **Your assignment from the Project Manager**:
-> {Researcher's delegation brief from DELEGATION_BRIEFS}
->
-> **Instructions**: Conduct the research described. Use web search and documentation as needed. Produce a structured report with summary, findings, sources, recommendations, and caveats.
+**Scope**: <project scope from .scope file>
 
-**Software Engineer** (if assigned work):
+**Codebase context** (do NOT re-read source files for orientation):
+{CODEBASE_BRIEF}
 
-> **Role**: Software Engineer
->
-> {paste the full body of software_engineer.md}
->
-> **Your assignment from the Project Manager**:
-> {Engineer's delegation brief from DELEGATION_BRIEFS}
->
-> **Instructions**: Design the architecture as specified. Produce a technical specification with file paths, function signatures, data structures, and integration points that the Developer can follow.
+**Prior changes this session** (already applied to the codebase):
+{WORKSPACE_STATE}
 
-**UI Designer** (if assigned work):
+**Your assignment**:
+{agent's tasks from DELEGATION_BRIEFS — tasks only, no PM reasoning}
 
-> **Role**: UI Designer
->
-> {paste the full body of ui_designer.md}
->
-> **Your assignment from the Project Manager**:
-> {UI Designer's delegation brief from DELEGATION_BRIEFS}
->
-> **Instructions**: Design the interface as specified. Review existing UI patterns in the project first. Produce a design specification with component hierarchy, layout, visual states, interaction behavior, and accessibility requirements.
+**IMPORTANT**: Only read files you need to EDIT. The codebase brief above covers the API surface.
+Report: files modified/created, what changed (one line per file).
+```
 
-**Feature Tester** (if assigned work):
+### Parallel Execution with Waves
 
-> **Role**: Feature Tester
->
-> {paste the full body of feature_tester.md}
->
-> **Your assignment from the Project Manager**:
-> {Feature Tester's delegation brief from DELEGATION_BRIEFS}
->
-> **Instructions**: Design test cases for the features being implemented. Define the test environment setup, test cases (happy path, boundary conditions, error states, integration points), and pass/fail criteria. These test designs will be executed after implementation.
+If tasks have dependencies (e.g., Developer creates a struct that UI Designer renders), split into waves:
+- **Wave 1**: Agents with no dependencies (Developer, Software Engineer, Researcher)
+- **Wave 2**: Agents that depend on Wave 1 outputs (UI Designer needing new modules, Feature Tester needing implemented code)
 
-Collect all Agent outputs. Store as `IMPLEMENTATION_RESULTS` — a combined record of all agent outputs keyed by role.
+Between waves, the Hypervisor:
+1. Collects Wave 1 results
+2. **Compresses** each agent's output to: files changed + what was added (strip reasoning)
+3. **Appends** to `WORKSPACE_STATE`
+4. Spawns Wave 2 agents with the updated `WORKSPACE_STATE`
+
+### Agent Role Summaries (use these instead of pasting full profiles)
+
+- **Developer**: Implement code per instructions. Read files before editing. Follow existing conventions. Report files modified.
+- **Software Engineer**: Design architecture. Produce file paths, function signatures, data structures. Implement if design is straightforward.
+- **UI Designer**: Design and implement TUI interfaces. Follow existing color scheme and rendering patterns.
+- **Researcher**: Investigate options. Produce structured report with findings, sources, recommendations.
+- **Feature Tester**: Design test cases. Define environments, happy path, boundary conditions, pass/fail criteria.
+
+Collect all Agent outputs. **Compress** each to a change summary. Store as `IMPLEMENTATION_RESULTS`. Update `WORKSPACE_STATE` with all changes.
 
 ---
 
@@ -181,41 +204,53 @@ Collect all Agent outputs. Store as `IMPLEMENTATION_RESULTS` — a combined reco
 
 Update `.orrch/workflow.json` — step 5, Penetration Tester and Beta Tester running.
 
-**CRITICAL: Context isolation.** The verification agents must NOT receive the implementation agents' reasoning, design documents, or internal discussion. They receive ONLY:
+**CRITICAL: Context isolation.** The verification agents must NOT receive the implementation agents' reasoning, design documents, or `IMPLEMENTATION_RESULTS`. They receive ONLY:
 - The original instructions (what was supposed to be built)
-- Access to the actual code/deliverables on disk (they can read files)
+- A FILE LIST of what changed (from `WORKSPACE_STATE` — file names only, not what was changed)
+- Access to the actual code on disk
 
-Read the agent profiles and spawn **in parallel**:
+**Targeted scope**: Instead of telling testers to "examine the codebase," give them the specific file list:
+
+```
+Files changed in this session (review ONLY these):
+{extract file paths from WORKSPACE_STATE}
+```
+
+This prevents testers from reading the entire codebase (~60-80K tokens of reads) when only 6-8 files changed.
+
+Spawn **in parallel**:
 
 **Penetration Tester**:
 
-> **Role**: Penetration Tester
+> **Role**: Penetration Tester — find security vulnerabilities through threat modeling and OWASP analysis.
 >
-> {paste the full body of penetration_tester.md}
+> **Context**: New features have been implemented. Your job is to find security vulnerabilities.
 >
-> **Context**: New features have been implemented in this project. Your job is to find security vulnerabilities.
+> **What was built**: {INSTRUCTIONS}
 >
-> **What was built** (from original instructions only):
-> {INSTRUCTIONS}
+> **Files to review** (focus ONLY on these — do not read other files):
+> {file paths from WORKSPACE_STATE}
 >
-> **Instructions**: Examine the codebase for the newly implemented features. Perform a threat model, OWASP Top 10 sweep, and contextual security testing. Report all findings with severity, description, location, reproduction steps, impact, and remediation recommendations.
+> Report findings with: severity, description, file:line, reproduction, impact, remediation.
 >
-> **IMPORTANT**: You are working independently. Do not ask for or reference any implementation notes, design documents, or other testers' findings. Read the code directly.
+> **IMPORTANT**: Work independently. Do not reference any implementation notes or other testers' findings.
 
 **Beta Tester**:
 
-> **Role**: Beta Tester
+> **Role**: Beta Tester — break features through adversarial inputs, boundary conditions, and state manipulation.
 >
-> {paste the full body of beta_tester.md}
+> **Context**: New features have been implemented. Your job is to break them.
 >
-> **Context**: New features have been implemented in this project. Your job is to break them.
+> **What was built**: {INSTRUCTIONS}
 >
-> **What was built** (from original instructions only):
-> {INSTRUCTIONS}
+> **Files to review** (focus ONLY on these — do not read other files):
+> {file paths from WORKSPACE_STATE}
 >
-> **Instructions**: Examine the codebase for the newly implemented features. Try to break them through invalid inputs, boundary conditions, rapid operations, state manipulation, resource exhaustion, and environment variation. Report every failure with reproduction steps, expected vs actual behavior, severity, and frequency.
+> Also run: `cargo build` and `cargo test --workspace` to verify compilation.
 >
-> **IMPORTANT**: You are working independently. Do not ask for or reference any implementation notes, design documents, or other testers' findings. Read the code directly.
+> Report failures with: reproduction, expected vs actual, severity, frequency.
+>
+> **IMPORTANT**: Work independently. Do not reference any implementation notes or other testers' findings.
 
 Collect all Agent outputs. Store as `VERIFICATION_RESULTS`.
 
@@ -225,25 +260,24 @@ Collect all Agent outputs. Store as `VERIFICATION_RESULTS`.
 
 Update `.orrch/workflow.json` — step 6, Project Manager running.
 
-Spawn an Agent with the PM profile:
+**Compression checkpoint**: Before spawning the PM, compress verification results:
+- For each finding, keep ONLY: severity, one-line description, file:line location, fix recommendation
+- Strip: reproduction steps, verbose analysis, "I read file X and noticed..."
+- Target: ~20-30 lines per tester (vs ~100+ raw)
 
-> **Role**: Project Manager
+Spawn an Agent:
+
+> **Role**: Project Manager — evaluate verification results, decide PASS/REWORK/DIMINISHING_RETURNS.
 >
-> {paste the full body of project_manager.md}
+> **Original instructions**: {INSTRUCTIONS}
 >
-> **Your task**: Evaluate verification results and determine if the implementation passes or needs rework.
+> **Implementation summary**: {compressed IMPLEMENTATION_RESULTS — files changed + what was added only}
 >
-> **Original instructions**:
-> {INSTRUCTIONS}
+> **Verification findings (Penetration Tester)**:
+> {compressed pen tester findings — severity | description | file:line | fix}
 >
-> **Implementation results**:
-> {IMPLEMENTATION_RESULTS}
->
-> **Verification results (Penetration Tester)**:
-> {Pen Tester's output from VERIFICATION_RESULTS}
->
-> **Verification results (Beta Tester)**:
-> {Beta Tester's output from VERIFICATION_RESULTS}
+> **Verification findings (Beta Tester)**:
+> {compressed beta tester findings — severity | description | file:line | fix}
 >
 > **Output**: One of:
 > 1. **PASS** — all testers report acceptable results. List any minor issues to note in the dev log but that do not block shipping.
@@ -265,38 +299,21 @@ Parse the PM's output:
 
 Update `.orrch/workflow.json` — step 7, Project Manager and Repository Manager running.
 
-Spawn **in parallel**:
+**Optimization**: Steps 7-10 (review, log, version, commit) can often be collapsed. The Hypervisor MAY perform Steps 8-10 directly if the project scope is `private` — the PM deliverable review and Repo Manager commit plan are most valuable for `public`/`commercial` scope where quality gates matter. For `private` scope, the Hypervisor can write the dev log, determine the version, and create the commit without spawning 4 additional agents.
 
-**Project Manager — deliverable review**:
+**If full review is warranted**, spawn in parallel:
 
-> **Role**: Project Manager
->
-> {paste the full body of project_manager.md}
->
-> **Your task**: Compare the completed deliverable against the original instructions. Verify that all requirements are met, acceptance criteria satisfied, and the feature is complete.
->
-> **Original instructions**:
-> {INSTRUCTIONS}
->
-> **Implementation results**:
-> {IMPLEMENTATION_RESULTS}
->
-> **Loop result**:
-> {LOOP_RESULT}
->
-> **Output**: A deliverable assessment — requirements met (yes/no per requirement), quality assessment, and recommendation (accept/reject with reasoning).
+**PM deliverable review**:
+> **Role**: Project Manager — compare deliverable against original instructions.
+> **Instructions**: {INSTRUCTIONS}
+> **Changes made**: {WORKSPACE_STATE}
+> **Verification result**: {LOOP_RESULT — one line: PASS/REWORK/DIMINISHING_RETURNS + summary}
+> **Output**: Per instruction: met/not met (one line each). Overall: accept/reject.
 
-**Repository Manager — commit review**:
-
-> **Role**: Repository Manager
->
-> {paste the full body of repository_manager.md}
->
-> **Your task**: Review the changes made during this development session. Recommend how to package them into git commits.
->
-> **Instructions**: Run `git diff` and `git status` to see all changes. Group related changes into logical commits. For each proposed commit, specify: files to include, conventional commit message, and reasoning for the grouping. Also recommend branch strategy (feature branch vs direct to main).
->
-> **Output**: A commit plan — ordered list of commits with files, messages, and branch recommendation.
+**Repo Manager commit plan**:
+> **Role**: Repository Manager — package changes into logical git commits.
+> Run `git diff --stat` and `git status`. Group by feature area. Conventional commit messages.
+> **Output**: Ordered commit list: files, message, branch recommendation. Keep compact.
 
 Store outputs as `DELIVERABLE_REVIEW` and `COMMIT_PLAN`.
 
@@ -304,95 +321,54 @@ Store outputs as `DELIVERABLE_REVIEW` and `COMMIT_PLAN`.
 
 ## Step 8: Dev log
 
-Update `.orrch/workflow.json` — step 8, Project Manager running.
+Update `.orrch/workflow.json` — step 8.
 
-Spawn an Agent with the PM profile:
+**Optimization**: The Hypervisor writes the dev log directly (no agent spawn needed). All information is already available in compressed form:
+- `INSTRUCTIONS` — what was requested
+- `WORKSPACE_STATE` — what files changed
+- `LOOP_RESULT` — pass/fail + known issues
+- Rework cycle count — tracked by the Hypervisor
 
-> **Role**: Project Manager
->
-> {paste the full body of project_manager.md}
->
-> **Your task**: Write a development session log entry.
->
-> **Session summary**:
-> - Instructions: {INSTRUCTIONS}
-> - Implementation results: {IMPLEMENTATION_RESULTS (summary only — file changes, test results)}
-> - Verification results: {VERIFICATION_RESULTS (summary only — pass/fail counts, critical findings)}
-> - Loop iterations: {number of rework cycles}
-> - Deliverable review: {DELIVERABLE_REVIEW}
->
-> **Output**: A log entry in this format:
-> ```
-> ## Dev Session: <YYYY-MM-DD HH:MM>
-> ### Completed
-> - <list of completed features/fixes>
-> ### Failed / Deferred
-> - <list of items that did not pass, if any>
-> ### Known Issues
-> - <issues documented during DIMINISHING_RETURNS, if any>
-> ### Files Changed
-> - <list of files created/modified/deleted>
-> ### Next
-> - <what should happen next based on remaining instructions>
-> ```
->
-> Append this entry to the project's `DEVLOG.md` (create if it does not exist).
+Append to `DEVLOG.md`:
+```
+## Dev Session: <YYYY-MM-DD HH:MM>
+### Completed
+- <from INSTRUCTIONS + LOOP_RESULT>
+### Failed / Deferred
+- <from LOOP_RESULT if DIMINISHING_RETURNS>
+### Known Issues
+- <deferred findings from verification>
+### Files Changed
+- <from WORKSPACE_STATE>
+### Next
+- <remaining inbox items or follow-up from known issues>
+```
 
 ---
 
 ## Step 9: Version determination
 
-Update `.orrch/workflow.json` — step 9, Repository Manager running.
+Update `.orrch/workflow.json` — step 9.
 
-Spawn an Agent with the Repository Manager profile:
+**Optimization**: The Hypervisor determines the version directly:
+1. Run `git tag -l 'v*' --sort=-v:refname | head -1` to find current version
+2. Apply SemVer rules: feat = minor bump, fix = patch, feat! = major, pre-1.0 features = patch
+3. Store as `VERSION_TAG`
 
-> **Role**: Repository Manager
->
-> {paste the full body of repository_manager.md}
->
-> **Your task**: Determine the appropriate semantic version tag for this set of changes.
->
-> **Commit plan**:
-> {COMMIT_PLAN}
->
-> **Current version**: Run `git tag -l 'v*' --sort=-v:refname | head -1` to find the latest version tag. If no tags exist, this is v0.1.0.
->
-> **Rules**:
-> - Breaking changes (feat! or BREAKING CHANGE) = major bump
-> - New features (feat) = minor bump
-> - Fixes only (fix) = patch bump
-> - If pre-1.0.0, treat feature additions as patch bumps unless explicitly breaking
->
-> **Output**: The recommended version tag (e.g., v0.4.0) with reasoning.
-
-Store the output as `VERSION_TAG`.
+No agent spawn needed — this is deterministic logic.
 
 ---
 
 ## Step 10: Commit
 
-Update `.orrch/workflow.json` — step 10, Repository Manager running.
+Update `.orrch/workflow.json` — step 10.
 
-Spawn an Agent with the Repository Manager profile:
-
-> **Role**: Repository Manager
->
-> {paste the full body of repository_manager.md}
->
-> **Your task**: Execute the commit plan.
->
-> **Commit plan**:
-> {COMMIT_PLAN}
->
-> **Version tag**:
-> {VERSION_TAG}
->
-> **Instructions**:
-> 1. Check if a feature branch is needed (based on commit plan's branch recommendation). If so, create it.
-> 2. Stage and commit each logical change group per the commit plan, using conventional commit messages.
-> 3. Do NOT force-push, commit secrets, or skip conventional commit format.
-> 4. Do NOT push to remote or create tags unless the user explicitly requested a release. Just commit locally.
-> 5. Report what was committed: commit hashes, messages, files included.
+**Optimization**: The Hypervisor executes the commit directly (no agent spawn):
+1. Check if a feature branch is needed (scope `public`/`commercial` on main = yes; `private` = optional)
+2. Stage files from `WORKSPACE_STATE`
+3. Create commit with conventional commit message derived from `INSTRUCTIONS`
+4. Do NOT push or tag unless the user explicitly requested a release
+5. Report: commit hash, message, files included
 
 ---
 
