@@ -10,17 +10,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="${1:-.}"
+# Resolve to absolute path
+PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
 GOAL="${2:-continue development}"
 ORRCH_DIR="${PROJECT_DIR}/.orrch"
 TOOLS_DIR="${SCRIPT_DIR}"
 AGENTS_DIR="${SCRIPT_DIR}/../../agents"
+LOG_FILE="${ORRCH_DIR}/workflow.log"
 
 # Claude CLI flags for agent subprocess calls
 CLAUDE_BASE=(claude -p --dangerously-skip-permissions --model sonnet)
 
 # ─── Helpers ─────────────────────────────────────────────────────────
 
-log() { echo "[workflow] $(date +%H:%M:%S) $*"; }
+log() {
+    local msg="[workflow] $(date +%H:%M:%S) $*"
+    echo "${msg}"
+    echo "${msg}" >> "${LOG_FILE}" 2>/dev/null
+}
 update_status() {
     echo "{\"workflow\":\"develop-feature\",\"step\":$1,\"status\":\"$2\"}" > "${ORRCH_DIR}/workflow.json"
 }
@@ -57,11 +64,16 @@ run_agent_bg() {
 
 # ─── INIT ────────────────────────────────────────────────────────────
 
+mkdir -p "${ORRCH_DIR}"
+: > "${LOG_FILE}"  # truncate log
+
+# Trap errors so we see what went wrong
+trap 'log "ERROR: script failed at line $LINENO (exit $?)"; update_status -1 "error"; echo "--- Workflow failed. See ${LOG_FILE} ---"; read -r -p "Press Enter to close..."' ERR
+
 log "=== develop-feature workflow ==="
 log "project: ${PROJECT_DIR}"
 log "goal: ${GOAL}"
 
-mkdir -p "${ORRCH_DIR}"
 update_status 0 "init"
 
 SCOPE=$(cat "${PROJECT_DIR}/.scope" 2>/dev/null || echo "private")
@@ -438,3 +450,7 @@ log "verdict: ${VERDICT}"
 log "rework cycles: ${REWORK_CYCLE}"
 log "commit: ${COMMIT_HASH}"
 log "see ${ORRCH_DIR}/ for all step outputs"
+
+echo ""
+echo "--- Workflow finished. Full log: ${LOG_FILE} ---"
+read -r -p "Press Enter to close..."
