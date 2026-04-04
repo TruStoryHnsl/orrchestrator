@@ -193,6 +193,48 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        serde_json::json!({
+            "name": "workflow_init",
+            "description": "Initialize a develop-feature workflow: generate codebase brief, read PLAN.md for unchecked items, check instruction inbox for stragglers. Returns everything needed to spawn the PM agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_dir": {
+                        "type": "string",
+                        "description": "Absolute path to the project directory"
+                    }
+                },
+                "required": ["project_dir"]
+            }
+        }),
+        serde_json::json!({
+            "name": "workflow_cluster",
+            "description": "Cluster PM's task plan by file overlap for parallel execution. Takes the PM's raw plan output, runs cluster_tasks.sh, returns cluster assignments with wave ordering.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "type": "string",
+                        "description": "The PM's task plan output (must contain TASK blocks)"
+                    }
+                },
+                "required": ["plan"]
+            }
+        }),
+        serde_json::json!({
+            "name": "workflow_compress",
+            "description": "Compress agent output to a structured summary: files changed, key changes, build/test status. Strips reasoning and verbose analysis.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "output": {
+                        "type": "string",
+                        "description": "Raw agent output to compress"
+                    }
+                },
+                "required": ["output"]
+            }
+        }),
     ]
 }
 
@@ -212,6 +254,9 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "agent_invoke" => agent_invoke(server, args),
         "module_api" => module_api(server, args),
         "codebase_brief" => codebase_brief(server, args),
+        "workflow_init" => workflow_init(server, args),
+        "workflow_cluster" => workflow_cluster(server, args),
+        "workflow_compress" => workflow_compress(server, args),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -350,35 +395,31 @@ fn list_skills(server: &OrrchMcpServer) -> String {
     }
 }
 
-fn develop_feature(server: &OrrchMcpServer, args: &Value) -> String {
-    let goal = match args.get("goal").and_then(|v| v.as_str()) {
-        Some(g) => g,
-        None => return "Error: 'goal' parameter is required".into(),
-    };
-
+fn develop_feature(_server: &OrrchMcpServer, args: &Value) -> String {
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or("continue development");
     let project_dir = args
         .get("project_dir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
 
-    let project_path = std::path::Path::new(project_dir);
-
-    // Spawn the workflow as a tmux window — the Hypervisor is a bash script, not this session.
-    match orrch_core::windows::spawn_workflow(project_path, goal) {
-        Ok(window_name) => {
-            format!(
-                "Workflow dispatched to tmux window: {window_name}\n\
-                 Goal: {goal}\n\
-                 Project: {project_dir}\n\
-                 Monitor: tmux attach -t orrch-proc\n\
-                 Status: cat {project_dir}/.orrch/workflow.json\n\
-                 Logs: ls {project_dir}/.orrch/\n\n\
-                 The workflow runs as a shell dispatcher spawning claude -p subprocesses.\n\
-                 This session is free — the workflow does not need this context window."
-            )
-        }
-        Err(e) => format!("Error: failed to spawn workflow: {e}"),
-    }
+    format!(
+        "Develop-feature workflow for: {goal}\n\
+         Project: {project_dir}\n\n\
+         Execute these steps using tools and Agent spawns:\n\n\
+         1. Call MCP tool `workflow_init` with project_dir=\"{project_dir}\"\n\
+         2. Spawn Agent (PM) with the instructions + brief from step 1\n\
+         3. Call MCP tool `workflow_cluster` with the PM's plan output\n\
+         4. For each cluster, spawn Agent in parallel with cluster tasks + brief\n\
+         5. Call MCP tool `workflow_compress` on each agent's output\n\
+         6. Spawn 2 Agents (testers) in parallel with file list from compressed output\n\
+         7. Call MCP tool `workflow_compress` on tester outputs\n\
+         8. Spawn Agent (PM) to evaluate — PASS/REWORK/SHIP_WITH_ISSUES\n\
+         9. If REWORK: spawn Developer with fix list, re-verify (max 3 cycles)\n\
+         10. Update PLAN.md [x], write DEVLOG.md, git commit"
+    )
 }
 
 fn instruction_intake(server: &OrrchMcpServer, args: &Value) -> String {
@@ -668,6 +709,222 @@ fn codebase_brief(server: &OrrchMcpServer, args: &Value) -> String {
     ));
 
     output
+}
+
+fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
+    let project_dir = match args.get("project_dir").and_then(|v| v.as_str()) {
+        Some(d) => d,
+        None => return "Error: 'project_dir' parameter is required".into(),
+    };
+
+    let project_path = std::path::Path::new(project_dir);
+
+    // 1. Read .scope (default "private").
+    let scope = std::fs::read_to_string(project_path.join(".scope"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "private".to_string());
+
+    // 2. Run codebase_brief.sh.
+    let brief_script = server.library_dir.join("tools/codebase_brief.sh");
+    let brief_output = if brief_script.exists() {
+        match std::process::Command::new("bash")
+            .arg(&brief_script)
+            .arg(project_dir)
+            .output()
+        {
+            Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
+            Err(e) => format!("(codebase_brief.sh failed: {e})"),
+        }
+    } else {
+        "(codebase_brief.sh not found — skipping brief)".to_string()
+    };
+
+    // 3. Read PLAN.md and extract unchecked items.
+    let plan_path = project_path.join("PLAN.md");
+    let (plan_items, item_count) = match std::fs::read_to_string(&plan_path) {
+        Ok(content) => {
+            if content.contains("[ ]") {
+                // Checkbox format — extract unchecked lines.
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|l| l.contains("[ ]"))
+                    .collect();
+                let count = lines.len();
+                (lines.join("\n"), count)
+            } else if content.contains("### Task ") {
+                // Task-header format — exclude DONE/COMPLETE lines.
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|l| {
+                        l.contains("### Task ")
+                            && !l.to_uppercase().contains("DONE")
+                            && !l.to_uppercase().contains("COMPLETE")
+                    })
+                    .collect();
+                let count = lines.len();
+                (lines.join("\n"), count)
+            } else {
+                // Unstructured fallback — return first 100 lines.
+                let lines: Vec<&str> = content.lines().take(100).collect();
+                let joined = lines.join("\n");
+                (joined, 0usize)
+            }
+        }
+        Err(_) => ("(PLAN.md not found)".to_string(), 0),
+    };
+
+    // 4. Read instructions_inbox.md — find straggler headings not yet implemented.
+    let inbox_path = project_path.join("instructions_inbox.md");
+    let stragglers = match std::fs::read_to_string(&inbox_path) {
+        Ok(content) => {
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|l| {
+                    l.starts_with("### ")
+                        && !l.contains("~~")
+                        && !l.to_uppercase().contains("IMPLEMENTED")
+                })
+                .collect();
+            if lines.is_empty() {
+                "none".to_string()
+            } else {
+                lines.join("\n")
+            }
+        }
+        Err(_) => "none".to_string(),
+    };
+
+    // 5. Create .orrch/ dir and write workflow.json at step 0.
+    let orrch_dir = project_path.join(".orrch");
+    let _ = std::fs::create_dir_all(&orrch_dir);
+    let workflow_json = serde_json::json!({
+        "step": 0,
+        "status": "initialized",
+        "project_dir": project_dir,
+        "scope": scope,
+    });
+    let _ = std::fs::write(
+        orrch_dir.join("workflow.json"),
+        serde_json::to_string_pretty(&workflow_json).unwrap_or_default(),
+    );
+
+    // 6. Return structured response.
+    format!(
+        "## Workflow Initialized\n\
+         Scope: {scope}\n\
+         Items: {item_count} unchecked\n\
+         Inbox stragglers: {stragglers_summary}\n\n\
+         ## Codebase Brief\n\
+         {brief_output}\n\
+         ## Instructions (unchecked dev map items)\n\
+         {plan_items}\n\n\
+         ## Inbox Stragglers\n\
+         {stragglers}\n\n\
+         ## Next Step\n\
+         Spawn a PM agent with the instructions and codebase brief above.\n\
+         The PM must output tasks in this EXACT format (cluster_tasks.sh parses it):\n\n\
+         TASK <id>: <description>\n\
+         Agent: <role>\n\
+         Files: <comma-separated paths>\n\
+         Work: <2-3 sentences>\n\
+         Acceptance: <one line>\n\
+         Depends: <task ids or none>",
+        stragglers_summary = if stragglers == "none" { "none".to_string() } else {
+            format!("{} item(s)", stragglers.lines().count())
+        },
+    )
+}
+
+fn workflow_cluster(server: &OrrchMcpServer, args: &Value) -> String {
+    let plan = match args.get("plan").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return "Error: 'plan' parameter is required".into(),
+    };
+
+    let script = server.library_dir.join("tools/cluster_tasks.sh");
+    if !script.exists() {
+        return format!("Error: cluster_tasks.sh not found at {}", script.display());
+    }
+
+    let tmp = std::env::temp_dir().join(format!("orrch-cluster-{}.txt", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, plan) {
+        return format!("Error: cannot write temp file: {e}");
+    }
+
+    let tmp_file = match std::fs::File::open(&tmp) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return format!("Error: cannot open temp file: {e}");
+        }
+    };
+
+    let result = std::process::Command::new("bash")
+        .arg(&script)
+        .stdin(tmp_file)
+        .output();
+
+    let _ = std::fs::remove_file(&tmp);
+
+    match result {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            if stdout.is_empty() && !stderr.is_empty() {
+                format!("Error from cluster_tasks.sh:\n{stderr}")
+            } else {
+                stdout
+            }
+        }
+        Err(e) => format!("Error: failed to run cluster_tasks.sh: {e}"),
+    }
+}
+
+fn workflow_compress(server: &OrrchMcpServer, args: &Value) -> String {
+    let output = match args.get("output").and_then(|v| v.as_str()) {
+        Some(o) => o,
+        None => return "Error: 'output' parameter is required".into(),
+    };
+
+    let script = server.library_dir.join("tools/compress_output.sh");
+    if !script.exists() {
+        return format!("Error: compress_output.sh not found at {}", script.display());
+    }
+
+    let tmp = std::env::temp_dir().join(format!("orrch-compress-{}.txt", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, output) {
+        return format!("Error: cannot write temp file: {e}");
+    }
+
+    let tmp_file = match std::fs::File::open(&tmp) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return format!("Error: cannot open temp file: {e}");
+        }
+    };
+
+    let result = std::process::Command::new("bash")
+        .arg(&script)
+        .stdin(tmp_file)
+        .output();
+
+    let _ = std::fs::remove_file(&tmp);
+
+    match result {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            if stdout.is_empty() && !stderr.is_empty() {
+                format!("Error from compress_output.sh:\n{stderr}")
+            } else {
+                stdout
+            }
+        }
+        Err(e) => format!("Error: failed to run compress_output.sh: {e}"),
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1103,7 +1360,7 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        assert_eq!(tool_definitions().len(), 12);
+        assert_eq!(tool_definitions().len(), 15);
     }
 
     #[test]
