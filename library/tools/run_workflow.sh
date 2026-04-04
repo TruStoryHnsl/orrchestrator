@@ -38,29 +38,19 @@ run_agent() {
     local prompt="$3"
     local output_file="$4"
 
-    log "spawning agent: ${name} ..."
+    log "spawning agent: ${name}"
+    echo "────────────────── ${name} ──────────────────"
 
-    # Run claude in background, show a progress indicator
+    # Stream output to both terminal and file via tee
     "${CLAUDE_BASE[@]}" \
         --allowed-tools "${tools}" \
         --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
         "${prompt}" \
-        > "${output_file}" 2>/dev/null &
-    local pid=$!
+        2>/dev/null | tee "${output_file}"
 
-    # Spinner while agent runs
-    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    local i=0
-    local elapsed=0
-    while kill -0 "${pid}" 2>/dev/null; do
-        printf '\r  %s %s (%ds)' "${spin:i++%10:1}" "${name}" "${elapsed}"
-        sleep 1
-        elapsed=$((elapsed + 1))
-    done
-    wait "${pid}" || true
-    printf '\r  ✓ %s (%ds, %d lines)\n' "${name}" "${elapsed}" "$(wc -l < "${output_file}" 2>/dev/null || echo 0)"
-
-    log "agent done: ${name} (${elapsed}s, $(wc -l < "${output_file}" 2>/dev/null || echo 0) lines)"
+    echo ""
+    echo "────────────────── /${name} ($(wc -l < "${output_file}" 2>/dev/null || echo 0) lines) ──────────────────"
+    log "agent done: ${name} ($(wc -l < "${output_file}" 2>/dev/null || echo 0) lines)"
 }
 
 run_agent_bg() {
