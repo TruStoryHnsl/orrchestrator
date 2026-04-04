@@ -47,12 +47,14 @@ run_agent() {
     echo "${prompt}" > "${prompt_file}"
 
     # claude -p runs the full agentic loop (tool use, file edits, reasoning)
-    # and exits when done. Pipe prompt via stdin. Output visible via tee.
-    "${CLAUDE_BASE[@]}" \
-        --allowed-tools "${tools}" \
-        --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
-        < "${prompt_file}" \
-        2>&1 | tee "${output_file}"
+    # and exits when done. Pipe prompt via stdin.
+    # Use script(1) to capture output while preserving TTY behavior —
+    # tee breaks because pipes cause block buffering, hiding all output.
+    script -qfc "${CLAUDE_BASE[*]} \
+        --allowed-tools '${tools}' \
+        --append-system-prompt 'You are the ${name}. Work in ${PROJECT_DIR}.' \
+        < '${prompt_file}'" \
+        "${output_file}"
 
     rm -f "${prompt_file}"
     echo ""
