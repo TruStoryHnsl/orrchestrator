@@ -167,25 +167,63 @@ pub fn spawn_vim_in_tmux(file_path: &Path, window_name: &str) -> anyhow::Result<
     spawn_in_category(SessionCategory::Edit, window_name, &cmd)
 }
 
-/// Spawn the develop-feature workflow dispatcher in the Proc category.
-/// The workflow script is a bash dispatcher that spawns claude -p subprocesses
-/// for each agent step. The Hypervisor is the script, not an LLM.
-pub fn spawn_workflow(project_dir: &Path, goal: &str) -> anyhow::Result<String> {
-    let dir_str = project_dir.to_string_lossy();
-
-    // Locate the workflow script relative to the orrchestrator project
+/// Return the directory containing workflow dispatcher scripts.
+pub fn workflow_scripts_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
-    let script = format!("{home}/projects/orrchestrator/library/tools/run_workflow.sh");
+    std::path::PathBuf::from(home)
+        .join("projects/orrchestrator/library/tools")
+}
 
+/// List available workflow dispatcher scripts.
+/// Looks for `run_*.sh` files in the tools directory.
+/// Returns `(script_name, display_name)` pairs — e.g. ("run_workflow.sh", "develop-feature").
+pub fn list_workflows() -> Vec<(String, String)> {
+    let dir = workflow_scripts_dir();
+    let mut workflows = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("run_") && name.ends_with(".sh") {
+                // run_workflow.sh → "develop-feature"
+                // run_intake.sh → "instruction-intake"
+                let display = name
+                    .strip_prefix("run_").unwrap_or(&name)
+                    .strip_suffix(".sh").unwrap_or(&name)
+                    .replace('_', "-");
+                workflows.push((name, display));
+            }
+        }
+    }
+    workflows.sort_by(|a, b| a.1.cmp(&b.1));
+    workflows
+}
+
+/// Spawn a workflow dispatcher script in the Proc category.
+/// `workflow_script` is the filename (e.g. "run_workflow.sh").
+/// `goal` is passed as the second argument to the script.
+pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> anyhow::Result<String> {
+    let dir_str = project_dir.to_string_lossy();
+    let script = workflow_scripts_dir().join(workflow_script);
+
+    if !script.exists() {
+        anyhow::bail!("Workflow script not found: {}", script.display());
+    }
+
+    let window_name = workflow_script
+        .strip_prefix("run_").unwrap_or(workflow_script)
+        .strip_suffix(".sh").unwrap_or(workflow_script);
+
+    // The script logs to .orrch/workflow.log itself and has a read prompt
+    // at the end to keep the tmux window alive after completion/error.
     let cmd = format!(
         "cd {} && bash {} {} {}",
         shell_escape(&dir_str),
-        shell_escape(&script),
+        shell_escape(&script.to_string_lossy()),
         shell_escape(&dir_str),
         shell_escape(goal),
     );
 
-    spawn_in_category(SessionCategory::Proc, "workflow", &cmd)
+    spawn_in_category(SessionCategory::Proc, window_name, &cmd)
 }
 
 // ─── Hub Edit Window ────────────────────────────────────────────────
