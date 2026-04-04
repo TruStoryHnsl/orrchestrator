@@ -223,13 +223,20 @@ Update workflow.json: `{"step":7,"status":"finishing"}`.
 <remaining inbox items, or "inbox clear">
 ```
 
+**Update dev map** — mark completed items in `PLAN.md`:
+For each instruction/feature that was implemented (from `.orrch/instructions.md`), find its matching entry in `PLAN.md` and change `[ ]` to `[x]`. Match by instruction ID (e.g., `INS-004`) or feature name keyword. If no matching entry exists in PLAN.md, skip — the dev map only tracks items that were formally planned.
+
+**Clean instruction inbox** — if ALL instructions from the current batch are now implemented:
+1. Write a short completion record to the source idea document (the file referenced in the inbox header's `Source:` field): `> Batch complete: N/N instructions implemented (<date>)`
+2. Clear the inbox to just its header: `# Orrchestrator — Instruction Inbox\n\nNo pending instructions.`
+
 **Version** — determine directly:
 ```bash
 current=$(git tag -l 'v*' --sort=-v:refname | head -1)
 # feat = minor bump, fix = patch, feat! = major
 ```
 
-**Commit** — execute directly:
+**Commit** — execute directly (include PLAN.md and instructions_inbox.md in the staged files):
 ```bash
 git add <files from workspace_state.md>
 git commit -m "feat: <summary derived from instructions>"
