@@ -128,6 +128,8 @@ pub enum SubView {
     NewProjectConfirm,
     /// Feedback submission confirmation — shows routing targets, lets user edit.
     FeedbackConfirm(usize), // index into feedback_items
+    /// Workflow picker — select a workflow script to run.
+    WorkflowPicker,
 }
 
 /// Sub-panels within the Design panel.
@@ -529,6 +531,12 @@ pub struct App {
 
     // Audit trail expansion in Intentions panel (index of expanded idea, or None)
     pub ideas_audit_expanded: Option<usize>,
+
+    // Workflow picker
+    /// Available workflow scripts: (filename, display_name)
+    pub workflow_choices: Vec<(String, String)>,
+    /// Selected index in workflow picker
+    pub workflow_picker_idx: usize,
 }
 
 /// A versioned release entry for the Production panel.
@@ -685,6 +693,8 @@ impl App {
             intake_review_focus: IntakeReviewFocus::Raw,
             split_off_editors: Vec::new(),
             ideas_audit_expanded: None,
+            workflow_choices: Vec::new(),
+            workflow_picker_idx: 0,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1423,6 +1433,7 @@ impl App {
                 let idx = *idx;
                 self.key_feedback_confirm(key, idx)
             }
+            SubView::WorkflowPicker => self.key_workflow_picker(key),
         }
     }
 
@@ -2074,13 +2085,13 @@ impl App {
                 }
             }
             KeyCode::Char('w') => {
-                // List tmux windows for reference
-                let windows = orrch_core::windows::list_tmux_windows();
-                if windows.is_empty() {
-                    self.notify("No tmux sessions".into());
+                // Open workflow picker
+                self.workflow_choices = orrch_core::windows::list_workflows();
+                if self.workflow_choices.is_empty() {
+                    self.notify("No workflow scripts found (run_*.sh in library/tools/)".into());
                 } else {
-                    let count = windows.len();
-                    self.notify(format!("{count} tmux window(s) — use tmux hotkeys to switch"));
+                    self.workflow_picker_idx = 0;
+                    self.sub = SubView::WorkflowPicker;
                 }
             }
             KeyCode::Char('x') => {
@@ -4034,6 +4045,45 @@ impl App {
 
     pub fn retrospect_stats_for(&mut self, project_dir: &str) -> Option<orrch_retrospect::store::StoreStats> {
         self.error_stores.get_mut(project_dir).map(|s| s.stats())
+    }
+
+    fn key_workflow_picker(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Up => {
+                if self.workflow_picker_idx > 0 {
+                    self.workflow_picker_idx -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.workflow_picker_idx + 1 < self.workflow_choices.len() {
+                    self.workflow_picker_idx += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some((script, display)) = self.workflow_choices.get(self.workflow_picker_idx).cloned() {
+                    if let Some(pidx) = self.selected_project_index() {
+                        let path = self.projects[pidx].path.clone();
+                        let name = self.projects[pidx].name.clone();
+                        match orrch_core::windows::spawn_workflow(&path, &script, "continue development") {
+                            Ok(window) => {
+                                self.notify(format!("{name}: {display} → tmux:{window}"));
+                            }
+                            Err(e) => {
+                                self.notify(format!("{name}: workflow failed: {e}"));
+                            }
+                        }
+                    } else {
+                        self.notify("No project selected".into());
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 
