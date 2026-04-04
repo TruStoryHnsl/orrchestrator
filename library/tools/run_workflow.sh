@@ -38,17 +38,33 @@ run_agent() {
     local prompt="$3"
     local output_file="$4"
 
-    log "spawning agent: ${name}"
+    log "spawning agent: ${name} ..."
+
+    # Run claude in background, show a progress indicator
     "${CLAUDE_BASE[@]}" \
         --allowed-tools "${tools}" \
         --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
         "${prompt}" \
-        > "${output_file}" 2>/dev/null
-    log "agent done: ${name} ($(wc -l < "${output_file}") lines)"
+        > "${output_file}" 2>/dev/null &
+    local pid=$!
+
+    # Spinner while agent runs
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    local elapsed=0
+    while kill -0 "${pid}" 2>/dev/null; do
+        printf '\r  %s %s (%ds)' "${spin:i++%10:1}" "${name}" "${elapsed}"
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    wait "${pid}" || true
+    printf '\r  ✓ %s (%ds, %d lines)\n' "${name}" "${elapsed}" "$(wc -l < "${output_file}" 2>/dev/null || echo 0)"
+
+    log "agent done: ${name} (${elapsed}s, $(wc -l < "${output_file}" 2>/dev/null || echo 0) lines)"
 }
 
 run_agent_bg() {
-    # Same as run_agent but backgrounded. Caller must wait.
+    # Same as run_agent but backgrounded — no spinner. Caller must wait.
     local name="$1"
     local tools="$2"
     local prompt="$3"
