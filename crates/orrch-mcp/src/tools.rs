@@ -377,10 +377,11 @@ DIR: {project_dir}
 1. bash: mkdir -p .orrch && echo '{{"workflow":"develop-feature","step":0,"status":"init"}}' > .orrch/workflow.json
 2. bash: cat .scope 2>/dev/null || echo "private"
    → store as $SCOPE
-3. IF goal is "continue development":
-   read: instructions_inbox.md
-   → collect unimplemented entries as $INSTRUCTIONS
-   → IF empty: say "Instruction inbox is empty. Add instructions or call with an explicit goal." then STOP.
+3. IF goal is "continue development" or "continue":
+   read: PLAN.md
+   → collect unchecked items (lines matching "[ ]") as $INSTRUCTIONS
+   → pick items from the lowest incomplete phase first
+   → IF no unchecked items: say "Dev map is complete — no unchecked items in PLAN.md." then STOP.
    ELSE: $INSTRUCTIONS = the goal text
 4. write $INSTRUCTIONS to .orrch/instructions.md
 5. bash: {brief_sh} "{project_dir}" > .orrch/codebase_brief.txt
@@ -409,11 +410,10 @@ DIR: {project_dir}
     → write to .orrch/verdict.md
     → IF REWORK: spawn Developer with FIX lines, re-run steps 11-13. Max 3 cycles.
 14. update PLAN.md: mark completed items [x]
-15. if all inbox instructions done: write completion record to source idea doc, clear inbox
-16. write DEVLOG.md entry
-17. git add + git commit with conventional message (include PLAN.md, instructions_inbox.md)
-18. echo '{{"workflow":"develop-feature","status":"complete"}}' > .orrch/workflow.json
-19. report: what was built, verification summary, commit hash, known issues.
+15. write DEVLOG.md entry
+16. git add + git commit with conventional message (include PLAN.md)
+17. echo '{{"workflow":"develop-feature","status":"complete"}}' > .orrch/workflow.json
+18. report: what was built, verification summary, commit hash, known issues.
 "#)
 }
 
