@@ -378,15 +378,18 @@ DIR: {project_dir}
 2. bash: cat .scope 2>/dev/null || echo "private"
    → store as $SCOPE
 3. IF goal is "continue development" or "continue":
-   read: PLAN.md
-   → collect unchecked items (lines matching "[ ]") as $INSTRUCTIONS
-   → pick items from the lowest incomplete phase first
-   → IF no unchecked items: say "Dev map is complete — no unchecked items in PLAN.md." then STOP.
+   a. read: instructions_inbox.md — check for entries not yet in PLAN.md
+      → IF any unintegrated entries exist: note them for the PM in step 6 (intake team missed them)
+      → skip entries already in the dev map
+   b. read: PLAN.md
+      → collect unchecked items (lines matching "[ ]") from the lowest incomplete phase
+      → these are $INSTRUCTIONS
+      → IF no unchecked items: say "Dev map is complete — no unchecked items in PLAN.md." then STOP.
    ELSE: $INSTRUCTIONS = the goal text
 4. write $INSTRUCTIONS to .orrch/instructions.md
 5. bash: {brief_sh} "{project_dir}" > .orrch/codebase_brief.txt
 6. spawn Agent (PM):
-   prompt: "You are the Project Manager. Plan and delegate — never write code.\n\nSynthesize these instructions into a task list.\n\n## Instructions\n<.orrch/instructions.md>\n\n## Codebase\n<.orrch/codebase_brief.txt>\n\n## MANDATORY output format (tools parse this)\nFor each task:\n\nTASK <id>: <description>\nAgent: <Developer|Software Engineer|UI Designer|Researcher|Feature Tester>\nFiles: <comma-separated paths>\nWork: <2-3 sentences>\nAcceptance: <one line>\nDepends: <task ids or none>"
+   prompt: "You are the Project Manager. Plan and delegate — never write code.\n\n## Inbox check\nVerify these inbox items are already in the dev map. If any are missing, add them to your task list below:\n<unintegrated inbox entries from step 3a, or 'none'>\n\n## Dev map items to implement\n<.orrch/instructions.md>\n\n## Codebase\n<.orrch/codebase_brief.txt>\n\n## MANDATORY output format (tools parse this)\nFor each task:\n\nTASK <id>: <description>\nAgent: <Developer|Software Engineer|UI Designer|Researcher|Feature Tester>\nFiles: <comma-separated paths>\nWork: <2-3 sentences>\nAcceptance: <one line>\nDepends: <task ids or none>"
    → write output to .orrch/plan.md
 7. bash: cat .orrch/plan.md | {compress_sh} > .orrch/plan_compressed.md
 8. bash: cat .orrch/plan.md | {cluster_sh} > .orrch/clusters.txt
