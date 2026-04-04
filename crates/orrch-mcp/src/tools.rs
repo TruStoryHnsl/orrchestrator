@@ -356,18 +356,65 @@ fn develop_feature(server: &OrrchMcpServer, args: &Value) -> String {
         None => return "Error: 'goal' parameter is required".into(),
     };
 
-    let skill_path = server.skills_dir.join("develop-feature.md");
-    let skill_content = match std::fs::read_to_string(&skill_path) {
-        Ok(c) => c,
-        Err(e) => return format!("Error: cannot read develop-feature.md: {e}"),
-    };
+    let project_dir = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
 
-    let project_ctx = match args.get("project_dir").and_then(|v| v.as_str()) {
-        Some(dir) => format!("\n\nProject directory: {dir}"),
-        None => String::new(),
-    };
+    let tools_dir = server.library_dir.join("tools");
+    let brief_sh = tools_dir.join("codebase_brief.sh").display().to_string();
+    let compress_sh = tools_dir.join("compress_output.sh").display().to_string();
+    let cluster_sh = tools_dir.join("cluster_tasks.sh").display().to_string();
 
-    format!("## Goal\n\n{goal}{project_ctx}\n\n---\n\n{skill_content}")
+    // Return a terse numbered dispatch sequence — NOT a prose skill document.
+    // The session executes these commands mechanically. No reasoning.
+    format!(r#"DISPATCH MODE. Execute each numbered command. No commentary, no insights, no analysis.
+If a command says STOP, stop immediately — do not look for alternative work.
+
+GOAL: {goal}
+DIR: {project_dir}
+
+1. bash: mkdir -p .orrch && echo '{{"workflow":"develop-feature","step":0,"status":"init"}}' > .orrch/workflow.json
+2. bash: cat .scope 2>/dev/null || echo "private"
+   → store as $SCOPE
+3. IF goal is "continue development":
+   read: instructions_inbox.md
+   → collect unimplemented entries as $INSTRUCTIONS
+   → IF empty: say "Instruction inbox is empty. Add instructions or call with an explicit goal." then STOP.
+   ELSE: $INSTRUCTIONS = the goal text
+4. write $INSTRUCTIONS to .orrch/instructions.md
+5. bash: {brief_sh} "{project_dir}" > .orrch/codebase_brief.txt
+6. spawn Agent (PM):
+   prompt: "You are the Project Manager. Plan and delegate — never write code.\n\nSynthesize these instructions into a task list.\n\n## Instructions\n<.orrch/instructions.md>\n\n## Codebase\n<.orrch/codebase_brief.txt>\n\n## MANDATORY output format (tools parse this)\nFor each task:\n\nTASK <id>: <description>\nAgent: <Developer|Software Engineer|UI Designer|Researcher|Feature Tester>\nFiles: <comma-separated paths>\nWork: <2-3 sentences>\nAcceptance: <one line>\nDepends: <task ids or none>"
+   → write output to .orrch/plan.md
+7. bash: cat .orrch/plan.md | {compress_sh} > .orrch/plan_compressed.md
+8. bash: cat .orrch/plan.md | {cluster_sh} > .orrch/clusters.txt
+9. read .orrch/clusters.txt for cluster + wave assignments
+10. FOR each wave (1, 2, ...):
+    FOR each cluster in wave, spawn Agent IN PARALLEL:
+      prompt: "You are the <cluster agent>. Scope: $SCOPE.\n\n## Codebase (do NOT read files for orientation)\n<.orrch/codebase_brief.txt>\n\n<if wave>1: ## Prior changes\n<.orrch/workspace_state.md>\n</if>\n\n## Tasks\n<tasks for this cluster from plan.md>\n\nOnly read files you will EDIT. Report: files modified/created, one line per file."
+    AFTER wave completes:
+      bash: echo "--- Wave N ---" >> .orrch/workspace_state.md
+      FOR each agent output: bash: echo "$output" | {compress_sh} >> .orrch/workspace_state.md
+    bash: cargo build 2>&1 | tail -5
+      → if build fails: report error and STOP
+11. extract file list from .orrch/workspace_state.md
+12. spawn 2 Agents IN PARALLEL (context isolation — NO implementation details):
+    Agent A: "You are a security tester.\n\nWhat was built: <.orrch/instructions.md>\nFiles to review (ONLY these): <file list>\n\nReport: SEVERITY | description | file:line | remediation\nOne finding per line. No prose."
+    Agent B: "You are a destructive tester.\n\nWhat was built: <.orrch/instructions.md>\nFiles to review (ONLY these): <file list>\nAlso run: cargo build && cargo test --workspace\n\nReport: SEVERITY | description | file:line | fix\nOne finding per line. No prose."
+    bash: echo "$A" | {compress_sh} > .orrch/security_findings.md
+    bash: echo "$B" | {compress_sh} > .orrch/destructive_findings.md
+13. spawn Agent (PM):
+    prompt: "Evaluate findings. Output EXACTLY one of:\nVERDICT: PASS\nVERDICT: SHIP_WITH_ISSUES\nKnown issues: <one per line>\nVERDICT: REWORK\n<FIX | file:line | what | severity per line>\n\nInstructions: <.orrch/instructions.md>\nChanges: <.orrch/workspace_state.md>\nSecurity: <.orrch/security_findings.md>\nDestructive: <.orrch/destructive_findings.md>"
+    → write to .orrch/verdict.md
+    → IF REWORK: spawn Developer with FIX lines, re-run steps 11-13. Max 3 cycles.
+14. update PLAN.md: mark completed items [x]
+15. if all inbox instructions done: write completion record to source idea doc, clear inbox
+16. write DEVLOG.md entry
+17. git add + git commit with conventional message (include PLAN.md, instructions_inbox.md)
+18. echo '{{"workflow":"develop-feature","status":"complete"}}' > .orrch/workflow.json
+19. report: what was built, verification summary, commit hash, known issues.
+"#)
 }
 
 fn instruction_intake(server: &OrrchMcpServer, args: &Value) -> String {

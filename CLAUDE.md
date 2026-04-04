@@ -85,7 +85,15 @@ User writes idea → `s` submits → COO optimizes into discrete instructions �
 
 ## Workflow Execution (MANDATORY)
 
-Every session spawned by orrchestrator MUST follow the workforce pipelines defined in this project. You are the **Hypervisor agent**. Read `agents/hypervisor.md` for your full behavioral profile.
+### MCP Dispatch (fastest path)
+
+When told to call `develop_feature`: immediately `ToolSearch` for `mcp__orrchestrator__develop_feature`, call it, then **execute the returned dispatch loop mechanically**. Do NOT:
+- Generate insights, commentary, or analysis
+- Read files beyond what a step requires
+- Reason about the project state or priorities
+- Look for alternative work if the inbox is empty
+
+The MCP tool returns a numbered command sequence. Execute each command. That's it.
 
 ### Architecture: Skills and Tools (NOT prompt injection)
 
@@ -108,11 +116,7 @@ The user audit step (raw vs optimized, side-by-side in Design > Intentions) is m
 
 ## Current Priority
 
-**Critical Path (CP-1 through CP-6):** Build the skill-based workflow execution system. See PLAN.md CRITICAL PATH section for details. CP-1 (workflow skills) and CP-2 (agent role skills) are the immediate next items.
-
-`instructions_inbox.md` has 9 instructions. INS-001 through INS-003 are done. Remaining: INS-004 through INS-009.
-
-**Critical priority:** Implement the CRITICAL PATH items in PLAN.md (CP-1 workforce-aware spawning, CP-2 template selector, CP-3 COO intake wiring). These are the highest priority items in the entire roadmap — without them, every spawned session ignores the orchestration architecture. The "Workflow Execution" section above is a stopgap until CP-1/CP-2 make it automatic.
+Critical Path (CP-1 through CP-7) is COMPLETE. Instruction inbox (INS-001 through INS-009) is COMPLETE and cleared. See PLAN.md for the 41 remaining roadmap items across Phases 4-8 and cross-cutting features.
 
 ## Conventions
 
