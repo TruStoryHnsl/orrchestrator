@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
+default-members = ["src"]
 members = [
     "crates/orrch-agents",
     "crates/orrch-core",
     "crates/orrch-library",
+    "crates/orrch-mcp",
     "crates/orrch-retrospect",
     "crates/orrch-tui",
     "crates/orrch-workforce",
@@ -30,3 +32,4 @@ nix = { version = "0.31", features = ["process", "signal", "term", "fs", "ioctl"
 ratatui = "0.29"
 crossterm = "0.28"
 arboard = "3"
+pulldown-cmark = "0.12"

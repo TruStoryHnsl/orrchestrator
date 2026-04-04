@@ -56,6 +56,25 @@ impl PipelineState {
         self.total_implemented() as f64 / total as f64
     }
 
+    /// Recompute progress from instruction counts.
+    /// 0 = not submitted, 1-49 = intake processing, 50 = instructions distributed,
+    /// 51-99 = partially implemented, 100 = all implemented.
+    pub fn recompute_progress(&mut self) {
+        if self.progress == 0 { return; } // not submitted, don't touch
+        let total = self.total_instructions();
+        if total == 0 {
+            // Submitted but no instructions distributed yet — intake phase
+            if self.progress < 50 { return; }
+        }
+        let implemented = self.total_implemented();
+        if implemented >= total && total > 0 {
+            self.progress = 100;
+        } else if total > 0 {
+            // 50 = all distributed, 100 = all implemented
+            self.progress = 50 + ((implemented as f64 / total as f64) * 50.0) as u8;
+        }
+    }
+
     /// Compute the display color as (r, g, b) based on the 100-step gradient.
     ///
     /// 0-4: default text color (no change)
@@ -239,6 +258,58 @@ pub fn set_pipeline_targets(vault_dir: &Path, filename: &str, package_name: &str
         state.progress = 50;
     }
     save_pipeline_state(vault_dir, filename, &state)
+}
+
+/// Scan a project's instructions_inbox.md and PLAN.md to count implemented instructions,
+/// then update the pipeline state for the source idea. Returns true if progress changed.
+pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea) -> bool {
+    let pipeline_dir = vault_dir.join(".pipeline");
+    let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
+    if state.targets.is_empty() || state.progress < 50 { return false; }
+
+    let source_marker = format!("plans/{}", idea.filename);
+    let mut changed = false;
+
+    for target in &mut state.targets {
+        let project_dir = projects_dir.join(&target.project);
+
+        // Count implemented instructions by scanning instructions_inbox.md for ✓ IMPLEMENTED markers
+        let inbox_path = project_dir.join("instructions_inbox.md");
+        let mut implemented = 0u32;
+        let mut in_source_block = false;
+        if let Ok(content) = fs::read_to_string(&inbox_path) {
+            for line in content.lines() {
+                if line.contains(&source_marker) { in_source_block = true; }
+                if in_source_block && (line.contains("✓ IMPLEMENTED") || line.contains("[x]") || line.contains("COMPLETED")) {
+                    implemented += 1;
+                }
+            }
+        }
+
+        // Also check PLAN.md for [x] items matching INS- numbers from this package
+        let plan_path = project_dir.join("PLAN.md");
+        if let Ok(plan) = fs::read_to_string(&plan_path) {
+            for line in plan.lines() {
+                if line.contains("[x]") && line.contains("INS-") {
+                    implemented += 1;
+                }
+            }
+        }
+
+        // Deduplicate: cap at instruction_count
+        implemented = implemented.min(target.instruction_count);
+
+        if target.implemented_count != implemented {
+            target.implemented_count = implemented;
+            changed = true;
+        }
+    }
+
+    if changed {
+        state.recompute_progress();
+        let _ = save_pipeline_state(vault_dir, &idea.filename, &state);
+    }
+    changed
 }
 
 #[cfg(test)]

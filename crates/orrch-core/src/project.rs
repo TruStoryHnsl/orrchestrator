@@ -715,8 +715,16 @@ fn read_description_from_claude_md(path: &Path) -> String {
 }
 
 fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
-    let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+    // Strip leading numbering: "1.", "65.", "CP-1.", "CP-7.", "- ", etc.
+    let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == '-');
     let rest = rest.trim_start();
+    // Also handle "CP-N." prefix (strip remaining alpha prefix after digit stripping)
+    let rest = if rest.starts_with(|c: char| c.is_ascii_uppercase() && c != '[') {
+        let after_prefix = rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+        after_prefix.trim_start()
+    } else {
+        rest
+    };
 
     let (done, rest) = if rest.starts_with("[x]") || rest.starts_with("[X]") {
         (true, &rest[3..])

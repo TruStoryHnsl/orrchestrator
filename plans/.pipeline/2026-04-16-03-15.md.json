@@ -2,11 +2,11 @@
   "progress": 50,
   "targets": [
     {
-      "project": "hypeland (NEW — not yet created)",
-      "instruction_count": 0,
+      "project": "layout_optimizer",
+      "instruction_count": 1,
       "implemented_count": 0
     }
   ],
-  "package_name": "Widget Position Optimizer — New Project Plan",
+  "package_name": "Widget Position Optimizer — Path of Least Action Layout Engine",
   "submitted_at": 1775104386
 }

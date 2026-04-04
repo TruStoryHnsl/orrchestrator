@@ -22,16 +22,16 @@ Resolved during initial planning session. Preserved here as architectural refere
 | Layer | Mechanism | Example |
 |-------|-----------|---------|
 | Between operations (decoupled) | File inbox (append-only) | COO → `instructions_inbox.md` → PM ingests when ready |
-| Within a workflow (tight coupling) | Prompt injection via subagents | PM ↔ Software Engineer ↔ Developer |
+| Within a workflow (tight coupling) | ~~Prompt injection via subagents~~ **Skill-based Agent tool calls** (updated 2026-04-03) | PM ↔ Software Engineer ↔ Developer |
 
-The file inbox separation enables throttling: COO can keep appending while PM is rate-limited. The prompt injection path is for agents that are part of the same execution flow.
+The file inbox separation enables throttling: COO can keep appending while PM is rate-limited. ~~The prompt injection path is for agents that are part of the same execution flow.~~ **Update (2026-04-03):** Within-workflow communication now uses Agent tool calls from self-managing workflow skills, not prompt injection into a single session. See CRITICAL PATH section.
 
 ### Q3 — Workforce Step Execution ~~(blocks Phase 2)~~ RESOLVED
 **Decision:** Follows from Q2's subagent model.
 
 - **Parallel branches** — the hypervisor agent spawns multiple subagents concurrently (e.g., Developer + Researcher + Feature Tester all as parallel Agent calls at the same step index).
 - **Blocker polling** — checked by the hypervisor between steps, not mid-step. A running subagent finishes its current work before the workflow pauses.
-- **Data handoff within workflow** — prompt injection between subagents (the hypervisor captures output and injects it into the next subagent's prompt).
+- **Data handoff within workflow** — ~~prompt injection between subagents (the hypervisor captures output and injects it into the next subagent's prompt)~~ **Agent tool call return values** (updated 2026-04-03). The workflow skill captures each subagent's output and passes it to the next subagent's invocation context.
 - **Data handoff between operations** — file inbox. Separate operations are decoupled by design to enable independent throttling.
 
 ### Q4 — Native Window Mode Scope ~~(blocks Phase 7)~~ RESOLVED
@@ -258,6 +258,52 @@ Intelligence Resources Manager polls API usage →
 
 The completed feature set below constitutes `1.0.0`. The roadmap below builds toward `2.0.0` — a breaking architectural expansion from session manager to agent orchestration platform.
 
+### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)
+
+> **Why this section exists:** Two foundational discoveries drove this section to the top of the roadmap.
+>
+> **Discovery 1 (2026-04-03):** A session spawned by orrchestrator to implement bug fixes operated as a solo developer — no architecture review, no testing agents, no PM synthesis loop. The DEVELOP FEATURE workflow was never followed because the spawn flow did not inject workforce context into sessions.
+>
+> **Discovery 2 (2026-04-03):** Two live tests of the prompt injection approach (CP-1/CP-2/CP-3) confirmed that even with 15k tokens of workforce instructions injected into a session prompt, sessions ignored the orchestration architecture and operated as solo developers. Prompt injection is fundamentally the wrong mechanism — LLM sessions treat injected workforce definitions as informational context, not as executable procedure. The entire `build_workforce_context()` / SpawnWorkforce prompt injection approach is scrapped.
+>
+> **New architecture:** Skill-based workflow execution. Workflow definitions become executable skills (`.md` prompt files invoked via Claude Code's `/skill` or Agent tool mechanism). The `/develop-feature` skill IS the Hypervisor — it procedurally spawns agents via Agent tool calls, pipes results between steps, enforces context isolation, and manages the dev loop. Orrchestrator provides visibility (live agent tree in Hypervise) and intervention controls (pause, redirect, inject). Sessions start with a skill invocation, not a massive prompt blob.
+
+These items replace the former CP-1/CP-2/CP-3 (prompt injection approach, now deprecated). They are the highest priority because they gate the value of everything else already built.
+
+**Deprecated:** `build_workforce_context()`, the SpawnWorkforce wizard step that injected prompt blobs, and the entire concept of constructing composite prompts from Hypervisor profile + workforce template + operation steps. These are replaced by skill invocation on session spawn.
+
+CP-1. [x] **Workflow skills (`.md` prompt files)** — Convert workflow definitions (DEVELOP FEATURE, INSTRUCTION INTAKE, etc.) into self-managing skill files. Implemented: `develop-feature.md` (10-step pipeline) and `instruction-intake.md` (7-step pipeline with user audit) created as Claude Code commands.
+
+CP-2. [x] **Agent role skills** — Convert agent profiles into invocable skills (`/agent:pm`, `/agent:developer`, `/agent:coo`, etc.). Each agent skill loads the agent's `.md` profile as its system context. Workflow skills spawn agent role skills as subagents. This replaces the `AgentRunner::build_prompt()` approach of constructing composite prompts. **Status: DONE — 13 agent skill files created (pm, developer, engineer, coo, tester, repo, executive-assistant, resource-optimizer, feature-tester, penetration-tester, beta-tester, ui-designer, researcher). 8 non-workflow agents deferred.**
+
+CP-3. [x] **Tool scripts for deterministic operations** — Implemented: `route_instructions.sh`, `workflow_status.sh`, `intake_review.sh`, `session_log.sh` in `library/tools/`. All defensive bash with `set -euo pipefail`.
+
+CP-4. [x] **Skill invocation on session spawn** — Replace the prompt injection spawn flow. When a session is spawned from orrchestrator, it starts with a skill invocation (e.g., `/develop-feature <goal>`) instead of a raw goal string or a massive composite prompt. The spawn wizard selects the skill; orrchestrator passes the invocation command as the session's initial input. Solo-developer mode (current behavior) remains as the fallback when no skill is selected. **Status: DONE — spawn flow now passes `/develop-feature <goal>` as initial command when workforce is selected.**
+
+CP-5. [x] **Hypervise live agent tree** — When a workflow skill executes, the Hypervise panel displays a real-time nested agent tree: which agents are active, what step the pipeline is on, agent status (running/waiting/complete/failed), and truncated output. The tree updates as the skill spawns and completes subagents. The user can pause, intervene (inject a message), or redirect from the TUI. This is the visibility layer — orrchestrator does not control execution, but it observes and can interrupt. **Status: DONE — TUI polls `.orrch/workflow.json` from active sessions, renders agent tree with step progress and color-coded statuses. Visibility for all workflow states (running/paused/failed/complete). Pause/intervene/redirect deferred.**
+
+CP-6. [x] **Instruction intake audit UI** — Add a user review step to the INSTRUCTION INTAKE pipeline: EA separates → COO optimizes → **user reviews (raw vs optimized side-by-side, editable)** → COO splits and routes → PM incorporates. The audit UI lives in Design > Intentions. When the COO finishes optimization, the result appears in a review queue. The user sees their original text alongside the optimized version, can edit the optimization, then confirms distribution. Instructions do not route to project inboxes until the user confirms. **Status: DONE — TUI polls `.orrch/intake_review.json` from project dirs when viewing Intentions. Auto-populates review overlay (side-by-side raw vs optimized). Confirm/reject writes decision back to filesystem.**
+
+CP-7. [x] **Unified orrch-mcp server** *(was items 30, 61)* — Implemented: `crates/orrch-mcp/` standalone binary, 10 MCP tools over stdio JSON-RPC, 19 tests. Registered at user scope via `claude mcp add -s user`. 1.3MB release binary.
+
+---
+
+### UI Polish & Infrastructure (from Instruction Inbox)
+
+_Queued work from `instructions_inbox.md` (INS-001 through INS-009). Formally incorporated 2026-04-03._
+
+65. [x] **INS-001: Responsive tab bar width** — Panel tabs now use fixed-width cells with collapsing labels (full → short → tiny). Dividers override text. Tab bar never extends beyond terminal width.
+66. [x] **INS-002: Fix Workforce sub-tab navigation** — Replaced `tab_focused: bool` with `focus_depth: usize` multi-level vertical navigation system. Each bar level is independently navigable with Left/Right, Up/Down moves between levels.
+67. [x] **INS-003: Left-justify Library sub-panel** — Library tab is now left-justified next to Workforce in the Design sub-bar. Right-justification logic removed.
+68. [ ] **INS-004: Add Harnesses editor as leftmost Workforce tab** — Add a "Harnesses" tab as the first tab in Design > Workforce (before Workflows). Placeholder page listing harness source directories and repo links. Long-term: visual harness aggregator indexing features across open-source harnesses (Claude Code, OpenCode, Crush, Codex, Gemini) for a custom fork. *(Note: distinct from item 56 — that is the read-only Library > Harnesses browser; this is an editable Workforce tab for harness feature cataloguing.)*
+69. [ ] **INS-005: Rich markdown preview renderer** — TUI rendering layer for `.md` files with rich formatting (headers, bold, lists, code blocks, links). Replaces plaintext preview in Library, Workforce, and Intentions panels. Must be scrollable and embeddable as a widget. Research: yazi image protocol, mdcat, glow, bat.
+70. [ ] **INS-006: Fix orphaned tmux sessions on exit** — On quit, enumerate all orrchestrator-managed tmux windows and kill them. On startup, detect orphaned sessions from a previous run and offer cleanup. Store managed session names in a state file for cross-run tracking.
+71. [ ] **INS-007: Custom tmux status bar for managed sessions** — Custom tmux status bar for the "orrch" session: window name, busy/waiting/idle status with color coding, sorted by urgency (waiting first). Custom hotkey to jump to most urgent window.
+72. [ ] **INS-008: Unified vim/nvim tmux window** — All vim/nvim editing sessions open in a single tmux window with the custom status bar. Users can split off individual vim sessions; orrchestrator tracks the change and represents lone windows in the Intentions menu. The tmux+vim window should feel like a native orrchestrator editing interface.
+73. [ ] **INS-009: Instruction audit trail with hash coordinates** — When COO splits user feedback into discrete instructions, each instruction is indexed with a hash derived from coordinate data (line range, character offsets) of the source text chunk. Bidirectional audit trail: trace any instruction back to the exact source text and see how it was interpreted/optimized. Audit log stored in `.feedback/audit.jsonl`. Translation mapping displayed in Intentions panel when an idea is expanded. *(Note: complements CP-6 audit UI — CP-6 is the user review step; this is the coordinate-level tracing and persistence layer.)*
+
+---
+
 ### Phase 0: Foundation Prep (1.1.0)
 _Restructure the existing codebase to support the new architecture. No new features — just plumbing._
 
@@ -275,7 +321,7 @@ _Agents become first-class entities. Each agent is a `.md` profile that can be b
 8. [x] **Agent library — 20 agent profiles** — all 19 roles + Hypervisor created in `agents/` directory with tailored system prompts, behavioral rules, and domain constraints.
 9. [x] **Agent execution binding** — `AgentRunner` with `build_prompt()`, `build_verification_prompt()` (context isolation), and `build_handoff_prompt()` (inter-agent data flow). `is_verification_role()` helper for isolation gating.
 10. [x] **Agent status tracking** — `Session.agent_profile: Option<String>` field. Agent selection step in spawn wizard (SpawnAgent). Profile prepended to goal on spawn.
-11. [ ] **COO instruction optimizer** — *requires live AI session to test*. Profile created (`chief_operations_officer.md`). Optimization logic is embedded in the COO's prompt instructions.
+11. [ ] **COO instruction optimizer** — *MOVED to Critical Path. The prompt injection approach (old CP-3) is deprecated. Now handled by CP-1 (instruction intake skill) + CP-6 (audit UI). See CRITICAL PATH section above.*
 12. [ ] **Mentor agent integration** — *requires Library (Phase 5) + live sessions*. Profile created (`mentor.md`). Background task deferred until Library storage exists.
 
 ### Phase 2: Workforce Templates (1.3.0)
@@ -283,8 +329,8 @@ _Agents are organized into teams with defined operation flows._
 
 13. [x] **Workforce template data model** — Workforce, AgentNode, Connection, DataFlow structs in orrch-workforce crate. Supports agent teams with directed connections and operation references.
 14. [x] **Built-in workforce templates** — 3 created as structured markdown in `workforces/`: Personal Tech Support, General Software Development, Commercial Software Development.
-15. [ ] **Template selector in spawn flow** — *deferred: needs workforce-aware session spawning (item 16) to be meaningful*.
-16. [ ] **Workforce-aware session management** — *deferred: requires live hypervisor execution to test grouped session display*.
+15. [ ] **Template selector in spawn flow** — *DEPRECATED. The prompt injection approach (old CP-2) is scrapped. Replaced by CP-4 (skill invocation on session spawn). See CRITICAL PATH section above.*
+16. [ ] **Workforce-aware session management** — *DEPRECATED. The prompt injection approach (old CP-1) is scrapped. Replaced by CP-4 (skill invocation on session spawn). See CRITICAL PATH section above.*
 
 ### Phase 3: Operation Modules (1.4.0)
 _Workforces execute structured pipelines with triggers, blockers, and interrupts._
@@ -310,7 +356,7 @@ _Centralized database of reusable AI workflow components._
 
 28. [ ] **Library storage backend** — git-backed GitHub repository. Structure: `{agents,skills,tools,mcp_servers,workforce_templates}/`. Each item is a `.md` file with YAML frontmatter + content. Synced across machines via git.
 29. [x] **Library panel UI** — 4 sub-panels (Agents/Models/Harnesses/MCP) with Shift+Tab navigation. Split-pane layout (40/60 list+preview). Models show tier badge (color-coded enterprise/mid-tier/local), pricing, context size, capabilities, limitations. Harnesses show availability status (auto-detected via `which`), supported models, flags. 8 model definitions + 5 harness definitions seeded. Enter opens items in vim for editing.
-30. [ ] **Library MCP server** — orrchestrator hosts an MCP server that exposes library items as tools/resources. Managed sessions can query the library for available tools.
+30. [ ] **Library MCP server** — MOVED to Critical Path (CP-7).
 31. [ ] **AI-assisted creation** — "New skill/tool/agent" action spawns a Claude session that helps the user define the item interactively. Result is saved to the library.
 32. [ ] **Auto-assignment via Mentor** — when an agent is bound to a session, the Mentor reviews its profile against Library contents and injects relevant tool/skill references into the agent's prompt.
 
@@ -364,7 +410,7 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 
 59. [x] **API valves (manual provider shutoff)** — per-provider on/off toggle in Library > Models. `v` = instant toggle, `V` = timed close (24h default). ValveStore persisted to `~/.config/orrchestrator/valves.json`. Visual `BLOCKED` badges on affected models. Auto-reopen ticker with countdown display.
 60. [x] **MCP server config management** — McpServerEntry struct with stdio/sse transport, enable/disable toggle (`e` key), role assignment. Loaded from `library/mcp_servers/*.md`. Displayed in Library > MCP sub-panel.
-61. [ ] **orrch-mcp server** — unified MCP server exposing orrchestrator internals: library_search, library_get, project_state, inbox_append, operation_status, session_list. Single server, connected to all agent sessions.
+61. [ ] **orrch-mcp server** — MOVED to Critical Path (CP-7).
 62. [ ] **External MCP server management** — configure connections to user's existing MCP servers (github, context7, etc.) through the Library > MCP panel. Assign servers to agent roles.
 63. [ ] **Syntax translation engine** — research session to catalog prompt/tool-call syntax differences across models and harnesses. Generate translated versions of context files (agent profiles, CLAUDE.md equivalents) per model/harness combination. Stored in Library.
 64. [ ] **Valve integration with Resource Optimizer** — Resource Optimizer checks valve state before recommending a model. Blocked providers are excluded from optimization suggestions. IRM auto-closes valves when rate limits are detected.
@@ -448,4 +494,8 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 | `q` | Global | Quit |
 
 ## Recent Changes
+- 2026-04-03: **MCP server elevated to Critical Path (CP-7).** Items 30 (Library MCP server) and 61 (orrch-mcp server) consolidated into CP-7 — a unified MCP server (stdio transport) exposing all library contents and pipeline operations as tools. Skill distribution via symlinked files is unsustainable; a single MCP server is the distribution layer that makes CP-1 through CP-6 accessible to all harnesses without file duplication.
+- 2026-04-03: **Instruction inbox incorporated into roadmap.** INS-001 through INS-009 from `instructions_inbox.md` formally added to PLAN.md as "UI Polish & Infrastructure (from Instruction Inbox)" section (items 65-73). INS-001 (responsive tabs), INS-002 (sub-tab navigation), INS-003 (Library left-justification) marked complete. INS-004 through INS-009 queued as pending. No duplicates with existing roadmap items; INS-004 distinguished from item 56 (Library harnesses vs Workforce harnesses editor), INS-009 noted as complementary to CP-6.
+- 2026-04-03: **Architecture pivot: skill-based workflow execution.** The prompt injection approach (old CP-1/CP-2/CP-3) is scrapped after two live tests confirmed sessions ignore 15k tokens of injected workforce instructions. New architecture: workflow definitions become executable skills (`.md` prompt files). The `/develop-feature` skill IS the Hypervisor — it spawns agents via Agent tool calls, pipes results, enforces context isolation. Orrchestrator provides visibility (live agent tree in Hypervise) and intervention. Skills vs Tools separation: skills = LLM judgment (workflows, agent roles), tools = deterministic ops (file routing, git, scaffolding). Instruction intake gets a user audit step (raw vs optimized side-by-side review before distribution). `build_workforce_context()` and SpawnWorkforce prompt injection deprecated. Critical Path rewritten with 6 new items (CP-1 through CP-6).
+- 2026-04-03: **CRITICAL PATH reprioritization.** Items 15 (template selector), 16 (workforce-aware spawning), and 11 (COO optimizer) moved to a new Critical Path section above Phase 0. Root cause: a spawned session operated as a solo developer, ignoring the DEVELOP FEATURE workflow entirely. The spawn flow does not inject workforce context — `AgentRunner::build_prompt()` exists but is never called in the actual spawn path. All orchestration architecture is dead code until CP-1/CP-2/CP-3 ship. Items marked unblocked for immediate implementation.
 - 2026-03-31: **FRESH PLAN.md written.** Processed redesign_plan into 8-phase roadmap toward 2.0.0 (43 items + 2 carried forward). All 8 design decisions resolved. Architecture expanded: 3 new crates, 4-panel layout, 19 agent roles, workforce templates, operation modules, multi-provider AI, node-based designer. Hypervisor agent profile created + agent profile system implemented (new spawn wizard step). fb2p.md model deprecated in favor of per-project `instructions_inbox.md` managed by COO via intake workforces. Ollama via Crush/OpenCode, library as git-backed GitHub repo + MCP server, workforce format is structured markdown.

@@ -71,6 +71,10 @@ async fn main() -> Result<()> {
     // Clean up managed sessions (non-blocking)
     app.pm.cleanup();
 
+    // Kill all managed tmux sessions and clear state records on clean exit
+    orrch_core::windows::kill_all_managed_tmux_sessions();
+    orrch_core::windows::clear_session_records();
+
     // Force exit — don't wait for background tokio tasks (remote discovery, timers)
     // They're all detached and will die with the process.
     if result.is_ok() {
@@ -86,6 +90,9 @@ async fn run_loop(
     let mut last_discovery = Instant::now();
     let mut last_feedback_reload = Instant::now();
     let mut last_retrospect = Instant::now();
+    let mut last_workflow_poll = Instant::now();
+    let mut last_intake_poll = Instant::now();
+    let mut last_pipeline_sync = Instant::now();
 
     // Background remote tasks — discovery + capability probes, never blocks render
     let (remote_tx, mut remote_rx) = mpsc::channel::<RemoteUpdate>(4);
@@ -141,6 +148,7 @@ async fn run_loop(
         if last_discovery.elapsed() > Duration::from_secs(5) {
             let _ = app.pm.discover_external().await;
             app.categorize_projects();
+            app.split_off_editors = orrch_core::windows::detect_split_off_editors("hub-edit");
             last_discovery = Instant::now();
         }
 
@@ -154,6 +162,12 @@ async fn run_loop(
                 }
             });
             last_retrospect = Instant::now();
+        }
+
+        // Intake review polling — check for pending review files every 3s
+        if last_intake_poll.elapsed() > Duration::from_secs(3) && app.intake_review.is_none() {
+            app.intake_review = orrch_core::load_intake_review(&app.projects);
+            last_intake_poll = Instant::now();
         }
 
         // Handle vim request from app
@@ -213,6 +227,32 @@ async fn run_loop(
         if last_feedback_reload.elapsed() > Duration::from_secs(5) {
             app.reload_feedback();
             last_feedback_reload = Instant::now();
+        }
+
+        // Sync pipeline progress every 10s — scans instruction inboxes for implemented markers
+        if last_pipeline_sync.elapsed() > Duration::from_secs(10) {
+            let vault = orrch_core::vault::vault_dir(&app.projects_dir);
+            let mut any_changed = false;
+            for idea in &app.ideas {
+                if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
+                    if orrch_core::vault::sync_pipeline_progress(&vault, &app.projects_dir, idea) {
+                        any_changed = true;
+                    }
+                }
+            }
+            if any_changed {
+                app.ideas = orrch_core::vault::load_ideas(&vault);
+            }
+            last_pipeline_sync = Instant::now();
+        }
+
+        // Poll workflow status for the selected session every 2s
+        if last_workflow_poll.elapsed() > Duration::from_secs(2) {
+            let cwd = app.managed_sessions
+                .get(app.session_tab_selected)
+                .map(|s| std::path::PathBuf::from(&s.cwd));
+            app.workflow_status = cwd.and_then(|p| orrch_core::load_workflow_status(&p));
+            last_workflow_poll = Instant::now();
         }
 
         terminal.draw(|frame| ui::draw(frame, app))?;

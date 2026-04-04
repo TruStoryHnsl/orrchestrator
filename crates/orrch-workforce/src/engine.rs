@@ -153,6 +153,24 @@ pub fn load_operations(dir: &std::path::Path) -> Vec<Operation> {
     ops
 }
 
+/// Load workforce templates from markdown files in a directory.
+pub fn load_workforces(dir: &std::path::Path) -> Vec<crate::template::Workforce> {
+    let mut workforces = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Some(wf) = crate::parser::parse_workforce_markdown(&content) {
+                        workforces.push(wf);
+                    }
+                }
+            }
+        }
+    }
+    workforces
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
