@@ -110,15 +110,33 @@ if [[ "${GOAL}" == "continue development" || "${GOAL}" == "continue" ]]; then
             | grep -v '~~' | grep -v 'IMPLEMENTED' | grep -v 'No pending' || true)
     fi
 
-    # Read PLAN.md for unchecked items from lowest incomplete phase
+    # Read PLAN.md for uncompleted items from lowest incomplete phase
     if [[ ! -f "${PROJECT_DIR}/PLAN.md" ]]; then
         log "ERROR: No PLAN.md found. Nothing to do."
         exit 0
     fi
 
-    INSTRUCTIONS=$(grep -n '\[ \]' "${PROJECT_DIR}/PLAN.md" || true)
+    # Detect plan format and extract uncompleted items:
+    #   Format A (orrchestrator): "N. [ ] **Feature**" — checkbox style
+    #   Format B (visualizorr etc): "### Task N: Title" — task-header style
+    #   Format C: "- [ ] item" — markdown task list
+    INSTRUCTIONS=""
+    if grep -q '\[ \]' "${PROJECT_DIR}/PLAN.md"; then
+        # Format A/C: checkbox items
+        INSTRUCTIONS=$(grep -n '\[ \]' "${PROJECT_DIR}/PLAN.md" || true)
+        log "plan format: checkbox ($(echo "${INSTRUCTIONS}" | wc -l) unchecked items)"
+    elif grep -qE '^### Task [0-9]+:' "${PROJECT_DIR}/PLAN.md"; then
+        # Format B: task headers — treat ALL tasks as uncompleted unless marked DONE/COMPLETE
+        INSTRUCTIONS=$(grep -nE '^### Task [0-9]+:' "${PROJECT_DIR}/PLAN.md" | grep -iv 'DONE\|COMPLETE\|✓' || true)
+        log "plan format: task-header ($(echo "${INSTRUCTIONS}" | wc -l) tasks)"
+    else
+        # Fallback: pass the whole PLAN.md to the PM and let it figure out what to do
+        INSTRUCTIONS=$(cat "${PROJECT_DIR}/PLAN.md")
+        log "plan format: unstructured (passing full plan to PM)"
+    fi
+
     if [[ -z "${INSTRUCTIONS}" ]]; then
-        log "Dev map is complete — no unchecked items in PLAN.md."
+        log "Dev map is complete — no uncompleted items in PLAN.md."
         exit 0
     fi
 
