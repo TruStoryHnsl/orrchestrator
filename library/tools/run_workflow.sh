@@ -41,15 +41,18 @@ run_agent() {
     log "spawning agent: ${name}"
     echo "────────────────── ${name} ──────────────────"
 
-    # Stream output to both terminal and file via tee
+    # claude -p runs the full agentic loop (tool use, file edits, reasoning)
+    # and exits when done. Output goes directly to the terminal so the user
+    # can watch. We capture a copy to file via tee for downstream steps.
+    # Use --output-format text (default) for readable terminal output.
     "${CLAUDE_BASE[@]}" \
         --allowed-tools "${tools}" \
         --append-system-prompt "You are the ${name}. Work in ${PROJECT_DIR}." \
         "${prompt}" \
-        2>/dev/null | tee "${output_file}"
+        2>&1 | tee "${output_file}"
 
     echo ""
-    echo "────────────────── /${name} ($(wc -l < "${output_file}" 2>/dev/null || echo 0) lines) ──────────────────"
+    echo "────────────────── /${name} ──────────────────"
     log "agent done: ${name} ($(wc -l < "${output_file}" 2>/dev/null || echo 0) lines)"
 }
 
