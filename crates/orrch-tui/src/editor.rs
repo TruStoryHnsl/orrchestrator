@@ -71,6 +71,8 @@ pub enum VimKind {
     MasterPlanAppend(usize),
     /// New idea for the vault.
     NewIdea,
+    /// Intake review — editing optimized instructions before distribution.
+    IntakeReview,
 }
 
 /// A request from App to the main loop to spawn vim.

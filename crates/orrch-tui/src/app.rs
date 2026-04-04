@@ -46,6 +46,26 @@ impl Panel {
         }
     }
 
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::Design => "Des",
+            Self::Oversee => "Ove",
+            Self::Hypervise => "Hyp",
+            Self::Analyze => "Ana",
+            Self::Publish => "Pub",
+        }
+    }
+
+    pub fn tiny_label(&self) -> &'static str {
+        match self {
+            Self::Design => "D",
+            Self::Oversee => "O",
+            Self::Hypervise => "H",
+            Self::Analyze => "A",
+            Self::Publish => "P",
+        }
+    }
+
     pub fn index(&self) -> usize {
         match self {
             Self::Design => 0,
@@ -78,6 +98,7 @@ pub enum SubView {
     ExternalSessionView(u32),
     /// Spawn wizard steps.
     SpawnGoal,
+    SpawnWorkforce,
     SpawnAgent,
     SpawnBackend,
     SpawnHost,
@@ -152,6 +173,7 @@ impl DesignSub {
 /// Tabs within the Workforce editor (Design > Workforce).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkforceTab {
+    Harnesses,     // harness definitions (read-only editor stub)
     Workflows,     // workforce templates (pipelines)
     Teams,         // operation modules (alias)
     Agents,
@@ -164,14 +186,16 @@ pub enum WorkforceTab {
 }
 
 impl WorkforceTab {
-    pub const ALL: [WorkforceTab; 9] = [
-        WorkforceTab::Workflows, WorkforceTab::Teams, WorkforceTab::Agents,
-        WorkforceTab::Skills, WorkforceTab::Tools, WorkforceTab::McpServers,
-        WorkforceTab::Profiles, WorkforceTab::TrainingData, WorkforceTab::Models,
+    pub const ALL: [WorkforceTab; 10] = [
+        WorkforceTab::Harnesses, WorkforceTab::Workflows, WorkforceTab::Teams,
+        WorkforceTab::Agents, WorkforceTab::Skills, WorkforceTab::Tools,
+        WorkforceTab::McpServers, WorkforceTab::Profiles, WorkforceTab::TrainingData,
+        WorkforceTab::Models,
     ];
 
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Harnesses => "Harnesses",
             Self::Workflows => "Workflows",
             Self::Teams => "Teams",
             Self::Agents => "Agents",
@@ -243,6 +267,13 @@ impl LibrarySub {
 pub enum DetailFocus {
     Sessions,
     Browser,
+}
+
+/// Focus pane within the intake review overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntakeReviewFocus {
+    Raw,
+    Optimized,
 }
 
 /// What a project list row maps to.
@@ -320,7 +351,7 @@ pub struct App {
     pub pm: ProcessManager,
     pub panel: Panel,
     pub sub: SubView,
-    pub tab_focused: bool, // true = arrow keys control panel tabs, false = content
+    pub focus_depth: usize, // 0=panel bar, 1=sub bar, 2=sub-sub bar, deeper=content
     pub should_quit: bool,
     pub projects_dir: PathBuf,
     pub event_rx: mpsc::UnboundedReceiver<SessionEvent>,
@@ -360,6 +391,8 @@ pub struct App {
     pub spawn_agent_idx: usize, // 0 = no agent, 1+ = index into agent_profiles
     pub spawn_backend: BackendKind,
     pub spawn_host_idx: usize, // 0 = local, 1+ = remote_hosts index
+    pub spawn_workforce_idx: usize,  // 0 = no workforce (solo), 1+ = index into loaded_workforces
+    pub loaded_workforces: Vec<orrch_workforce::Workforce>,
 
     // Agent profiles
     pub agent_profiles: Vec<orrch_core::AgentProfile>,
@@ -481,6 +514,21 @@ pub struct App {
     pub commit_correction_text: String,
     pub commit_typing_correction: bool,
     pub commit_correction_session: Option<String>, // tmux session name
+
+    // Workflow status (live agent tree in Hypervise panel)
+    pub workflow_status: Option<orrch_core::WorkflowStatus>,
+
+    // Intake review (instruction audit UI)
+    pub intake_review: Option<orrch_core::IntakeReview>,
+    pub intake_review_scroll_raw: u16,
+    pub intake_review_scroll_opt: u16,
+    pub intake_review_focus: IntakeReviewFocus,
+
+    // Split-off vim editors from the orrch-edit session
+    pub split_off_editors: Vec<String>,
+
+    // Audit trail expansion in Intentions panel (index of expanded idea, or None)
+    pub ideas_audit_expanded: Option<usize>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -513,6 +561,7 @@ impl App {
         let deprecated_path = projects_dir.join("deprecated");
         let workforce_files = scan_md_dir(&projects_dir.join("orrchestrator").join("workforces"));
         let operation_files = scan_md_dir(&projects_dir.join("orrchestrator").join("operations"));
+        let loaded_workforces = orrch_workforce::load_workforces(&projects_dir.join("orrchestrator").join("workforces"));
         let library_root = projects_dir.join("orrchestrator").join("library");
         let library_models = orrch_library::load_models(&library_root.join("models"));
         let library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
@@ -526,7 +575,7 @@ impl App {
             pm: ProcessManager::new(tx),
             panel: Panel::Oversee,
             sub: SubView::List,
-            tab_focused: false,
+            focus_depth: 1, // start at content level for Oversee panel
             should_quit: false,
             projects_dir,
             event_rx: rx,
@@ -555,6 +604,8 @@ impl App {
             spawn_agent_idx: 0,
             spawn_backend: BackendKind::Claude,
             spawn_host_idx: 0,
+            spawn_workforce_idx: 0,
+            loaded_workforces,
             agent_profiles: load_agents(&agents_dir()),
             workforce_tab: WorkforceTab::Workflows,
             wf_selected: 0,
@@ -627,6 +678,13 @@ impl App {
             commit_correction_text: String::new(),
             commit_typing_correction: false,
             commit_correction_session: None,
+            workflow_status: None,
+            intake_review: None,
+            intake_review_scroll_raw: 0,
+            intake_review_scroll_opt: 0,
+            intake_review_focus: IntakeReviewFocus::Raw,
+            split_off_editors: Vec::new(),
+            ideas_audit_expanded: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -640,7 +698,28 @@ impl App {
                 std::time::Instant::now(),
             ));
         }
+        // Detect orphaned tmux windows from a previous unclean exit
+        let orphans = orrch_core::windows::detect_orphaned_sessions();
+        if !orphans.is_empty() {
+            app.last_notification = Some((
+                format!("{} orphaned tmux window(s) from last session detected", orphans.len()),
+                std::time::Instant::now(),
+            ));
+        }
         app
+    }
+
+    /// Returns the focus depth at which content (list items) lives for the current panel state.
+    /// Depths below this are navigable bar levels.
+    pub fn content_depth(&self) -> usize {
+        match self.panel {
+            Panel::Design => match self.design_sub {
+                DesignSub::Intentions => 2,  // panel(0) → sub(1) → content(2)
+                DesignSub::Workforce => 3,   // panel(0) → sub(1) → wf tabs(2) → content(3)
+                DesignSub::Library => 3,     // panel(0) → sub(1) → lib tabs(2) → content(3)
+            },
+            _ => 1,                          // panel(0) → content(1)
+        }
     }
 
     pub fn reload_projects(&mut self) {
@@ -1187,13 +1266,21 @@ impl App {
     }
 
     pub fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) -> Result<()> {
-        // Shift+Left/Right always switches panels (from any list view)
+        // Shift+Left/Right always switches panels (from any list view), landing at content depth
         if self.sub == SubView::List && modifiers.contains(KeyModifiers::SHIFT) {
             match code {
-                KeyCode::Left => { self.panel = self.panel.prev(); return Ok(()); }
-                KeyCode::Right => { self.panel = self.panel.next(); return Ok(()); }
+                KeyCode::Left => { self.panel = self.panel.prev(); self.focus_depth = self.content_depth(); return Ok(()); }
+                KeyCode::Right => { self.panel = self.panel.next(); self.focus_depth = self.content_depth(); return Ok(()); }
                 _ => {}
             }
+        }
+
+        // Intake review Esc: close review without making a decision
+        if code == KeyCode::Esc && self.intake_review.is_some() && self.sub == SubView::List {
+            self.intake_review = None;
+            self.intake_review_scroll_raw = 0;
+            self.intake_review_scroll_opt = 0;
+            return Ok(());
         }
 
         // Global Esc: from List views opens app menu, from app menu closes it
@@ -1229,18 +1316,69 @@ impl App {
             code
         };
 
-        // Tab row navigation
-        if self.tab_focused && self.sub == SubView::List {
-            match key {
-                KeyCode::Left => { self.panel = self.panel.prev(); return Ok(()); }
-                KeyCode::Right => { self.panel = self.panel.next(); return Ok(()); }
-                KeyCode::Down | KeyCode::Enter => {
-                    self.tab_focused = false;
-                    return Ok(());
-                }
-                KeyCode::Char('q') => { self.should_quit = true; return Ok(()); }
-                _ => { self.tab_focused = false; }
+        // Multi-level focus navigation: each tab bar is a navigable level
+        if self.sub == SubView::List && self.focus_depth < self.content_depth() {
+            let handled = match self.focus_depth {
+                // Level 0: Panel bar (Design/Oversee/Hypervise/Analyze/Publish)
+                0 => match key {
+                    KeyCode::Left => { self.panel = self.panel.prev(); true }
+                    KeyCode::Right => { self.panel = self.panel.next(); true }
+                    KeyCode::Down | KeyCode::Enter => { self.focus_depth = 1; true }
+                    KeyCode::Char('q') => { self.should_quit = true; true }
+                    _ => false
+                },
+                // Level 1: Design sub-bar (Intentions/Workforce/Library)
+                1 if self.panel == Panel::Design => match key {
+                    KeyCode::Left => { self.design_sub = self.design_sub.prev(); true }
+                    KeyCode::Right => { self.design_sub = self.design_sub.next(); true }
+                    KeyCode::Up => { self.focus_depth = 0; true }
+                    KeyCode::Down | KeyCode::Enter => {
+                        // Drop to next level (sub-sub bar or content, depending on design_sub)
+                        self.focus_depth = 2;
+                        true
+                    }
+                    KeyCode::Char('q') => { self.should_quit = true; true }
+                    _ => false
+                },
+                // Level 2: Workforce sub-tabs or Library sub-tabs
+                2 if self.panel == Panel::Design => match self.design_sub {
+                    DesignSub::Workforce => match key {
+                        KeyCode::Left => {
+                            self.workforce_tab = self.workforce_tab.prev();
+                            self.wf_selected = 0; self.wf_preview_scroll = 0; true
+                        }
+                        KeyCode::Right => {
+                            self.workforce_tab = self.workforce_tab.next();
+                            self.wf_selected = 0; self.wf_preview_scroll = 0; true
+                        }
+                        KeyCode::Up => { self.focus_depth = 1; true }
+                        KeyCode::Down | KeyCode::Enter => { self.focus_depth = 3; true }
+                        KeyCode::Char('q') => { self.should_quit = true; true }
+                        _ => false
+                    },
+                    DesignSub::Library => match key {
+                        KeyCode::Left => {
+                            self.library_sub = self.library_sub.prev();
+                            self.library_selected = 0; self.library_preview_scroll = 0; true
+                        }
+                        KeyCode::Right => {
+                            self.library_sub = self.library_sub.next();
+                            self.library_selected = 0; self.library_preview_scroll = 0; true
+                        }
+                        KeyCode::Up => { self.focus_depth = 1; true }
+                        KeyCode::Down | KeyCode::Enter => { self.focus_depth = 3; true }
+                        KeyCode::Char('q') => { self.should_quit = true; true }
+                        _ => false
+                    },
+                    _ => false // Intentions has no level 2 bar
+                },
+                _ => false
+            };
+            if handled {
+                return Ok(());
             }
+            // Unhandled key at a bar level: drop to content and process it there
+            self.focus_depth = self.content_depth();
         }
 
         match &self.sub {
@@ -1255,6 +1393,7 @@ impl App {
             SubView::SessionFocus(_) => self.key_session_focus(key),
             SubView::ExternalSessionView(_) => self.key_external_session_view(key),
             SubView::SpawnGoal => self.key_spawn_goal(key, modifiers),
+            SubView::SpawnWorkforce => self.key_spawn_workforce(key),
             SubView::SpawnAgent => self.key_spawn_agent(key),
             SubView::SpawnBackend => self.key_spawn_backend(key),
             SubView::SpawnHost => self.key_spawn_host(key),
@@ -1401,17 +1540,8 @@ impl App {
     }
 
     fn key_design(&mut self, key: KeyCode) -> Result<()> {
-        match key {
-            KeyCode::Left | KeyCode::BackTab => {
-                self.design_sub = self.design_sub.prev();
-                return Ok(());
-            }
-            KeyCode::Right => {
-                self.design_sub = self.design_sub.next();
-                return Ok(());
-            }
-            _ => {}
-        }
+        // Bar-level navigation (Left/Right for sub-tabs) is handled in handle_key focus dispatch.
+        // This only runs at content depth.
         match self.design_sub {
             DesignSub::Intentions => self.key_design_project(key),
             DesignSub::Workforce => self.key_design_workforce(key),
@@ -1426,24 +1556,22 @@ impl App {
     }
 
     fn key_design_workforce(&mut self, key: KeyCode) -> Result<()> {
-        // Tab/Shift+Tab switches between workforce sub-tabs
-        match key {
-            KeyCode::Tab => {
-                self.workforce_tab = self.workforce_tab.next();
-                self.wf_selected = 0;
-                self.wf_preview_scroll = 0;
-                return Ok(());
-            }
-            _ => {}
-        }
-
+        // At content level: Left/Right switches workforce sub-tabs
         let items = self.wf_items_for_tab();
         let count = items.len();
 
         match key {
             KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Left => {
+                self.workforce_tab = self.workforce_tab.prev();
+                self.wf_selected = 0; self.wf_preview_scroll = 0;
+            }
+            KeyCode::Right => {
+                self.workforce_tab = self.workforce_tab.next();
+                self.wf_selected = 0; self.wf_preview_scroll = 0;
+            }
             KeyCode::Up => {
-                if self.wf_selected == 0 { self.tab_focused = true; }
+                if self.wf_selected == 0 { self.focus_depth = self.content_depth() - 1; }
                 else { self.wf_selected -= 1; self.wf_preview_scroll = 0; }
             }
             KeyCode::Down => {
@@ -1455,9 +1583,15 @@ impl App {
             KeyCode::PageDown => { self.wf_preview_scroll += 10; }
             KeyCode::PageUp => { self.wf_preview_scroll = self.wf_preview_scroll.saturating_sub(10); }
             KeyCode::Char('n') => {
+                // Harnesses: editor stub — edit files directly
+                if self.workforce_tab == WorkforceTab::Harnesses {
+                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    return Ok(());
+                }
                 // New from template for current tab
                 use orrch_library::templates::{TemplateCategory, create_from_template};
                 let category = match self.workforce_tab {
+                    WorkforceTab::Harnesses => unreachable!(),
                     WorkforceTab::Workflows => TemplateCategory::Workforce,
                     WorkforceTab::Teams => TemplateCategory::Operation,
                     WorkforceTab::Agents => TemplateCategory::Agent,
@@ -1484,6 +1618,10 @@ impl App {
                 }
             }
             KeyCode::Char('d') => {
+                if self.workforce_tab == WorkforceTab::Harnesses {
+                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    return Ok(());
+                }
                 let items = self.wf_items_for_tab();
                 if let Some((_, path)) = items.get(self.wf_selected) {
                     let p = path.clone();
@@ -1495,6 +1633,10 @@ impl App {
                 }
             }
             KeyCode::Enter => {
+                if self.workforce_tab == WorkforceTab::Harnesses {
+                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    return Ok(());
+                }
                 let items = self.wf_items_for_tab();
                 if let Some((_, path)) = items.get(self.wf_selected) {
                     let p = path.clone();
@@ -1514,6 +1656,7 @@ impl App {
     /// Get the list of (name, path) items for the current workforce tab.
     pub fn wf_items_for_tab(&self) -> Vec<(String, PathBuf)> {
         match self.workforce_tab {
+            WorkforceTab::Harnesses => self.library_harnesses.iter().map(|h| (h.name.clone(), h.path.clone())).collect(),
             WorkforceTab::Workflows => self.workforce_files.clone(),
             WorkforceTab::Teams => self.operation_files.clone(),
             WorkforceTab::Agents => self.agent_profiles.iter().map(|a| (a.name.clone(), a.path.clone())).collect(),
@@ -1541,18 +1684,23 @@ impl App {
     }
 
     fn key_library(&mut self, key: KeyCode) -> Result<()> {
-        // Library is a read-only browser within Design. Tab switches sub-tabs.
+        // Library is a read-only browser within Design. Left/Right switches sub-tabs at content level.
         // Valve controls (v/V) and MCP toggle (e) are operational, not content editing.
         let count = self.library_item_count();
         match key {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Tab => {
+            KeyCode::Left => {
+                self.library_sub = self.library_sub.prev();
+                self.library_selected = 0;
+                self.library_preview_scroll = 0;
+            }
+            KeyCode::Right => {
                 self.library_sub = self.library_sub.next();
                 self.library_selected = 0;
                 self.library_preview_scroll = 0;
             }
             KeyCode::Up => {
-                if self.library_selected == 0 { self.tab_focused = true; }
+                if self.library_selected == 0 { self.focus_depth = self.content_depth() - 1; }
                 else { self.library_selected -= 1; self.library_preview_scroll = 0; }
             }
             KeyCode::Down => {
@@ -1622,13 +1770,17 @@ impl App {
     fn key_placeholder(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Up => { self.tab_focused = true; }
+            KeyCode::Up => { self.focus_depth = 0; }
             _ => {}
         }
         Ok(())
     }
 
     fn key_ideas(&mut self, key: KeyCode) -> Result<()> {
+        // Intake review mode takes over the Intentions panel
+        if self.intake_review.is_some() {
+            return self.key_intake_review(key);
+        }
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
@@ -1653,14 +1805,59 @@ impl App {
                         self.notify(format!("Already submitted ({}%)", idea.pipeline.progress));
                     } else {
                         let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        let idea_path = idea.path.clone();
+                        let idea_title = idea.title.clone();
                         match orrch_core::vault::submit_to_pipeline(&vault, idea) {
                             Ok(_) => {
-                                self.notify(format!("Submitted: {}", idea.title));
+                                // Spawn a session that calls the instruction_intake MCP tool
+                                let project_dir = self.projects_dir.join("orrchestrator");
+                                let goal = format!("Call the instruction_intake tool with file_path: {}", idea_path.display());
+                                let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
+                                self.notify(format!("Pipeline started: {}", idea_title));
                                 self.ideas = orrch_core::vault::load_ideas(&vault);
                             }
                             Err(e) => self.notify(format!("Submit failed: {e}")),
                         }
                     }
+                }
+            }
+            KeyCode::Char('r') => {
+                // Review selected idea — show raw idea (left) vs its derived instructions (right)
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    let raw = std::fs::read_to_string(&idea.path).unwrap_or_default();
+                    let inbox_path = self.projects_dir.join("orrchestrator").join("instructions_inbox.md");
+                    let optimized = if let Ok(inbox) = std::fs::read_to_string(&inbox_path) {
+                        // Find instructions sourced from this idea by matching filename
+                        let source_marker = format!("plans/{}", idea.filename);
+                        if inbox.contains(&source_marker) {
+                            // Extract the package block for this source
+                            let mut in_block = false;
+                            let mut block = String::new();
+                            for line in inbox.lines() {
+                                if line.contains(&source_marker) {
+                                    in_block = true;
+                                }
+                                if in_block {
+                                    block.push_str(line);
+                                    block.push('\n');
+                                }
+                            }
+                            if block.is_empty() { format!("(no instructions found for {})", idea.filename) } else { block }
+                        } else {
+                            format!("(no instructions found for {})", idea.filename)
+                        }
+                    } else {
+                        "(no instructions_inbox.md found)".into()
+                    };
+                    self.intake_review = Some(orrch_core::IntakeReview {
+                        raw,
+                        optimized,
+                        source_project: self.projects_dir.join("orrchestrator"),
+                        source_path: inbox_path,
+                    });
+                    self.intake_review_scroll_raw = 0;
+                    self.intake_review_scroll_opt = 0;
+                    self.intake_review_focus = IntakeReviewFocus::Raw;
                 }
             }
             KeyCode::Char('d') => {
@@ -1678,13 +1875,88 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('i') => {
+                // Toggle audit trail expansion for the selected idea
+                if self.ideas_audit_expanded == Some(self.idea_selected) {
+                    self.ideas_audit_expanded = None;
+                } else {
+                    self.ideas_audit_expanded = Some(self.idea_selected);
+                }
+            }
+            KeyCode::Esc => {
+                if self.ideas_audit_expanded.is_some() {
+                    self.ideas_audit_expanded = None;
+                }
+            }
             KeyCode::Up => {
-                if self.idea_selected == 0 { self.tab_focused = true; }
+                if self.idea_selected == 0 { self.focus_depth = self.content_depth() - 1; }
                 else { self.idea_selected -= 1; }
             }
             KeyCode::Down => {
                 if !self.ideas.is_empty() && self.idea_selected < self.ideas.len() - 1 {
                     self.idea_selected += 1;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_intake_review(&mut self, key: KeyCode) -> Result<()> {
+        // Esc is handled in handle_key before global dispatch
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Tab => {
+                self.intake_review_focus = match self.intake_review_focus {
+                    IntakeReviewFocus::Raw => IntakeReviewFocus::Optimized,
+                    IntakeReviewFocus::Optimized => IntakeReviewFocus::Raw,
+                };
+            }
+            KeyCode::Up => {
+                match self.intake_review_focus {
+                    IntakeReviewFocus::Raw => self.intake_review_scroll_raw = self.intake_review_scroll_raw.saturating_sub(1),
+                    IntakeReviewFocus::Optimized => self.intake_review_scroll_opt = self.intake_review_scroll_opt.saturating_sub(1),
+                }
+            }
+            KeyCode::Down => {
+                match self.intake_review_focus {
+                    IntakeReviewFocus::Raw => self.intake_review_scroll_raw += 1,
+                    IntakeReviewFocus::Optimized => self.intake_review_scroll_opt += 1,
+                }
+            }
+            KeyCode::Char('e') => {
+                // Edit optimized text in vim
+                if let Some(review) = &self.intake_review {
+                    let edit_path = review.source_project.join(".orrch").join("intake_optimized_edit.md");
+                    let _ = std::fs::create_dir_all(edit_path.parent().unwrap());
+                    let _ = std::fs::write(&edit_path, &review.optimized);
+                    self.vim_request = Some(VimRequest {
+                        file: edit_path,
+                        kind: VimKind::IntakeReview,
+                        title: "[Intake Review] Edit optimized instructions".to_string(),
+                    });
+                }
+            }
+            KeyCode::Char('y') => {
+                // Confirm review
+                if let Some(review) = self.intake_review.take() {
+                    match orrch_core::write_intake_decision(&review, "confirmed", &review.optimized) {
+                        Ok(_) => self.notify("Intake review confirmed — instructions will be distributed".into()),
+                        Err(e) => self.notify(format!("Failed to confirm: {e}")),
+                    }
+                    self.intake_review_scroll_raw = 0;
+                    self.intake_review_scroll_opt = 0;
+                }
+            }
+            KeyCode::Char('N') => {
+                // Reject review (capital N to avoid accidental rejection)
+                if let Some(review) = self.intake_review.take() {
+                    match orrch_core::write_intake_decision(&review, "rejected", &review.optimized) {
+                        Ok(_) => self.notify("Intake review rejected".into()),
+                        Err(e) => self.notify(format!("Failed to reject: {e}")),
+                    }
+                    self.intake_review_scroll_raw = 0;
+                    self.intake_review_scroll_opt = 0;
                 }
             }
             _ => {}
@@ -1714,6 +1986,7 @@ impl App {
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
                 self.spawn_agent_idx = 0;
+                self.spawn_workforce_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             KeyCode::Char('N') => {
@@ -1905,7 +2178,7 @@ impl App {
                 }
             }
             KeyCode::Up => {
-                if self.project_selected == 0 { self.tab_focused = true; }
+                if self.project_selected == 0 { self.focus_depth = 0; }
                 else { self.project_selected -= 1; }
             }
             KeyCode::Down => {
@@ -2078,6 +2351,7 @@ impl App {
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
                 self.spawn_agent_idx = 0;
+                self.spawn_workforce_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             KeyCode::Char('x') => {
@@ -2103,7 +2377,7 @@ impl App {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => {
-                if self.production_selected == 0 { self.tab_focused = true; }
+                if self.production_selected == 0 { self.focus_depth = 0; }
                 else { self.production_selected -= 1; }
             }
             KeyCode::Down => {
@@ -2136,6 +2410,7 @@ impl App {
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
                 self.spawn_agent_idx = 0;
+                self.spawn_workforce_idx = 0;
                 self.sub = SubView::SpawnGoal;
                 return Ok(());
             }
@@ -2445,8 +2720,14 @@ impl App {
         match key {
             KeyCode::Esc => self.sub = SubView::List,
             KeyCode::Enter => {
-                self.spawn_agent_idx = 0;
-                self.sub = SubView::SpawnAgent;
+                self.spawn_workforce_idx = 0;
+                if self.loaded_workforces.is_empty() {
+                    // No workforces on disk — skip to agent selection
+                    self.spawn_agent_idx = 0;
+                    self.sub = SubView::SpawnAgent;
+                } else {
+                    self.sub = SubView::SpawnWorkforce;
+                }
             }
             KeyCode::Tab => {
                 if let Some(proj) = self.projects.get(self.spawn_project_idx) {
@@ -2467,6 +2748,33 @@ impl App {
             }
             KeyCode::Backspace => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.pop(); }
             KeyCode::Char(c) => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.push(c); }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_spawn_workforce(&mut self, key: KeyCode) -> Result<()> {
+        let count = 1 + self.loaded_workforces.len(); // 0 = no workforce, 1+ = workforces
+        match key {
+            KeyCode::Esc => self.sub = SubView::List,
+            KeyCode::Tab | KeyCode::Down => {
+                self.spawn_workforce_idx = (self.spawn_workforce_idx + 1) % count;
+            }
+            KeyCode::Up => {
+                self.spawn_workforce_idx = (self.spawn_workforce_idx + count - 1) % count;
+            }
+            KeyCode::Enter => {
+                // If a workforce is selected, pre-select Hypervisor agent
+                if self.spawn_workforce_idx > 0 {
+                    self.spawn_agent_idx = self.agent_profiles.iter()
+                        .position(|p| p.name == "Hypervisor")
+                        .map(|i| i + 1)  // +1 because 0 = no agent
+                        .unwrap_or(0);
+                } else {
+                    self.spawn_agent_idx = 0;
+                }
+                self.sub = SubView::SpawnAgent;
+            }
             _ => {}
         }
         Ok(())
@@ -2533,12 +2841,17 @@ impl App {
                         CONTINUE_DEV_PROMPT.to_string()
                     } else { self.spawn_goal_text.clone() };
 
-                    // Prepend agent profile preamble if one is selected
-                    let goal = if self.spawn_agent_idx > 0 {
+                    let goal = if self.spawn_workforce_idx > 0 {
+                        // MCP tool path: instruct session to call the develop_feature MCP tool
+                        format!("Call the orrchestrator MCP tool 'develop_feature' with goal: {}", raw_goal)
+                    } else if self.spawn_agent_idx > 0 {
+                        // Agent-only path (existing behavior)
                         if let Some(profile) = self.agent_profiles.get(self.spawn_agent_idx - 1) {
                             profile.as_preamble(&raw_goal)
                         } else { raw_goal }
-                    } else { raw_goal };
+                    } else {
+                        raw_goal
+                    };
 
                     if self.spawn_host_idx == 0 {
                         // Local spawn
@@ -2681,6 +2994,7 @@ impl App {
                 self.spawn_goal_text.clear();
                 self.spawn_goal_from_roadmap = None;
                 self.spawn_agent_idx = 0;
+                self.spawn_workforce_idx = 0;
                 self.sub = SubView::SpawnGoal;
             }
             ActionKind::SpawnAll => {
@@ -2965,7 +3279,7 @@ impl App {
                 self.notify("Sessions refreshed".into());
             }
             KeyCode::Up => {
-                if self.session_tab_selected == 0 { self.tab_focused = true; }
+                if self.session_tab_selected == 0 { self.focus_depth = 0; }
                 else { self.session_tab_selected -= 1; }
             }
             KeyCode::Down => {
@@ -3373,6 +3687,7 @@ impl App {
                 format!("[orrchestrator] {name} Master Plan")
             }
             VimKind::NewIdea => "[orrchestrator] New Idea".into(),
+            VimKind::IntakeReview => "[orrchestrator] Intake Review".into(),
         }
     }
 
@@ -3388,6 +3703,10 @@ impl App {
             VimKind::NewIdea => {
                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                 orrch_core::vault::save_idea(&vault, "").ok()
+            }
+            VimKind::IntakeReview => {
+                // Intake review uses an existing file — handled by caller
+                None
             }
         };
         if let Some(file) = file {
@@ -3451,6 +3770,15 @@ impl App {
                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                 self.ideas = orrch_core::vault::load_ideas(&vault);
                 self.notify("Saved".into());
+            }
+            VimKind::IntakeReview => {
+                // Read edited optimized text back into the review
+                if let Some(ref mut review) = self.intake_review {
+                    review.optimized = text.clone();
+                }
+                self.notify("Optimized text updated — y=confirm N=reject".into());
+                // Clean up the temp edit file
+                let _ = std::fs::remove_file(file);
             }
         }
         // Always reload library + workforce data after any vim edit
@@ -3618,7 +3946,7 @@ impl App {
                 }
             }
             KeyCode::Up => {
-                if self.feedback_selected == 0 { self.tab_focused = true; }
+                if self.feedback_selected == 0 { self.focus_depth = 0; }
                 else { self.feedback_selected -= 1; }
             }
             KeyCode::Down => {

@@ -68,6 +68,37 @@ pub enum InterruptCondition {
     Custom { description: String },
 }
 
+impl std::fmt::Display for TriggerCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UserSubmit { input_type } => write!(f, "user submits {}", input_type),
+            Self::InboxNotEmpty { project } => write!(f, "unprocessed instructions exist in project {}", project),
+            Self::Manual => write!(f, "manual trigger"),
+            Self::OperationComplete { operation } => write!(f, "{} operation completes", operation),
+        }
+    }
+}
+
+impl std::fmt::Display for BlockCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApiRateLimited { provider } => write!(f, "API rate limit reached for {}", provider),
+            Self::OperationInProgress { operation } => write!(f, "{} is currently running", operation),
+            Self::Custom { description } => write!(f, "{}", description),
+        }
+    }
+}
+
+impl std::fmt::Display for InterruptCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApiRateLimited { provider } => write!(f, "API rate limit hit for {}", provider),
+            Self::UserCancel => write!(f, "user requests cancellation"),
+            Self::Custom { description } => write!(f, "{}", description),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

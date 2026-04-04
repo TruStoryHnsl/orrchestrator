@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 orrch-core = { path = "../orrch-core" }
+orrch-workforce = { path = "../orrch-workforce" }
 orrch-library = { path = "../orrch-library" }
 orrch-retrospect = { path = "../orrch-retrospect" }
 tokio.workspace = true
@@ -15,3 +16,4 @@ tracing.workspace = true
 anyhow.workspace = true
 arboard.workspace = true
 libc.workspace = true
+pulldown-cmark.workspace = true

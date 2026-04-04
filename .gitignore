@@ -17,6 +17,10 @@ python-prototype/*.egg-info/
 # Retrospect data (generated)
 .retrospect/
 
+# Runtime workflow state
+.orrch/
+.omg/
+
 # OS
 .DS_Store
 ._*

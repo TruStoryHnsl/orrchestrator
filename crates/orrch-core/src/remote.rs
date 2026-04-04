@@ -222,7 +222,7 @@ pub async fn spawn_remote_session(
     goal: &str,
     flags: &[String],
 ) -> anyhow::Result<String> {
-    let flags_str = flags.join(" ");
+    let flags_str = flags.iter().map(|f| shell_escape(f)).collect::<Vec<_>>().join(" ");
     let args = format!(
         "spawn {} {} {} {}",
         shell_escape(project_name),

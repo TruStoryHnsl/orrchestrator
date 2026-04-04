@@ -3,12 +3,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
-    Table, TableState, Tabs, Wrap,
+    Table, TableState, Wrap,
 };
 use ratatui::Frame;
 
 use orrch_core::{Project, SessionState, FeedbackStatus};
-use crate::app::{App, Panel, SubView};
+use crate::app::{App, IntakeReviewFocus, Panel, SubView};
+use crate::markdown::markdown_to_lines;
 
 // ─── Color Palette (all high-contrast, readable on translucent bg) ────
 const ACCENT: Color = Color::Rgb(233, 69, 96);
@@ -43,6 +44,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::SessionFocus(idx) => draw_session_focus(frame, app, layout[1], idx),
         SubView::ExternalSessionView(pid) => draw_external_session(frame, app, layout[1], pid),
         SubView::SpawnGoal => { draw_panel_content(frame, app, layout[1]); draw_spawn_goal(frame, app); }
+        SubView::SpawnWorkforce => { draw_panel_content(frame, app, layout[1]); draw_spawn_workforce(frame, app); }
         SubView::SpawnAgent => { draw_panel_content(frame, app, layout[1]); draw_spawn_agent(frame, app); }
         SubView::SpawnBackend => { draw_panel_content(frame, app, layout[1]); draw_spawn_backend(frame, app); }
         SubView::SpawnHost => { draw_panel_content(frame, app, layout[1]); draw_spawn_host(frame, app); }
@@ -66,18 +68,37 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let focused = app.tab_focused;
+    let focused = app.focus_depth == 0;
     let panel_count = Panel::ALL.len();
     let width = area.width as usize;
-    // Evenly distribute panel labels across the tab bar
-    let cell_width = if panel_count > 0 { width / panel_count } else { width };
+    // Each slot (label + divider) is exactly width/N chars. Dividers always render.
+    let slot_width = if panel_count > 0 { width / panel_count } else { width };
+    let remainder = if panel_count > 0 { width % panel_count } else { 0 };
 
-    let titles: Vec<Line> = Panel::ALL.iter().map(|p| {
-        let label = p.label();
-        let pad_total = cell_width.saturating_sub(label.len());
+    let spans: Vec<Span> = Panel::ALL.iter().enumerate().flat_map(|(i, p)| {
+        let is_last = i == panel_count - 1;
+        // Last slot absorbs remainder pixels and has no divider
+        let label_width = if is_last {
+            slot_width + remainder
+        } else {
+            slot_width.saturating_sub(1) // 1 char reserved for "│"
+        };
+
+        // Pick label tier that fits (need at least 1 char padding each side)
+        let label = if label_width >= p.label().len() + 2 {
+            p.label()
+        } else if label_width >= p.short_label().len() + 2 {
+            p.short_label()
+        } else {
+            p.tiny_label()
+        };
+
+        // Center label, truncate if still too wide
+        let pad_total = label_width.saturating_sub(label.len());
         let pad_left = pad_total / 2;
         let pad_right = pad_total - pad_left;
         let padded = format!("{}{}{}", " ".repeat(pad_left), label, " ".repeat(pad_right));
+        let truncated: String = padded.chars().take(label_width).collect();
 
         let style = if *p == app.panel {
             if focused {
@@ -88,20 +109,19 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(TEXT_MUTED)
         };
-        Line::styled(padded, style)
+
+        let mut result = vec![Span::styled(truncated, style)];
+        if !is_last {
+            result.push(Span::styled("│", Style::default().fg(TEXT_MUTED)));
+        }
+        result
     }).collect();
 
     let bg = if focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
-    let tabs = Tabs::new(titles)
-        .select(app.panel.index())
-        .divider("│")
-        .style(Style::default().bg(bg).fg(TEXT_MUTED))
-        .highlight_style(if focused {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-        } else {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        });
-    frame.render_widget(tabs, area);
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
+        area,
+    );
 }
 
 fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -186,37 +206,36 @@ fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
     use crate::app::DesignSub;
 
-    // Sub-panel selector bar: Intentions + Workforce left, Library right-justified
+    // Sub-panel selector bar: Intentions │ Workforce │ Library (left-justified)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
 
-    let width = chunks[0].width as usize;
-    let mut left_spans: Vec<Span> = Vec::new();
-    for sub in &[DesignSub::Intentions, DesignSub::Workforce] {
+    let bar_focused = app.focus_depth == 1;
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, sub) in DesignSub::ALL.iter().enumerate() {
         let sel = *sub == app.design_sub;
         let style = if sel {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+            if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+            s
         } else {
             Style::default().fg(TEXT_MUTED)
         };
-        left_spans.push(Span::styled(format!(" {} ", sub.label()), style));
-        left_spans.push(Span::styled(" │ ", Style::default().fg(TEXT_MUTED)));
+        spans.push(Span::styled(format!(" {} ", sub.label()), style));
+        if i < DesignSub::ALL.len() - 1 {
+            spans.push(Span::styled("│", Style::default().fg(TEXT_MUTED)));
+        }
     }
-    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
-    let lib_sel = app.design_sub == DesignSub::Library;
-    let lib_style = if lib_sel {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(TEXT_MUTED)
-    };
-    let lib_label = " Library ";
-    let gap = width.saturating_sub(left_width + lib_label.len());
-    left_spans.push(Span::raw(" ".repeat(gap)));
-    left_spans.push(Span::styled(lib_label, lib_style));
 
-    frame.render_widget(Paragraph::new(Line::from(left_spans)), chunks[0]);
+    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)), chunks[0]);
+
+    // Poll for pending intake reviews when viewing Intentions and none is loaded
+    if app.design_sub == DesignSub::Intentions && app.intake_review.is_none() {
+        app.intake_review = orrch_core::intake_review::load_intake_review(&app.projects);
+    }
 
     match app.design_sub {
         DesignSub::Intentions => draw_ideas(frame, app, chunks[1]),
@@ -235,11 +254,14 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Tab bar for workforce sub-tabs
+    let bar_focused = app.focus_depth == 2 && app.design_sub == crate::app::DesignSub::Workforce;
     let tab_spans: Vec<Span> = WorkforceTab::ALL.iter()
         .flat_map(|tab| {
             let sel = *tab == app.workforce_tab;
             let style = if sel {
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+                if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+                s
             } else {
                 Style::default().fg(TEXT_MUTED)
             };
@@ -249,7 +271,8 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
             ]
         })
         .collect();
-    frame.render_widget(Paragraph::new(Line::from(tab_spans)), outer[0]);
+    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg)), outer[0]);
 
     // "Coming soon" tabs
     if matches!(app.workforce_tab, WorkforceTab::TrainingData | WorkforceTab::Models) {
@@ -265,6 +288,12 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(outer[1]);
+
+    // Harnesses tab: availability-aware list + structured preview
+    if app.workforce_tab == WorkforceTab::Harnesses {
+        draw_workforce_harnesses(frame, app, chunks[0], chunks[1]);
+        return;
+    }
 
     let items_data = app.wf_items_for_tab();
     let visible_rows = chunks[0].height.saturating_sub(2) as usize;
@@ -284,10 +313,10 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" {} ({}) — n=new Enter=edit d=del ", app.workforce_tab.label(), items_data.len());
     frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
 
-    // Preview: show file contents
+    // Preview: show file contents with markdown rendering
     let preview = if let Some((_, path)) = items_data.get(app.wf_selected) {
         if let Ok(content) = std::fs::read_to_string(path) {
-            content.lines().map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT_DIM))).collect()
+            markdown_to_lines(&content)
         } else {
             vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
         }
@@ -301,10 +330,88 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((app.wf_preview_scroll as u16, 0)), chunks[1]);
 }
 
+fn draw_workforce_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    // Known repo URLs for the 5 standard harnesses
+    fn repo_url(name: &str) -> &'static str {
+        match name {
+            "claude_code" | "claude-code" => "github.com/anthropics/claude-code",
+            "opencode" => "github.com/sst/opencode",
+            "crush" => "N/A",
+            "codex" | "codex-cli" => "github.com/openai/codex-cli",
+            "gemini_cli" | "gemini-cli" => "github.com/google-gemini/gemini-cli",
+            _ => "N/A",
+        }
+    }
+
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.wf_selected >= visible_rows { app.wf_selected - visible_rows + 1 } else { 0 };
+
+    let mut list_items = Vec::new();
+    for (i, h) in app.library_harnesses.iter().enumerate().skip(scroll_offset) {
+        let sel = app.wf_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        let (indicator, ind_style) = if h.available {
+            ("● ", Style::default().fg(GREEN))
+        } else {
+            ("○ ", Style::default().fg(TEXT_MUTED).add_modifier(Modifier::DIM))
+        };
+        list_items.push(ListItem::new(Line::from(vec![
+            Span::styled(marker.to_owned(), style),
+            Span::styled(indicator.to_owned(), ind_style),
+            Span::styled(h.name.clone(), style),
+        ])));
+    }
+    if list_items.is_empty() {
+        list_items.push(ListItem::new(Line::styled(
+            "  No harnesses in library/harnesses/",
+            Style::default().fg(TEXT_MUTED),
+        )));
+    }
+
+    let title = format!(" Harnesses ({}) ", app.library_harnesses.len());
+    frame.render_widget(
+        List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
+
+    let preview = if let Some(h) = app.library_harnesses.get(app.wf_selected) {
+        let status_line = if h.available {
+            Line::styled("● Available", Style::default().fg(GREEN))
+        } else {
+            Line::styled("○ Not Found", Style::default().fg(WAITING_COLOR))
+        };
+        let repo = repo_url(&h.name);
+        let mut lines = vec![
+            Line::styled(h.name.clone(), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            status_line,
+            Line::styled(format!("Command: {}", h.command), Style::default().fg(TEXT)),
+            Line::styled(format!("Repo:    {}", repo), Style::default().fg(CYAN)),
+            Line::raw(""),
+        ];
+        if !h.notes.is_empty() {
+            lines.extend(markdown_to_lines(&h.notes));
+            lines.push(Line::raw(""));
+        }
+        lines.push(Line::styled("Source: [not indexed yet]", Style::default().fg(TEXT_MUTED)));
+        lines
+    } else {
+        vec![Line::styled("Select a harness to preview", Style::default().fg(TEXT_MUTED))]
+    };
+
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+            .wrap(Wrap { trim: false })
+            .scroll((app.wf_preview_scroll as u16, 0)),
+        preview_area,
+    );
+}
+
 // ─── Library Panel ───────────────────────────────────────────────────
 
 fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
-    use crate::app::LibrarySub;
+    use crate::app::{DesignSub, LibrarySub};
 
     // Layout: sub-panel selector (1 line) + content
     let outer = Layout::default()
@@ -313,6 +420,7 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         .split(area);
 
     // Sub-panel selector bar
+    let bar_focused = app.focus_depth == 2 && app.design_sub == DesignSub::Library;
     let sub_labels: Vec<Span> = LibrarySub::ALL.iter()
         .flat_map(|sub| {
             let sel = *sub == app.library_sub;
@@ -325,7 +433,9 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
                 LibrarySub::Tools => app.library_tools.len(),
             };
             let style = if sel {
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
+                if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+                s
             } else {
                 Style::default().fg(TEXT_MUTED)
             };
@@ -335,7 +445,8 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
             ]
         })
         .collect();
-    frame.render_widget(Paragraph::new(Line::from(sub_labels)), outer[0]);
+    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
+    frame.render_widget(Paragraph::new(Line::from(sub_labels)).style(Style::default().bg(bg)), outer[0]);
 
     // Split content: list (40%) + preview (60%)
     let chunks = Layout::default()
@@ -379,9 +490,7 @@ fn draw_library_agents(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
             Line::styled(format!("Dept: {}", p.department), Style::default().fg(TEXT_DIM)),
             Line::raw(""),
         ];
-        for line in p.prompt.lines() {
-            lines.push(Line::styled(line.to_string(), Style::default().fg(TEXT_DIM)));
-        }
+        lines.extend(markdown_to_lines(&p.prompt));
         lines
     } else { vec![Line::styled("No agents loaded — press n to create", Style::default().fg(TEXT_MUTED))] };
     frame.render_widget(Paragraph::new(preview)
@@ -587,7 +696,7 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
 
     let preview = if let Some((_, path)) = items_data.get(app.library_selected) {
         if let Ok(content) = std::fs::read_to_string(path) {
-            content.lines().map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT_DIM))).collect()
+            markdown_to_lines(&content)
         } else {
             vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
         }
@@ -603,6 +712,11 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
 // ─── Ideas (Design > Intentions) ────────────────────────────────────
 
 fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
+    // Intake review takes over the full area
+    if app.intake_review.is_some() {
+        draw_intake_review(frame, app, area);
+        return;
+    }
     if app.ideas.is_empty() {
         let msg = Paragraph::new("No ideas yet. Press 'n' to create one.\n\nWrite feedback, ideas, or instructions here.\nPress 's' to submit through the instruction intake pipeline.")
             .style(Style::default().fg(TEXT_DIM))
@@ -616,7 +730,7 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
     let yellow_rgb = (255, 200, 50);   // WAITING_COLOR
     let green_rgb = (80, 200, 120);    // GREEN
 
-    let items: Vec<ListItem> = app.ideas.iter().map(|idea| {
+    let items: Vec<ListItem> = app.ideas.iter().enumerate().map(|(idx, idea)| {
         let (r, g, b) = idea.pipeline.gradient_color(default_rgb, yellow_rgb, green_rgb);
         let title_style = Style::default().fg(Color::Rgb(r, g, b)).add_modifier(Modifier::BOLD);
 
@@ -638,7 +752,14 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
         // Package name header (shown when instructions distributed, progress >= 50)
         let package_line = if let Some(ref pkg) = idea.pipeline.package_name {
             let counts: Vec<String> = idea.pipeline.targets.iter()
-                .map(|t| format!("{}:{}", t.project, t.instruction_count))
+                .map(|t| {
+                    let remaining = t.instruction_count.saturating_sub(t.implemented_count);
+                    if t.implemented_count > 0 {
+                        format!("{}:{} remaining ({} done)", t.project, remaining, t.implemented_count)
+                    } else {
+                        format!("{}:{}", t.project, t.instruction_count)
+                    }
+                })
                 .collect();
             format!("  ⟦{}⟧ → {}", pkg, counts.join(", "))
         } else {
@@ -656,8 +777,81 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
         }
         lines.push(Line::styled(format!("  {}", idea.preview), Style::default().fg(TEXT_DIM)));
 
+        // Inline audit trail expansion (toggled with 'i')
+        if app.ideas_audit_expanded == Some(idx) {
+            let idea_filename = idea.path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            // Load audit entries for orrchestrator project dir
+            let project_dir = app.projects_dir.join("orrchestrator");
+            let all_entries = orrch_core::load_audit_entries(&project_dir);
+            let matching: Vec<_> = all_entries.iter()
+                .filter(|e| e.source_file.contains(&idea_filename))
+                .collect();
+
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("── Audit Trail ──", Style::default().fg(TEXT_MUTED)));
+
+            if matching.is_empty() {
+                lines.push(Line::styled("  No audit records for this idea", Style::default().fg(TEXT_MUTED)));
+            } else {
+                for entry in &matching {
+                    let raw_preview = if entry.raw_text.chars().count() > 80 {
+                        format!("{}...", entry.raw_text.chars().take(80).collect::<String>())
+                    } else {
+                        entry.raw_text.clone()
+                    };
+                    let opt_preview = if entry.optimized_text.chars().count() > 80 {
+                        format!("{}...", entry.optimized_text.chars().take(80).collect::<String>())
+                    } else {
+                        entry.optimized_text.clone()
+                    };
+                    let hash_short: String = entry.source_hash.chars().take(8).collect();
+                    lines.push(Line::styled(
+                        format!("  Source: {}", entry.source_file),
+                        Style::default().fg(TEXT_DIM),
+                    ));
+                    lines.push(Line::styled(
+                        format!("  Range: line {}–{}, chars {}–{}",
+                            entry.coordinate.line_start, entry.coordinate.line_end,
+                            entry.coordinate.char_start, entry.coordinate.char_end),
+                        Style::default().fg(TEXT_DIM),
+                    ));
+                    lines.push(Line::styled(
+                        format!("  Raw: {}", raw_preview),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                    lines.push(Line::styled(
+                        format!("  Optimized: {}", opt_preview),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                    lines.push(Line::styled(
+                        format!("  Hash: {}", hash_short),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                    lines.push(Line::raw(""));
+                }
+            }
+            lines.push(Line::styled(
+                "  Press 'i' or Esc to collapse",
+                Style::default().fg(TEXT_DIM),
+            ));
+        }
+
         ListItem::new(lines)
     }).collect();
+
+    // Split area: if open editors exist, carve out a bottom section for them
+    let (list_area, editors_area) = if !app.split_off_editors.is_empty() {
+        let editor_lines = (app.split_off_editors.len() + 3) as u16; // separator + entries + help line
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(editor_lines)])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    };
 
     let title = format!(" Intentions ({}) — n=new s=submit Enter=edit ", app.ideas.len());
     let list = List::new(items)
@@ -666,7 +860,84 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default().bg(BG_HIGHLIGHT))
         .highlight_symbol("■ ");
     let mut state = ListState::default().with_selected(Some(app.idea_selected));
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    // Open Editors section (only rendered when split_off_editors is non-empty)
+    if let Some(editors_rect) = editors_area {
+        let mut editor_lines: Vec<Line> = Vec::new();
+        editor_lines.push(Line::styled(
+            "─── Open Editors ───",
+            Style::default().fg(TEXT_MUTED),
+        ));
+        for name in &app.split_off_editors {
+            editor_lines.push(Line::styled(
+                format!("  ▸ {}", name),
+                Style::default().fg(TEXT_MUTED),
+            ));
+        }
+        editor_lines.push(Line::styled(
+            "Jump to editor: Hypervise > orrch-edit",
+            Style::default().fg(TEXT_DIM),
+        ));
+        frame.render_widget(
+            Paragraph::new(editor_lines).style(Style::default()),
+            editors_rect,
+        );
+    }
+}
+
+// ─── Intake Review Overlay ──────────────────────────────────────────
+
+fn draw_intake_review(frame: &mut Frame, app: &App, area: Rect) {
+    // Layout: banner (2 lines) + body (split 50/50 horizontal)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(area);
+
+    // Banner
+    let banner = Paragraph::new(Line::styled(
+        " Intake Review Pending — y=confirm  e=edit  N=reject  Tab=switch pane ",
+        Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(banner, chunks[0]);
+
+    // Side-by-side panes
+    let panes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[1]);
+
+    if let Some(review) = &app.intake_review {
+        let raw_focused = app.intake_review_focus == IntakeReviewFocus::Raw;
+        let opt_focused = app.intake_review_focus == IntakeReviewFocus::Optimized;
+
+        // Raw pane (left, read-only)
+        let raw_border = if raw_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+        let raw_block = Block::default()
+            .title(" Raw (read-only) ")
+            .borders(Borders::ALL)
+            .border_style(raw_border);
+        let raw_para = Paragraph::new(review.raw.as_str())
+            .style(Style::default().fg(TEXT_DIM))
+            .block(raw_block)
+            .wrap(Wrap { trim: false })
+            .scroll((app.intake_review_scroll_raw, 0));
+        frame.render_widget(raw_para, panes[0]);
+
+        // Optimized pane (right, editable)
+        let opt_border = if opt_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+        let opt_block = Block::default()
+            .title(" Optimized (e=edit) ")
+            .borders(Borders::ALL)
+            .border_style(opt_border);
+        let opt_para = Paragraph::new(review.optimized.as_str())
+            .style(Style::default().fg(TEXT))
+            .block(opt_block)
+            .wrap(Wrap { trim: false })
+            .scroll((app.intake_review_scroll_opt, 0));
+        frame.render_widget(opt_para, panes[1]);
+    }
 }
 
 // ─── Projects Panel (Hot / Cold / Facilities) ────────────────────────
@@ -1235,6 +1506,11 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     // Refresh sessions on each render (fast — just reads tmux state)
     app.managed_sessions = orrch_core::windows::list_all_sessions();
 
+    // Poll workflow status from active sessions' working directories
+    app.workflow_status = app.managed_sessions.iter()
+        .filter(|s| matches!(s.status, SessionStatus::Working | SessionStatus::WaitingForInput))
+        .find_map(|s| orrch_core::load_workflow_status(std::path::Path::new(&s.cwd)));
+
     let mut lines: Vec<Line> = Vec::new();
     let mut flat_idx: usize = 0;
 
@@ -1303,11 +1579,61 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         app.session_tab_selected = total - 1;
     }
 
+    // Decide whether to split for workflow tree
+    let show_workflow = app.workflow_status.as_ref().is_some_and(|ws| {
+        matches!(ws.status.as_str(), "running" | "paused" | "failed" | "complete")
+    });
+
+    let (session_area, workflow_area) = if show_workflow {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    };
+
     let items: Vec<ListItem> = lines.into_iter().map(|l| ListItem::new(l)).collect();
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
         .block(Block::default().title(" Sessions ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
-    frame.render_widget(list, area);
+    frame.render_widget(list, session_area);
+
+    // Render workflow agent tree when a workflow is running
+    if let (Some(wf_area), Some(ws)) = (workflow_area, &app.workflow_status) {
+        let mut tree_lines: Vec<Line> = Vec::new();
+        let agent_count = ws.agents.len();
+        for (i, agent) in ws.agents.iter().enumerate() {
+            let is_last = i == agent_count - 1;
+            let connector = if is_last { "  └─ " } else { "  ├─ " };
+            let status_color = match agent.status.as_str() {
+                "complete" => GREEN,
+                "running" => GREEN,
+                "waiting" => WAITING_COLOR,
+                "failed" => ACCENT,
+                _ => TEXT_MUTED,
+            };
+            tree_lines.push(Line::from(vec![
+                Span::styled(connector, Style::default().fg(TEXT_DIM)),
+                Span::styled(&agent.role, Style::default().fg(TEXT)),
+                Span::styled(format!("    [{}]", agent.status), Style::default().fg(status_color)),
+            ]));
+        }
+
+        let title = format!(
+            " Workflow: {} \u{2014} Step {}/{} ",
+            ws.workflow, ws.step, ws.total_steps
+        );
+        let tree_block = Paragraph::new(tree_lines)
+            .block(
+                Block::default()
+                    .title(Span::styled(&title, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)))
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_DIM)),
+            );
+        frame.render_widget(tree_block, wf_area);
+    }
 }
 
 fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -1513,6 +1839,40 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
     }
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Goal (N=spawn all) ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+        .wrap(Wrap { trim: false }), popup);
+}
+
+fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
+    let height = 7 + app.loaded_workforces.len() as u16;
+    let popup = centered_popup(frame.area(), 60, height.min(16));
+    frame.render_widget(Clear, popup);
+    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let mut lines = vec![
+        Line::from(vec![Span::raw("Goal: "), Span::styled(goal_display, Style::default().fg(GREEN))]),
+        Line::raw(""),
+        Line::styled("Workforce (Tab/arrows to select, Enter to confirm):", Style::default().fg(TEXT_DIM)),
+    ];
+
+    // Option 0: no workforce (solo session)
+    let no_wf_sel = app.spawn_workforce_idx == 0;
+    lines.push(Line::styled(
+        format!("{} (none) — solo session", if no_wf_sel { "▶" } else { " " }),
+        if no_wf_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+    ));
+
+    // Workforce templates
+    for (i, wf) in app.loaded_workforces.iter().enumerate() {
+        let sel = app.spawn_workforce_idx == i + 1;
+        let marker = if sel { "■ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{}{}", marker, wf.name),
+                if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
+            Span::styled(format!("  ({} agents)", wf.agents.len()), Style::default().fg(TEXT_MUTED)),
+        ]));
+    }
+
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Workforce ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
         .wrap(Wrap { trim: false }), popup);
 }
 
