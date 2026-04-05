@@ -24,6 +24,14 @@ impl BackendKind {
             Self::Gemini => "[gemini]",
         }
     }
+
+    /// Map backend to the provider name used in valve store and model definitions.
+    pub fn provider_name(&self) -> &'static str {
+        match self {
+            Self::Claude => "Anthropic",
+            Self::Gemini => "Google",
+        }
+    }
 }
 
 impl Default for BackendKind {
@@ -118,6 +126,20 @@ impl BackendsConfig {
             .filter(|(_, cfg)| cfg.available)
             .map(|(kind, _)| *kind)
             .collect()
+    }
+}
+
+/// Check if a backend is available for spawning, considering both system availability
+/// and external block status (e.g., valve state).
+/// `valve_blocked` should be true if the provider's valve is closed.
+pub fn is_provider_available(backends: &BackendsConfig, kind: BackendKind, valve_blocked: bool) -> (bool, &'static str) {
+    if valve_blocked {
+        return (false, "provider valve is closed");
+    }
+    match backends.backends.get(&kind) {
+        Some(cfg) if cfg.available => (true, ""),
+        Some(_) => (false, "backend binary not found"),
+        None => (false, "backend not configured"),
     }
 }
 
