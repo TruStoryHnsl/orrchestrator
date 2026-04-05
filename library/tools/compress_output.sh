@@ -67,8 +67,26 @@ BULLET_PATHS="$(printf '%s\n' "$INPUT" \
     | sort -u \
     || true)"
 
+# Pass 4: narrative agent summaries — "Modified: file.rs" or "**file.rs**" or "`file.rs`"
+# Also handles markdown formatting: **`path`**, backtick-wrapped paths, bold labels
+NARRATIVE_PATHS="$(printf '%s\n' "$INPUT" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | sed 's/\*\*//g; s/`//g' \
+    | grep -Eo '(crates|src|library|agents|operations|workforces|plans)/[A-Za-z0-9_./-]+\.(rs|sh|toml|md|json|yaml)' \
+    | sort -u \
+    || true)"
+
+# Pass 5: narrative "Files changed:" or "Files:" sections with path-per-line
+SECTION_PATHS="$(printf '%s\n' "$INPUT" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | sed -n '/^[#]*[[:space:]]*Files/,/^[#]*[[:space:]]*[A-Z]/p' \
+    | grep -Eo '[A-Za-z0-9_/-]+\.(rs|sh|toml|md|json)' 2>/dev/null \
+    | sort -u \
+    || true)"
+
 # Combine all found paths into one sorted-unique list
-ALL_PATHS="$(printf '%s\n%s\n%s\n' "$PATH_LINES" "$BULLET_PATHS" \
+ALL_PATHS="$(printf '%s\n%s\n%s\n%s\n%s\n' "$PATH_LINES" "$BULLET_PATHS" \
+    "$NARRATIVE_PATHS" "$SECTION_PATHS" \
     "$(printf '%s\n' "$LABELED_LINES" \
         | grep -Eo '(crates|src|library)/[A-Za-z0-9_./-]+' \
         || true)" \
@@ -124,19 +142,30 @@ FILE_CHANGE_LINES="$(printf '%s\n' "$INPUT" \
     | head -15 \
     || true)"
 
+# Narrative change descriptions (from agent markdown summaries)
+NARRATIVE_CHANGES="$(printf '%s\n' "$INPUT" \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | grep -Ei '(expand|create|replace|update|refactor|rewrite|extend|convert|hook|wire)[a-z]*[[:space:]]' \
+    | grep -Ev '^(#|>|```|---|\|)' \
+    | sed 's/^[[:space:]]*//' \
+    | sort -u \
+    | head -15 \
+    || true)"
+
 # ── STATUS EXTRACTION ─────────────────────────────────────────────────────────
 
-# Build result
+# Build result (raw cargo output OR narrative summaries)
 BUILD_LINE="$(printf '%s\n' "$INPUT" \
     | sed 's/\x1b\[[0-9;]*m//g' \
-    | grep -Ei '(Finished|Compiling|error\[|^error:|cargo build|cargo check|build (passed|failed|succeeded|ok))' \
+    | grep -Ei '(Finished|Compiling|error\[|^error:|cargo build|cargo check|build (passed|failed|succeeded|ok)|build:.*pass|build.*succeeds|compil(es|ation).*succeed)' \
     | tail -5 \
     || true)"
 
-# Test result
+# Test result (raw cargo output OR narrative summaries)
+# First try to extract "Tests: ..." from a line that may also contain build info
 TEST_LINE="$(printf '%s\n' "$INPUT" \
     | sed 's/\x1b\[[0-9;]*m//g' \
-    | grep -Ei '(test result:|tests? (passed|failed)|[0-9]+ passed|[0-9]+ failed|running [0-9]+ test)' \
+    | grep -Eoi '(test result:[^.]*|tests?:?[[:space:]]*[0-9]+/?[0-9]* (passed|passing|failed)[^.]*|running [0-9]+ test[^.]*|all [0-9]+ tests? pass[^.]*)' \
     | tail -3 \
     || true)"
 
@@ -156,7 +185,7 @@ ISSUES_LINES="$(printf '%s\n' "$INPUT" \
 # Determine if we found anything useful
 FOUND_SOMETHING=false
 [[ -n "$FILES_SECTION" ]] && FOUND_SOMETHING=true
-[[ -n "$CHANGES_LINES" || -n "$FILE_CHANGE_LINES" ]] && FOUND_SOMETHING=true
+[[ -n "$CHANGES_LINES" || -n "$FILE_CHANGE_LINES" || -n "$NARRATIVE_CHANGES" ]] && FOUND_SOMETHING=true
 [[ -n "$BUILD_LINE" || -n "$TEST_LINE" || -n "$ISSUES_LINES" ]] && FOUND_SOMETHING=true
 
 # ── OUTPUT ────────────────────────────────────────────────────────────────────
@@ -186,6 +215,8 @@ if [[ -n "$FILE_CHANGE_LINES" ]]; then
     printf '%s\n' "$FILE_CHANGE_LINES"
 elif [[ -n "$CHANGES_LINES" ]]; then
     printf '%s\n' "$CHANGES_LINES"
+elif [[ -n "$NARRATIVE_CHANGES" ]]; then
+    printf '%s\n' "$NARRATIVE_CHANGES"
 else
     echo "(none detected)"
 fi
@@ -197,27 +228,29 @@ echo "### Status"
 if [[ -n "$BUILD_LINE" ]]; then
     # Summarise: look for pass/fail keywords in the raw cargo output
     if printf '%s\n' "$BUILD_LINE" | grep -qi 'error\['; then
-        # Extract first error line as the summary
         first_err="$(printf '%s\n' "$BUILD_LINE" | grep -i 'error\[' | head -1)"
         echo "Build: FAIL — $first_err"
-    elif printf '%s\n' "$BUILD_LINE" | grep -qiE 'Finished|build (passed|succeeded|ok)'; then
+    elif printf '%s\n' "$BUILD_LINE" | grep -qiE 'Finished|build.*(passed|succeeded|ok|pass)'; then
         echo "Build: pass"
     else
-        echo "Build: $(printf '%s\n' "$BUILD_LINE" | tail -1)"
+        # Strip leading "Build:" from narrative lines to avoid "Build: Build: ..."
+        line="$(printf '%s\n' "$BUILD_LINE" | tail -1 | sed 's/^[Bb]uild:[[:space:]]*//')"
+        echo "Build: $line"
     fi
 else
     echo "Build: (no cargo output detected)"
 fi
 
 if [[ -n "$TEST_LINE" ]]; then
-    # Summarise test result to one line
     summary="$(printf '%s\n' "$TEST_LINE" \
-        | grep -Ei 'test result:|[0-9]+ passed' \
-        | tail -1)"
+        | grep -Ei 'test result:|[0-9]+ passed|[0-9]+/[0-9]+|TESTS:' \
+        | tail -1 \
+        | sed 's/^[Tt]ests:[[:space:]]*//')"
     if [[ -n "$summary" ]]; then
         echo "Tests: $summary"
     else
-        echo "Tests: $(printf '%s\n' "$TEST_LINE" | tail -1)"
+        line="$(printf '%s\n' "$TEST_LINE" | tail -1 | sed 's/^[Tt]ests:[[:space:]]*//')"
+        echo "Tests: $line"
     fi
 else
     echo "Tests: (no test output detected)"

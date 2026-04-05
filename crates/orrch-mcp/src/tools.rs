@@ -408,25 +408,64 @@ fn develop_feature(_server: &OrrchMcpServer, args: &Value) -> String {
     format!(
         "Develop-feature workflow for: {goal}\n\
          Project: {project_dir}\n\n\
-         Execute these steps using tools and Agent spawns:\n\n\
+         The Hypervisor is a THIN DISPATCHER. Execute exactly these steps:\n\n\
          1. Call MCP tool `workflow_init` with project_dir=\"{project_dir}\"\n\
-         2. Check `plan_ready` flag in init output:\n\
-            - If TRUE: spawn lightweight PM to CONVERT tasks to TASK blocks (no re-planning)\n\
-            - If FALSE: spawn full PM to plan from scratch\n\
-         3. Call MCP tool `workflow_cluster` with the PM's plan output\n\
-         4. For each cluster: READ the files in its Files: list, then spawn Agent\n\
-            with those file contents inlined (agents do NOT re-read these files)\n\
-         5. Call MCP tool `workflow_compress` on each agent's output.\n\
-            ONLY pass the compressed output to subsequent steps — never the raw output.\n\
-         6. Determine testing level:\n\
-            - FULL (2 testers): if work completes a phase/milestone, OR new traits/crates\n\
-              were created, OR math/projection/auth code was modified\n\
-            - LIGHT: just run `cargo test --workspace`, skip tester agents\n\
-         7. If FULL testing: spawn 2 Agents (testers) with compressed file list.\n\
-            Call `workflow_compress` on tester outputs.\n\
-         8. Spawn Agent (PM) to evaluate — PASS/REWORK/SHIP_WITH_ISSUES\n\
-         9. If REWORK: spawn Developer with fix list, re-verify (max 3 cycles)\n\
-         10. Update PLAN.md [x], write DEVLOG.md, git commit"
+         2. Ensure you are on the main branch at HEAD before spawning any worktree agents.\n\
+            Run `git checkout main` if needed.\n\
+         3. Spawn a SINGLE PM agent (subagent_type: general-purpose) with:\n\
+            - The full codebase brief + unchecked items from step 1\n\
+            - The goal: \"{goal}\"\n\
+            - The PM instructions below\n\
+         4. When the PM returns, take its final output and commit.\n\
+            Update PLAN.md with [x] for completed items. Commit with conventional format.\n\n\
+         That's it. The PM manages the entire dev loop. Do NOT:\n\
+         - Cluster tasks yourself (PM does it)\n\
+         - Spawn developer agents yourself (PM does it)\n\
+         - Spawn tester agents yourself (PM does it)\n\
+         - Evaluate pass/fail yourself (PM does it)\n\
+         - Second-guess or filter the PM's task selection\n\n\
+         ---\n\n\
+         ## PM AGENT INSTRUCTIONS\n\n\
+         You are the Project Manager. You own the entire dev loop for this sprint.\n\n\
+         ### Phase 1: Task Selection\n\
+         Read the unchecked items from the codebase brief. Select the next batch of\n\
+         actionable items (no artificial limit — pick everything that's unblocked).\n\
+         Output each as a TASK block:\n\n\
+         ```\n\
+         TASK <id>: <description>\n\
+         Agent: <role>\n\
+         Files: <comma-separated paths>\n\
+         Work: <2-3 sentences>\n\
+         Acceptance: <one measurable criterion>\n\
+         Depends: <task ids or none>\n\
+         ```\n\n\
+         ### Phase 2: Clustering\n\
+         Call MCP tool `workflow_cluster` with your TASK blocks.\n\
+         The cluster tool groups tasks by shared files and assigns execution waves.\n\n\
+         ### Phase 3: Agent Dispatch\n\
+         For EACH cluster, spawn a Developer agent (using the Agent tool with\n\
+         isolation: \"worktree\") with:\n\
+         - All tasks in that cluster\n\
+         - The codebase brief for context\n\
+         - Instruction to run `cargo build` and `cargo test` after changes\n\
+         Spawn clusters in the same wave IN PARALLEL (multiple Agent calls in one message).\n\
+         Wait for wave N to complete before starting wave N+1.\n\
+         Dispatch ALL tasks. Do not skip or defer any.\n\n\
+         ### Phase 4: Compression\n\
+         Call MCP tool `workflow_compress` on each developer agent's output.\n\n\
+         ### Phase 5: Testing (conditional)\n\
+         Spawn tester agents ONLY if the work involves significant structural changes:\n\
+         new crates, new traits, modified auth/security code, or completing a full phase.\n\
+         Otherwise, the developer's own `cargo test` is sufficient.\n\n\
+         ### Phase 6: Evaluation\n\
+         Review all compressed outputs. Determine: PASS / REWORK / SHIP_WITH_ISSUES.\n\
+         If REWORK: spawn a Developer agent with the fix list (max 3 rework cycles).\n\n\
+         ### Phase 7: Report\n\
+         Return a final report listing:\n\
+         - Each task ID and whether it passed\n\
+         - Files changed per task\n\
+         - Any worktree paths/branches that contain the changes\n\
+         - Which PLAN.md items to mark [x]"
     )
 }
 
@@ -734,6 +773,27 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "private".to_string());
 
+    // 1b. Check git branch state — warn if not on main.
+    let git_branch = std::process::Command::new("git")
+        .args(["-C", project_dir, "rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let git_commit = std::process::Command::new("git")
+        .args(["-C", project_dir, "rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let branch_warning = if git_branch != "main" && git_branch != "master" {
+        format!("\n⚠ WARNING: Not on main branch (on '{git_branch}'). \
+                 Worktree agents will branch from this commit, not main HEAD. \
+                 Run `git checkout main` first to avoid merge conflicts.\n")
+    } else {
+        String::new()
+    };
+
     // 2. Run codebase_brief.sh.
     let brief_script = server.library_dir.join("tools/codebase_brief.sh");
     let brief_output = if brief_script.exists() {
@@ -886,9 +946,11 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
     format!(
         "## Workflow Initialized\n\
          Scope: {scope}\n\
+         Branch: {git_branch} ({git_commit})\n\
          Plan ready: {plan_ready}\n\
          Items: {item_count} unchecked\n\
-         Inbox stragglers: {stragglers_summary}\n\n\
+         Inbox stragglers: {stragglers_summary}\n\
+         {branch_warning}\n\
          ## Codebase Brief\n\
          {brief_output}\n\
          ## Instructions (unchecked dev map items)\n\
