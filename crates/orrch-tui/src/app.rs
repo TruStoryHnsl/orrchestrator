@@ -131,6 +131,10 @@ pub enum SubView {
     FeedbackConfirm(usize), // index into feedback_items
     /// Workflow picker — select a workflow script to run.
     WorkflowPicker,
+    /// Add Feature popup in dev map (project index).
+    AddFeature(usize),
+    /// Add MCP Server registration form.
+    AddMcpServer,
 }
 
 /// Sub-panels within the Design panel.
@@ -547,6 +551,19 @@ pub struct App {
     /// Selected index in workflow picker
     pub workflow_picker_idx: usize,
 
+    // Add Feature popup state (Task 47)
+    pub add_feature_title: String,
+    pub add_feature_desc: String,
+    pub add_feature_field: usize, // 0=title, 1=desc
+
+    // Add MCP Server form state (Task 62)
+    pub add_mcp_name: String,
+    pub add_mcp_desc: String,
+    pub add_mcp_transport: usize,   // 0=stdio, 1=sse
+    pub add_mcp_command: String,    // command (stdio) or url (sse)
+    pub add_mcp_args: String,       // space-separated args (stdio only)
+    pub add_mcp_roles: String,      // comma-separated role names
+    pub add_mcp_field: usize,       // 0=name, 1=desc, 2=transport, 3=command/url, 4=args, 5=roles
 }
 
 /// A versioned release entry for the Production panel.
@@ -711,6 +728,17 @@ impl App {
             ideas_audit_expanded: None,
             workflow_choices: Vec::new(),
             workflow_picker_idx: 0,
+            add_feature_title: String::new(),
+            add_feature_desc: String::new(),
+            add_feature_field: 0,
+
+            add_mcp_name: String::new(),
+            add_mcp_desc: String::new(),
+            add_mcp_transport: 0,
+            add_mcp_command: String::new(),
+            add_mcp_args: String::new(),
+            add_mcp_roles: String::new(),
+            add_mcp_field: 0,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1384,7 +1412,7 @@ impl App {
         }
 
         // Normalize vim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -1505,6 +1533,8 @@ impl App {
                 self.key_feedback_confirm(key, idx)
             }
             SubView::WorkflowPicker => self.key_workflow_picker(key),
+            SubView::AddFeature(pidx) => { let pidx = *pidx; self.key_add_feature(key, pidx) }
+            SubView::AddMcpServer => self.key_add_mcp_server(key),
         }
     }
 
@@ -1825,6 +1855,17 @@ impl App {
                     let status = if self.library_mcp_servers[idx].enabled { "enabled" } else { "disabled" };
                     self.notify(format!("{} {}", name, status));
                 }
+            }
+            // Task 62: Register new external MCP server
+            KeyCode::Char('n') if self.library_sub == LibrarySub::McpServers => {
+                self.add_mcp_name.clear();
+                self.add_mcp_desc.clear();
+                self.add_mcp_transport = 0;
+                self.add_mcp_command.clear();
+                self.add_mcp_args.clear();
+                self.add_mcp_roles.clear();
+                self.add_mcp_field = 0;
+                self.sub = SubView::AddMcpServer;
             }
             _ => {}
         }
@@ -2742,6 +2783,241 @@ impl App {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            // Task 46: Reorder features with J (down) / K (up)
+            KeyCode::Char('J') => {
+                self.devmap_move_feature(proj_idx, orrch_core::MoveDirection::Down);
+            }
+            KeyCode::Char('K') => {
+                self.devmap_move_feature(proj_idx, orrch_core::MoveDirection::Up);
+            }
+            // Task 47: Add Feature popup
+            KeyCode::Char('a') => {
+                if let Some((_is_phase, _phase_idx, _)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                    // 'a' works on both phase headers and features (adds to the selected/containing phase)
+                    self.add_feature_title.clear();
+                    self.add_feature_desc.clear();
+                    self.add_feature_field = 0;
+                    self.sub = SubView::AddFeature(proj_idx);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Move the currently selected feature in the dev map.
+    fn devmap_move_feature(&mut self, proj_idx: usize, direction: orrch_core::MoveDirection) {
+        let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) else {
+            return;
+        };
+        if is_phase {
+            return; // can't move phase headers
+        }
+        let plan_path = {
+            let Some(proj) = self.projects.get(proj_idx) else { return; };
+            let Some(ref plan_file) = proj.meta.plan_file else {
+                self.notify("No PLAN.md".into());
+                return;
+            };
+            proj.path.join(plan_file)
+        };
+        match orrch_core::move_feature_in_plan(&plan_path, phase_idx, feat_idx, direction) {
+            Ok(true) => {
+                // Reload plan phases for this project
+                self.reload_project_plan(proj_idx);
+                // Adjust selection to follow the moved feature
+                match direction {
+                    orrch_core::MoveDirection::Up => {
+                        self.devmap_selected = self.devmap_selected.saturating_sub(1);
+                    }
+                    orrch_core::MoveDirection::Down => {
+                        self.devmap_selected += 1;
+                    }
+                }
+            }
+            Ok(false) => {
+                self.notify("Cannot move".into());
+            }
+            Err(e) => {
+                self.notify(format!("Move failed: {e}"));
+            }
+        }
+    }
+
+    /// Reload plan phases for a single project from disk.
+    fn reload_project_plan(&mut self, proj_idx: usize) {
+        let Some(proj) = self.projects.get_mut(proj_idx) else { return; };
+        if let Some(ref plan_file) = proj.meta.plan_file {
+            let plan_path = proj.path.join(plan_file);
+            if let Ok(content) = std::fs::read_to_string(&plan_path) {
+                proj.plan_phases = orrch_core::parse_plan(&content);
+            }
+        }
+    }
+
+    /// Handle key input in the AddFeature popup (Task 47).
+    fn key_add_feature(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Esc => {
+                self.sub = SubView::ProjectDetail(proj_idx);
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.add_feature_field = if self.add_feature_field == 0 { 1 } else { 0 };
+            }
+            KeyCode::Enter => {
+                let title = self.add_feature_title.trim().to_string();
+                if title.is_empty() {
+                    self.notify("Title is required".into());
+                    return Ok(());
+                }
+                let desc = self.add_feature_desc.trim().to_string();
+                // Determine which phase we're in
+                let phase_idx = if let Some((_is_phase, pidx, _)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                    pidx
+                } else if let Some(proj) = self.projects.get(proj_idx) {
+                    // Default to last phase
+                    proj.plan_phases.len().saturating_sub(1)
+                } else {
+                    0
+                };
+                let plan_path = {
+                    let Some(proj) = self.projects.get(proj_idx) else {
+                        self.sub = SubView::ProjectDetail(proj_idx);
+                        return Ok(());
+                    };
+                    let Some(ref plan_file) = proj.meta.plan_file else {
+                        self.notify("No PLAN.md".into());
+                        self.sub = SubView::ProjectDetail(proj_idx);
+                        return Ok(());
+                    };
+                    proj.path.join(plan_file)
+                };
+                match orrch_core::append_feature_to_plan(&plan_path, phase_idx, &title, &desc) {
+                    Ok(true) => {
+                        self.reload_project_plan(proj_idx);
+                        self.notify(format!("Added: {title}"));
+                    }
+                    Ok(false) => {
+                        self.notify("Failed to add feature".into());
+                    }
+                    Err(e) => {
+                        self.notify(format!("Error: {e}"));
+                    }
+                }
+                self.sub = SubView::ProjectDetail(proj_idx);
+            }
+            KeyCode::Backspace => {
+                match self.add_feature_field {
+                    0 => { self.add_feature_title.pop(); }
+                    _ => { self.add_feature_desc.pop(); }
+                }
+            }
+            KeyCode::Char(c) => {
+                match self.add_feature_field {
+                    0 => self.add_feature_title.push(c),
+                    _ => self.add_feature_desc.push(c),
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle key input in the AddMcpServer form (Task 62).
+    fn key_add_mcp_server(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Tab => {
+                self.add_mcp_field = (self.add_mcp_field + 1) % 6;
+            }
+            KeyCode::BackTab => {
+                self.add_mcp_field = if self.add_mcp_field == 0 { 5 } else { self.add_mcp_field - 1 };
+            }
+            KeyCode::Enter => {
+                if self.add_mcp_field == 2 {
+                    // Toggle transport type
+                    self.add_mcp_transport = 1 - self.add_mcp_transport;
+                    return Ok(());
+                }
+                // Submit
+                let name = self.add_mcp_name.trim().to_string();
+                if name.is_empty() {
+                    self.notify("Server name is required".into());
+                    return Ok(());
+                }
+                let description = self.add_mcp_desc.trim().to_string();
+                let transport = if self.add_mcp_transport == 0 {
+                    orrch_library::McpTransport::Stdio {
+                        command: self.add_mcp_command.trim().to_string(),
+                        args: self.add_mcp_args.split_whitespace().map(|s| s.to_string()).collect(),
+                        env: std::collections::HashMap::new(),
+                    }
+                } else {
+                    orrch_library::McpTransport::Sse {
+                        url: self.add_mcp_command.trim().to_string(),
+                    }
+                };
+                let assigned_roles: Vec<String> = self.add_mcp_roles
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                let entry = orrch_library::McpServerEntry {
+                    name: name.clone(),
+                    description,
+                    transport,
+                    enabled: true,
+                    assigned_roles,
+                    notes: String::new(),
+                    path: std::path::PathBuf::new(),
+                };
+
+                let mcp_dir = self.projects_dir.join("orrchestrator/library/mcp_servers");
+                match orrch_library::save_mcp_server(&mcp_dir, &entry) {
+                    Ok(_) => {
+                        // Reload MCP servers
+                        self.library_mcp_servers = orrch_library::load_mcp_servers(&mcp_dir);
+                        self.notify(format!("Added MCP server: {name}"));
+                    }
+                    Err(e) => {
+                        self.notify(format!("Failed: {e}"));
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                match self.add_mcp_field {
+                    0 => { self.add_mcp_name.pop(); }
+                    1 => { self.add_mcp_desc.pop(); }
+                    2 => {} // transport is a toggle
+                    3 => { self.add_mcp_command.pop(); }
+                    4 => { self.add_mcp_args.pop(); }
+                    5 => { self.add_mcp_roles.pop(); }
+                    _ => {}
+                }
+            }
+            KeyCode::Char(c) => {
+                if self.add_mcp_field == 2 {
+                    // Transport: s=stdio, e=sse
+                    match c {
+                        's' | 'S' => self.add_mcp_transport = 0,
+                        'e' | 'E' => self.add_mcp_transport = 1,
+                        _ => {}
+                    }
+                } else {
+                    match self.add_mcp_field {
+                        0 => self.add_mcp_name.push(c),
+                        1 => self.add_mcp_desc.push(c),
+                        3 => self.add_mcp_command.push(c),
+                        4 => self.add_mcp_args.push(c),
+                        5 => self.add_mcp_roles.push(c),
+                        _ => {}
                     }
                 }
             }
