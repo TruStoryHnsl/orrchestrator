@@ -92,6 +92,58 @@ fn extract_list(fm: &str, key: &str) -> Vec<String> {
     crate::store::extract_list_pub(fm, key)
 }
 
+/// Save an MCP server entry as a `.md` file with YAML frontmatter.
+///
+/// Creates the directory if it doesn't exist. Filename is derived from the
+/// server name (lowercased, spaces to hyphens).
+pub fn save_mcp_server(dir: &Path, entry: &McpServerEntry) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+
+    let filename = entry.name.to_lowercase().replace(' ', "-");
+    let path = dir.join(format!("{filename}.md"));
+
+    let mut content = String::from("---\n");
+    content.push_str(&format!("name: {}\n", entry.name));
+    content.push_str(&format!("description: {}\n", entry.description));
+
+    match &entry.transport {
+        McpTransport::Stdio { command, args, env: _ } => {
+            content.push_str("transport: stdio\n");
+            content.push_str(&format!("command: {}\n", command));
+            if !args.is_empty() {
+                content.push_str("args:\n");
+                for arg in args {
+                    content.push_str(&format!("  - {}\n", arg));
+                }
+            }
+        }
+        McpTransport::Sse { url } => {
+            content.push_str("transport: sse\n");
+            content.push_str(&format!("url: {}\n", url));
+        }
+    }
+
+    content.push_str(&format!("enabled: {}\n", entry.enabled));
+
+    if !entry.assigned_roles.is_empty() {
+        content.push_str("assigned_roles:\n");
+        for role in &entry.assigned_roles {
+            content.push_str(&format!("  - {}\n", role));
+        }
+    }
+
+    content.push_str("---\n");
+
+    if !entry.notes.is_empty() {
+        content.push('\n');
+        content.push_str(&entry.notes);
+        content.push('\n');
+    }
+
+    std::fs::write(&path, &content)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

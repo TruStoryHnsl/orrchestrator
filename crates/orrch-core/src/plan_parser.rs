@@ -440,6 +440,212 @@ fn parse_title_description(text: &str) -> (String, String) {
     (text.trim().to_string(), String::new())
 }
 
+/// Direction for moving features.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveDirection {
+    Up,
+    Down,
+}
+
+/// Move a feature up or down within a Plan.md file.
+///
+/// Within a phase, swaps adjacent feature lines.
+/// Cross-phase: moves the feature to the last position of the previous phase
+/// (for Up) or the first position of the next phase (for Down).
+///
+/// `phase_idx` and `feature_idx` are indices into the parsed PlanPhase/PlanFeature vectors.
+pub fn move_feature_in_plan(
+    plan_path: &std::path::Path,
+    phase_idx: usize,
+    feature_idx: usize,
+    direction: MoveDirection,
+) -> std::io::Result<bool> {
+    let contents = std::fs::read_to_string(plan_path)?;
+    let phases = parse_plan(&contents);
+
+    let phase = match phases.get(phase_idx) {
+        Some(p) => p,
+        None => return Ok(false),
+    };
+
+    // Find the source feature's line in the file by matching its title
+    let feat = match phase.features.get(feature_idx) {
+        Some(f) => f,
+        None => return Ok(false),
+    };
+
+    let lines: Vec<&str> = contents.lines().collect();
+
+    // Find the line index of the feature we want to move
+    let source_line = match find_feature_line(&lines, &feat.title) {
+        Some(idx) => idx,
+        None => return Ok(false),
+    };
+
+    let mut new_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+    match direction {
+        MoveDirection::Up => {
+            if feature_idx > 0 {
+                // Swap with previous feature in same phase
+                let prev_feat = &phase.features[feature_idx - 1];
+                let prev_line = match find_feature_line(&lines, &prev_feat.title) {
+                    Some(idx) => idx,
+                    None => return Ok(false),
+                };
+                new_lines.swap(source_line, prev_line);
+            } else if phase_idx > 0 {
+                // Cross-phase: move to end of previous phase
+                let prev_phase = &phases[phase_idx - 1];
+                if prev_phase.features.is_empty() {
+                    // Insert after the phase header
+                    let target = match find_phase_header_line(&lines, &prev_phase.name) {
+                        Some(idx) => idx + 1,
+                        None => return Ok(false),
+                    };
+                    let removed = new_lines.remove(source_line);
+                    let insert_at = if source_line < target { target - 1 } else { target };
+                    new_lines.insert(insert_at, removed);
+                } else {
+                    let last_feat = prev_phase.features.last().unwrap();
+                    let target = match find_feature_line(&lines, &last_feat.title) {
+                        Some(idx) => idx,
+                        None => return Ok(false),
+                    };
+                    let removed = new_lines.remove(source_line);
+                    let insert_at = if source_line < target { target } else { target + 1 };
+                    new_lines.insert(insert_at, removed);
+                }
+            } else {
+                return Ok(false); // already at top
+            }
+        }
+        MoveDirection::Down => {
+            if feature_idx + 1 < phase.features.len() {
+                // Swap with next feature in same phase
+                let next_feat = &phase.features[feature_idx + 1];
+                let next_line = match find_feature_line(&lines, &next_feat.title) {
+                    Some(idx) => idx,
+                    None => return Ok(false),
+                };
+                new_lines.swap(source_line, next_line);
+            } else if phase_idx + 1 < phases.len() {
+                // Cross-phase: move to start of next phase
+                let next_phase = &phases[phase_idx + 1];
+                if next_phase.features.is_empty() {
+                    let target = match find_phase_header_line(&lines, &next_phase.name) {
+                        Some(idx) => idx + 1,
+                        None => return Ok(false),
+                    };
+                    let removed = new_lines.remove(source_line);
+                    let insert_at = if source_line < target { target - 1 } else { target };
+                    new_lines.insert(insert_at, removed);
+                } else {
+                    let first_feat = &next_phase.features[0];
+                    let target = match find_feature_line(&lines, &first_feat.title) {
+                        Some(idx) => idx,
+                        None => return Ok(false),
+                    };
+                    let removed = new_lines.remove(source_line);
+                    let insert_at = if source_line < target { target - 1 } else { target };
+                    new_lines.insert(insert_at, removed);
+                }
+            } else {
+                return Ok(false); // already at bottom
+            }
+        }
+    }
+
+    let mut output = new_lines.join("\n");
+    if contents.ends_with('\n') {
+        output.push('\n');
+    }
+    std::fs::write(plan_path, output)?;
+    Ok(true)
+}
+
+/// Append a new feature to a specific phase in Plan.md.
+///
+/// Auto-assigns the next sequential feature number (max existing + 1).
+/// Appends `N. [ ] **title** — description` after the last feature in the phase.
+pub fn append_feature_to_plan(
+    plan_path: &std::path::Path,
+    phase_idx: usize,
+    title: &str,
+    description: &str,
+) -> std::io::Result<bool> {
+    let contents = std::fs::read_to_string(plan_path)?;
+    let phases = parse_plan(&contents);
+
+    let phase = match phases.get(phase_idx) {
+        Some(p) => p,
+        None => return Ok(false),
+    };
+
+    let lines: Vec<&str> = contents.lines().collect();
+
+    // Compute next feature number: max across ALL phases + 1
+    let max_id = phases.iter()
+        .flat_map(|p| p.features.iter())
+        .filter_map(|f| f.id)
+        .max()
+        .unwrap_or(0);
+    let next_id = max_id + 1;
+
+    // Build the new feature line
+    let new_line = if description.is_empty() {
+        format!("{}. [ ] **{}**", next_id, title)
+    } else {
+        format!("{}. [ ] **{}** — {}", next_id, title, description)
+    };
+
+    // Find where to insert: after the last feature of this phase, or after the phase header
+    let insert_after = if phase.features.is_empty() {
+        // After the phase header line
+        find_phase_header_line(&lines, &phase.name)
+    } else {
+        // After the last feature in this phase
+        let last_feat = phase.features.last().unwrap();
+        find_feature_line(&lines, &last_feat.title)
+    };
+
+    let insert_after = match insert_after {
+        Some(idx) => idx,
+        None => return Ok(false),
+    };
+
+    let mut new_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    new_lines.insert(insert_after + 1, new_line);
+
+    let mut output = new_lines.join("\n");
+    if contents.ends_with('\n') {
+        output.push('\n');
+    }
+    std::fs::write(plan_path, output)?;
+    Ok(true)
+}
+
+/// Find the line index of a feature by its title.
+fn find_feature_line(lines: &[&str], title: &str) -> Option<usize> {
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains(&format!("**{title}**")) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Find the line index of a phase header by its name.
+fn find_phase_header_line(lines: &[&str], phase_name: &str) -> Option<usize> {
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if (trimmed.starts_with("## ") || trimmed.starts_with("### ")) && trimmed.contains(phase_name) {
+            return Some(i);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
