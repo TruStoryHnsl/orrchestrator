@@ -54,7 +54,8 @@ impl ProcessManager {
         self.sessions.get_mut(sid)
     }
 
-    /// Spawn a new Claude Code session in a PTY.
+    /// Spawn a new AI session in a PTY.
+    /// CLI backends spawn via PTY fork/exec. API backends are not yet implemented.
     pub fn spawn(
         &mut self,
         project_dir: &Path,
@@ -63,17 +64,19 @@ impl ProcessManager {
         rows: u16,
         cols: u16,
     ) -> anyhow::Result<String> {
+        // Route through provider abstraction
+        let provider = backend.to_provider(&self.backends);
+
+        if provider.is_api() {
+            anyhow::bail!("{} is an API provider — PTY spawn not supported (API dispatch coming in a future release)", backend.label());
+        }
+
+        let cmd_args = provider
+            .cli_args(project_dir, prompt)
+            .ok_or_else(|| anyhow::anyhow!("{} backend not available", backend.label()))?;
+
         let sid = format!("s{}", self.next_id);
         self.next_id += 1;
-
-        let mut cmd_args = self
-            .backends
-            .get_command(backend)
-            .ok_or_else(|| anyhow::anyhow!("{} backend not available", backend.label()))?;
-        if let Some(p) = prompt {
-            // Positional argument, not -p (which is print/non-interactive mode)
-            cmd_args.push(p.into());
-        }
 
         // Open PTY pair via libc
         let mut master_fd: RawFd = -1;

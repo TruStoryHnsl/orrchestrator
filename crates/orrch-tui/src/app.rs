@@ -268,6 +268,7 @@ impl LibrarySub {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailFocus {
     Sessions,
+    DevMap,
     Browser,
 }
 
@@ -435,8 +436,12 @@ pub struct App {
     pub browser_root: PathBuf,
     pub browser_preview: String,
 
-    // Detail view focus: sessions (top) or browser (bottom)
+    // Detail view focus: sessions / dev map / browser
     pub detail_focus: DetailFocus,
+
+    // Dev map (parsed Plan.md feature tree)
+    pub devmap_phase_idx: usize,    // which phase is expanded (or usize::MAX for none)
+    pub devmap_selected: usize,     // flat selection index across all visible items
 
     // Deprecated panel (two-column browser)
     pub dep_parent_entries: Vec<orrch_core::DirEntry>,
@@ -642,6 +647,8 @@ impl App {
             browser_root: PathBuf::new(),
             browser_preview: String::new(),
             detail_focus: DetailFocus::Sessions,
+            devmap_phase_idx: usize::MAX,
+            devmap_selected: 0,
             dep_parent_entries: orrch_core::list_directory(&deprecated_path),
             dep_parent_selected: 0,
             dep_child_entries: Vec::new(),
@@ -1209,13 +1216,21 @@ impl App {
                     self.project_selected = (self.project_selected + delta as usize).min(max);
                 }
             }
-            SubView::ProjectDetail(_) => {
+            SubView::ProjectDetail(pidx) => {
                 match self.detail_focus {
                     DetailFocus::Sessions => {
                         if delta < 0 {
                             self.session_selected = self.session_selected.saturating_sub((-delta) as usize);
                         } else {
                             self.session_selected += delta as usize;
+                        }
+                    }
+                    DetailFocus::DevMap => {
+                        let total = self.devmap_flat_count(*pidx);
+                        if delta < 0 {
+                            self.devmap_selected = self.devmap_selected.saturating_sub((-delta) as usize);
+                        } else if total > 0 {
+                            self.devmap_selected = (self.devmap_selected + delta as usize).min(total.saturating_sub(1));
                         }
                     }
                     DetailFocus::Browser => {
@@ -2442,9 +2457,13 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Toggle focus between sessions and browser
+                // Cycle focus: sessions → dev map (if available) → browser
+                let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
                 self.detail_focus = match self.detail_focus {
-                    DetailFocus::Sessions => DetailFocus::Browser,
+                    DetailFocus::Sessions => {
+                        if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser }
+                    }
+                    DetailFocus::DevMap => DetailFocus::Browser,
                     DetailFocus::Browser => DetailFocus::Sessions,
                 };
                 return Ok(());
@@ -2454,11 +2473,16 @@ impl App {
 
         match self.detail_focus {
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
+            DetailFocus::DevMap => self.key_detail_devmap(key, proj_idx),
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to sessions
                 if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
-                    self.detail_focus = DetailFocus::Sessions;
+                    self.detail_focus = if self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty()) {
+                        DetailFocus::DevMap
+                    } else {
+                        DetailFocus::Sessions
+                    };
                     return Ok(());
                 }
                 self.key_browser_in_detail(key, proj_idx)
@@ -2480,8 +2504,9 @@ impl App {
                 if session_count > 0 && self.session_selected < session_count - 1 {
                     self.session_selected += 1;
                 } else {
-                    // Past last session → move to browser
-                    self.detail_focus = DetailFocus::Browser;
+                    // Past last session → move to dev map (if available) or browser
+                    let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
+                    self.detail_focus = if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser };
                 }
             }
             KeyCode::Enter => {
@@ -2533,6 +2558,88 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn key_detail_devmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        let total = self.devmap_flat_count(proj_idx);
+        match key {
+            KeyCode::Up => {
+                if self.devmap_selected == 0 {
+                    self.detail_focus = DetailFocus::Sessions;
+                } else {
+                    self.devmap_selected = self.devmap_selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if total == 0 || self.devmap_selected >= total.saturating_sub(1) {
+                    self.detail_focus = DetailFocus::Browser;
+                } else {
+                    self.devmap_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                    if is_phase {
+                        // Toggle phase expansion
+                        if self.devmap_phase_idx == phase_idx {
+                            self.devmap_phase_idx = usize::MAX; // collapse
+                        } else {
+                            self.devmap_phase_idx = phase_idx; // expand
+                        }
+                    } else {
+                        // Quick-spawn: launch develop-feature session for this feature
+                        if let Some(proj) = self.projects.get(proj_idx) {
+                            if let Some(phase) = proj.plan_phases.get(phase_idx) {
+                                if let Some(feat) = phase.features.get(feat_idx) {
+                                    self.spawn_project_idx = proj_idx;
+                                    self.spawn_goal_text = feat.title.clone();
+                                    self.spawn_goal_from_roadmap = None;
+                                    self.spawn_agent_idx = 0;
+                                    self.spawn_workforce_idx = 0;
+                                    self.sub = SubView::SpawnGoal;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Count the total number of visible items in the dev map flat list.
+    pub fn devmap_flat_count(&self, proj_idx: usize) -> usize {
+        let Some(proj) = self.projects.get(proj_idx) else { return 0; };
+        let mut count = 0;
+        for (i, phase) in proj.plan_phases.iter().enumerate() {
+            count += 1; // phase header
+            if self.devmap_phase_idx == i {
+                count += phase.features.len();
+            }
+        }
+        count
+    }
+
+    /// Given a flat index, return (is_phase_header, phase_index, feature_index_within_phase).
+    /// For phase headers, feature_index is 0 (unused).
+    fn devmap_item_at(&self, proj_idx: usize, flat_idx: usize) -> Option<(bool, usize, usize)> {
+        let Some(proj) = self.projects.get(proj_idx) else { return None; };
+        let mut pos = 0;
+        for (i, phase) in proj.plan_phases.iter().enumerate() {
+            if pos == flat_idx {
+                return Some((true, i, 0));
+            }
+            pos += 1;
+            if self.devmap_phase_idx == i {
+                if flat_idx < pos + phase.features.len() {
+                    let feat_idx = flat_idx - pos;
+                    return Some((false, i, feat_idx));
+                }
+                pos += phase.features.len();
+            }
+        }
+        None
     }
 
     fn key_browser_in_detail(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
@@ -2814,10 +2921,10 @@ impl App {
         match key {
             KeyCode::Esc => self.sub = SubView::List,
             KeyCode::Tab => {
-                self.spawn_backend = match self.spawn_backend {
-                    BackendKind::Claude => BackendKind::Gemini,
-                    BackendKind::Gemini => BackendKind::Claude,
-                };
+                // Cycle through CLI backends
+                let cli = BackendKind::cli_backends();
+                let cur_idx = cli.iter().position(|b| *b == self.spawn_backend).unwrap_or(0);
+                self.spawn_backend = cli[(cur_idx + 1) % cli.len()];
             }
             KeyCode::Enter => {
                 self.spawn_host_idx = 0;

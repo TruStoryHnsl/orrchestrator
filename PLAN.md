@@ -344,7 +344,7 @@ _Workforces execute structured pipelines with triggers, blockers, and interrupts
 ### Phase 4: Multi-Provider & Resource Management (1.5.0)
 _Expand beyond Claude+Gemini. Add API usage intelligence._
 
-22. [ ] **Provider abstraction layer** — unified `Provider` trait with `cli_pty` and `api_http` variants. CLI providers use existing PTY spawn. API providers use `reqwest` with streaming response parsing.
+22. [x] **Provider abstraction layer** — unified `Provider` trait with `cli_pty` and `api_http` variants. CLI providers use existing PTY spawn. API providers use `reqwest` with streaming response parsing.
 23. [ ] **Ollama backend via Crush/OpenCode** — integrate Crush (primary) or OpenCode (fallback) as `BackendKind::Crush`, same PTY model. If neither works, build native agentic modules wrapping Ollama's API.
 24. [ ] **Raw API backends** — Anthropic Messages API, OpenAI Chat Completions API. Direct HTTP, no CLI dependency.
 25. [ ] **Intelligence Resources Manager** — background task tracking per-provider: requests/minute, tokens/minute, remaining quota (where APIs report it). Stores in `~/.config/orrchestrator/usage.jsonl`.
@@ -386,11 +386,11 @@ _The predefined workforces that process different types of user input. Completin
 ### Cross-Cutting: Interactive Dev Map (Oversee panel)
 _Feature tracking interface in the project focus view. Plan.md becomes a live, interactive development map._
 
-44. [ ] **Plan.md syntax parser for dev map** — parse Plan.md into a structured feature tree: phases → features → status (planned/in-progress/tested/verified/removed). Display as interactive list in Oversee project detail view.
+44. [x] **Plan.md syntax parser for dev map** — parse Plan.md into a structured feature tree: phases → features → status (planned/in-progress/tested/verified/removed). Display as interactive list in Oversee project detail view.
 45. [ ] **Feature state machine** — each feature tracks: planned → implementing → implemented → testing → verified → user-confirmed. Visual indicators for each state. Removed features show as strikethrough with removal context (removed-before-impl vs removed-after-impl vs failing-verification).
 46. [ ] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
 47. [ ] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
-48. [ ] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
+48. [x] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
 49. [ ] **Diff log persistence** — all changes to the dev map are tracked. Features display visual badges: modified since last verification, newly added, reordered, removed.
 50. [ ] **User verification tracking** — user marks features as manually tested/confirmed. Confirmation persists until any code change affects that feature. Previously confirmed features are re-flagged when implementation changes. Release readiness view shows unconfirmed features.
 51. [ ] **Direct PM interaction** — open a live session with the Project Manager agent for natural-language plan changes. PM updates Plan.md, dev map reflects changes in real time.
