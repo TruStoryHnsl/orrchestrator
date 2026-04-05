@@ -79,6 +79,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::CommitReview(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_review(frame, app); }
         SubView::CommitCorrecting(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_correcting(frame, app); }
         SubView::WorkflowPicker => { draw_panel_content(frame, app, layout[1]); draw_workflow_picker(frame, app); }
+        SubView::AddFeature(idx) => { draw_project_detail(frame, app, layout[1], idx); draw_add_feature(frame, app); }
+        SubView::AddMcpServer => { draw_panel_content(frame, app, layout[1]); draw_add_mcp_server(frame, app); }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -2093,6 +2095,139 @@ fn draw_workflow_picker(frame: &mut Frame, app: &App) {
         Paragraph::new(lines)
             .block(Block::default()
                 .title(" Workflow ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+fn draw_add_feature(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 55, 12);
+    frame.render_widget(Clear, popup);
+
+    let title_style = if app.add_feature_field == 0 {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_DIM)
+    };
+    let desc_style = if app.add_feature_field == 1 {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_DIM)
+    };
+
+    let cursor_title = if app.add_feature_field == 0 { "█" } else { "" };
+    let cursor_desc = if app.add_feature_field == 1 { "█" } else { "" };
+
+    let lines = vec![
+        Line::styled("Add Feature (Tab=switch, Enter=add, Esc=cancel)", Style::default().fg(TEXT_DIM)),
+        Line::raw(""),
+        Line::styled("Title:", title_style.add_modifier(Modifier::BOLD)),
+        Line::from(vec![
+            Span::styled("> ", title_style),
+            Span::styled(&app.add_feature_title, Style::default().fg(TEXT)),
+            Span::styled(cursor_title, title_style),
+        ]),
+        Line::raw(""),
+        Line::styled("Description:", desc_style.add_modifier(Modifier::BOLD)),
+        Line::from(vec![
+            Span::styled("> ", desc_style),
+            Span::styled(&app.add_feature_desc, Style::default().fg(TEXT)),
+            Span::styled(cursor_desc, desc_style),
+        ]),
+        Line::raw(""),
+        Line::styled("Appends: N. [ ] **Title** — Description", Style::default().fg(TEXT_MUTED)),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default()
+                .title(" Add Feature ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
+}
+
+fn draw_add_mcp_server(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 60, 22);
+    frame.render_widget(Clear, popup);
+
+    let field = app.add_mcp_field;
+    let cursor = |idx: usize| -> &'static str { if field == idx { "█" } else { "" } };
+    let label_style = |idx: usize| -> Style {
+        if field == idx {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        }
+    };
+
+    let transport_label = if app.add_mcp_transport == 0 { "stdio" } else { "sse" };
+    let cmd_label = if app.add_mcp_transport == 0 { "Command:" } else { "URL:" };
+
+    let mut lines = vec![
+        Line::styled("Register MCP Server (Tab=next, Enter=save, Esc=cancel)", Style::default().fg(TEXT_DIM)),
+        Line::raw(""),
+        Line::styled("Name:", label_style(0)),
+        Line::from(vec![
+            Span::styled("> ", label_style(0)),
+            Span::styled(&app.add_mcp_name, Style::default().fg(TEXT)),
+            Span::styled(cursor(0), label_style(0)),
+        ]),
+        Line::raw(""),
+        Line::styled("Description:", label_style(1)),
+        Line::from(vec![
+            Span::styled("> ", label_style(1)),
+            Span::styled(&app.add_mcp_desc, Style::default().fg(TEXT)),
+            Span::styled(cursor(1), label_style(1)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Transport: ", label_style(2)),
+            Span::styled(
+                format!("[{transport_label}]"),
+                if field == 2 {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(GREEN)
+                },
+            ),
+            Span::styled(if field == 2 { "  (Enter/s/e to toggle)" } else { "" }, Style::default().fg(TEXT_MUTED)),
+        ]),
+        Line::raw(""),
+        Line::styled(cmd_label, label_style(3)),
+        Line::from(vec![
+            Span::styled("> ", label_style(3)),
+            Span::styled(&app.add_mcp_command, Style::default().fg(TEXT)),
+            Span::styled(cursor(3), label_style(3)),
+        ]),
+    ];
+
+    if app.add_mcp_transport == 0 {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled("Args (space-separated):", label_style(4)));
+        lines.push(Line::from(vec![
+            Span::styled("> ", label_style(4)),
+            Span::styled(&app.add_mcp_args, Style::default().fg(TEXT)),
+            Span::styled(cursor(4), label_style(4)),
+        ]));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("Roles (comma-separated):", label_style(5)));
+    lines.push(Line::from(vec![
+        Span::styled("> ", label_style(5)),
+        Span::styled(&app.add_mcp_roles, Style::default().fg(TEXT)),
+        Span::styled(cursor(5), label_style(5)),
+    ]));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default()
+                .title(" Register MCP Server ")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
             .wrap(Wrap { trim: false }),
