@@ -410,12 +410,20 @@ fn develop_feature(_server: &OrrchMcpServer, args: &Value) -> String {
          Project: {project_dir}\n\n\
          Execute these steps using tools and Agent spawns:\n\n\
          1. Call MCP tool `workflow_init` with project_dir=\"{project_dir}\"\n\
-         2. Spawn Agent (PM) with the instructions + brief from step 1\n\
+         2. Check `plan_ready` flag in init output:\n\
+            - If TRUE: spawn lightweight PM to CONVERT tasks to TASK blocks (no re-planning)\n\
+            - If FALSE: spawn full PM to plan from scratch\n\
          3. Call MCP tool `workflow_cluster` with the PM's plan output\n\
-         4. For each cluster, spawn Agent in parallel with cluster tasks + brief\n\
-         5. Call MCP tool `workflow_compress` on each agent's output\n\
-         6. Spawn 2 Agents (testers) in parallel with file list from compressed output\n\
-         7. Call MCP tool `workflow_compress` on tester outputs\n\
+         4. For each cluster: READ the files in its Files: list, then spawn Agent\n\
+            with those file contents inlined (agents do NOT re-read these files)\n\
+         5. Call MCP tool `workflow_compress` on each agent's output.\n\
+            ONLY pass the compressed output to subsequent steps — never the raw output.\n\
+         6. Determine testing level:\n\
+            - FULL (2 testers): if work completes a phase/milestone, OR new traits/crates\n\
+              were created, OR math/projection/auth code was modified\n\
+            - LIGHT: just run `cargo test --workspace`, skip tester agents\n\
+         7. If FULL testing: spawn 2 Agents (testers) with compressed file list.\n\
+            Call `workflow_compress` on tester outputs.\n\
          8. Spawn Agent (PM) to evaluate — PASS/REWORK/SHIP_WITH_ISSUES\n\
          9. If REWORK: spawn Developer with fix list, re-verify (max 3 cycles)\n\
          10. Update PLAN.md [x], write DEVLOG.md, git commit"
@@ -741,9 +749,13 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
         "(codebase_brief.sh not found — skipping brief)".to_string()
     };
 
-    // 3. Read PLAN.md and extract unchecked items.
+    // 3. Read PLAN.md — extract unchecked items and detect plan readiness.
+    //
+    // plan_ready = true when PLAN.md tasks already have acceptance criteria,
+    // file references, and dependency info. In that case the PM should convert
+    // task prose to TASK blocks (context bundling), NOT re-plan from scratch.
     let plan_path = project_path.join("PLAN.md");
-    let (plan_items, item_count) = match std::fs::read_to_string(&plan_path) {
+    let (plan_items, item_count, plan_ready) = match std::fs::read_to_string(&plan_path) {
         Ok(content) => {
             if content.contains("[ ]") {
                 // Checkbox format — extract unchecked lines.
@@ -752,27 +764,60 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
                     .filter(|l| l.contains("[ ]"))
                     .collect();
                 let count = lines.len();
-                (lines.join("\n"), count)
+                (lines.join("\n"), count, false)
             } else if content.contains("### Task ") {
-                // Task-header format — exclude DONE/COMPLETE lines.
-                let lines: Vec<&str> = content
-                    .lines()
-                    .filter(|l| {
-                        l.contains("### Task ")
-                            && !l.to_uppercase().contains("DONE")
-                            && !l.to_uppercase().contains("COMPLETE")
-                    })
-                    .collect();
-                let count = lines.len();
-                (lines.join("\n"), count)
+                // Task-header format — extract full task sections for unchecked tasks.
+                // Also detect plan readiness: do tasks have acceptance criteria + deps?
+                let plan_lines: Vec<&str> = content.lines().collect();
+                let mut sections = Vec::new();
+                let mut current_section = Vec::new();
+                let mut in_unchecked = false;
+                let mut has_acceptance = 0u32;
+                let mut total_tasks = 0u32;
+
+                for line in &plan_lines {
+                    if line.contains("### Task ") {
+                        // Flush previous section
+                        if in_unchecked && !current_section.is_empty() {
+                            sections.push(current_section.join("\n"));
+                        }
+                        current_section.clear();
+                        let is_done = line.to_uppercase().contains("DONE")
+                            || line.to_uppercase().contains("COMPLETE");
+                        in_unchecked = !is_done;
+                        if in_unchecked {
+                            total_tasks += 1;
+                        }
+                    }
+                    // Detect plan detail signals within task sections
+                    if in_unchecked {
+                        let upper = line.to_uppercase();
+                        if upper.contains("ACCEPTANCE")
+                            || upper.contains("CRITERIA")
+                            || (upper.contains("**AGENT**") && upper.contains(":"))
+                        {
+                            has_acceptance += 1;
+                        }
+                        current_section.push(*line);
+                    }
+                }
+                // Flush final section
+                if in_unchecked && !current_section.is_empty() {
+                    sections.push(current_section.join("\n"));
+                }
+
+                let count = sections.len();
+                // Plan is ready if >50% of tasks have acceptance criteria
+                let ready = total_tasks > 0 && has_acceptance * 2 >= total_tasks;
+                (sections.join("\n\n"), count, ready)
             } else {
                 // Unstructured fallback — return first 100 lines.
                 let lines: Vec<&str> = content.lines().take(100).collect();
                 let joined = lines.join("\n");
-                (joined, 0usize)
+                (joined, 0usize, false)
             }
         }
-        Err(_) => ("(PLAN.md not found)".to_string(), 0),
+        Err(_) => ("(PLAN.md not found)".to_string(), 0, false),
     };
 
     // 4. Read instructions_inbox.md — find straggler headings not yet implemented.
@@ -804,16 +849,44 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
         "status": "initialized",
         "project_dir": project_dir,
         "scope": scope,
+        "plan_ready": plan_ready,
     });
     let _ = std::fs::write(
         orrch_dir.join("workflow.json"),
         serde_json::to_string_pretty(&workflow_json).unwrap_or_default(),
     );
 
-    // 6. Return structured response.
+    // 6. Build the Next Step instruction — conditional on plan_ready.
+    let next_step = if plan_ready {
+        "## Next Step (PLAN READY — skip full PM planning)\n\
+         The PLAN.md tasks already have acceptance criteria and detail.\n\
+         Spawn a LIGHTWEIGHT PM agent whose ONLY job is to convert these task\n\
+         descriptions into TASK blocks with exact file paths. The PM must NOT\n\
+         re-plan, re-analyze, or rewrite the tasks — just reformat them.\n\n\
+         The PM must output tasks in this EXACT format (cluster_tasks.sh parses it):\n\n\
+         TASK <id>: <description>\n\
+         Agent: <role>\n\
+         Files: <comma-separated paths>\n\
+         Work: <2-3 sentences>\n\
+         Acceptance: <one line>\n\
+         Depends: <task ids or none>"
+    } else {
+        "## Next Step\n\
+         Spawn a PM agent with the instructions and codebase brief above.\n\
+         The PM must output tasks in this EXACT format (cluster_tasks.sh parses it):\n\n\
+         TASK <id>: <description>\n\
+         Agent: <role>\n\
+         Files: <comma-separated paths>\n\
+         Work: <2-3 sentences>\n\
+         Acceptance: <one line>\n\
+         Depends: <task ids or none>"
+    };
+
+    // 7. Return structured response.
     format!(
         "## Workflow Initialized\n\
          Scope: {scope}\n\
+         Plan ready: {plan_ready}\n\
          Items: {item_count} unchecked\n\
          Inbox stragglers: {stragglers_summary}\n\n\
          ## Codebase Brief\n\
@@ -822,15 +895,7 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
          {plan_items}\n\n\
          ## Inbox Stragglers\n\
          {stragglers}\n\n\
-         ## Next Step\n\
-         Spawn a PM agent with the instructions and codebase brief above.\n\
-         The PM must output tasks in this EXACT format (cluster_tasks.sh parses it):\n\n\
-         TASK <id>: <description>\n\
-         Agent: <role>\n\
-         Files: <comma-separated paths>\n\
-         Work: <2-3 sentences>\n\
-         Acceptance: <one line>\n\
-         Depends: <task ids or none>",
+         {next_step}",
         stragglers_summary = if stragglers == "none" { "none".to_string() } else {
             format!("{} item(s)", stragglers.lines().count())
         },
