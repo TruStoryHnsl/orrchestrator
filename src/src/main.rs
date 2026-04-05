@@ -150,6 +150,21 @@ async fn run_loop(
             app.categorize_projects();
             app.split_off_editors = orrch_core::windows::detect_split_off_editors("hub-edit");
             last_discovery = Instant::now();
+
+            // Valve auto-reopen tick
+            let reopened = app.valve_store.tick();
+            for provider in &reopened {
+                app.notify(format!("{} valve reopened", provider));
+            }
+
+            // IRM throttle check — auto-close valves for providers exceeding rate limits
+            let throttled = app.usage_tracker.check_throttle();
+            for (provider, reason, cooldown) in throttled {
+                if !app.valve_store.is_blocked(&provider) {
+                    app.valve_store.auto_close(&provider, &format!("IRM: {}", reason), cooldown);
+                    app.notify(format!("{} auto-throttled: {}", provider, reason));
+                }
+            }
         }
 
         // Retrospect analysis every 10 minutes — generates troubleshooting protocols

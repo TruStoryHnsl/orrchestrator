@@ -35,3 +35,4 @@ python-prototype/*.egg-info/
 .feedback/.correction-*
 .feedback/.autocommit-*
 .feedback/.git-commit-*
+.claude/worktrees/

@@ -51,6 +51,16 @@ impl BackendKind {
         matches!(self, Self::AnthropicApi | Self::OpenAiApi)
     }
 
+    /// Map backend to the provider name used in valve store and model definitions.
+    pub fn provider_name(&self) -> &'static str {
+        match self {
+            Self::Claude | Self::AnthropicApi => "Anthropic",
+            Self::Gemini => "Google",
+            Self::Crush | Self::OpenCode => "Local",
+            Self::OpenAiApi => "OpenAI",
+        }
+    }
+
     /// Convert this backend kind into a unified ProviderConfig.
     /// For CLI backends, reads command/flags from BackendsConfig.
     /// For API backends, produces a stub config.
@@ -67,7 +77,6 @@ impl BackendKind {
                         available: cfg.available,
                     }
                 } else {
-                    // Backend not configured — return unavailable provider
                     ProviderConfig {
                         name: self.label().to_string(),
                         kind: ProviderKind::CliPty {
@@ -225,6 +234,20 @@ impl BackendsConfig {
             .filter(|(_, cfg)| cfg.available)
             .map(|(kind, _)| *kind)
             .collect()
+    }
+}
+
+/// Check if a backend is available for spawning, considering both system availability
+/// and external block status (e.g., valve state).
+/// `valve_blocked` should be true if the provider's valve is closed.
+pub fn is_provider_available(backends: &BackendsConfig, kind: BackendKind, valve_blocked: bool) -> (bool, &'static str) {
+    if valve_blocked {
+        return (false, "provider valve is closed");
+    }
+    match backends.backends.get(&kind) {
+        Some(cfg) if cfg.available => (true, ""),
+        Some(_) => (false, "backend binary not found"),
+        None => (false, "backend not configured"),
     }
 }
 
