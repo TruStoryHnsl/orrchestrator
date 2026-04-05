@@ -348,7 +348,7 @@ _Expand beyond Claude+Gemini. Add API usage intelligence._
 23. [ ] **Ollama backend via Crush/OpenCode** — integrate Crush (primary) or OpenCode (fallback) as `BackendKind::Crush`, same PTY model. If neither works, build native agentic modules wrapping Ollama's API.
 24. [ ] **Raw API backends** — Anthropic Messages API, OpenAI Chat Completions API. Direct HTTP, no CLI dependency.
 25. [x] **Intelligence Resources Manager** — background task tracking per-provider: requests/minute, tokens/minute, remaining quota (where APIs report it). Stores in `~/.config/orrchestrator/usage.jsonl`. **Status: DONE — UsageTracker with append-only JSONL persistence, SessionStart/SessionEnd recording on spawn/death, Analyze panel replaced with per-provider usage summary table.**
-26. [ ] **Dynamic throttling** — when a provider approaches rate limits, the IRM pauses workforce queues using that provider. Shifts work to alternative providers when possible. Resumes automatically.
+26. [x] **Dynamic throttling** — when a provider approaches rate limits, the IRM pauses workforce queues using that provider. Shifts work to alternative providers when possible. Resumes automatically.
 27. [ ] **Token optimization pipeline** — three layers: (a) COO one-time feedback compression during intake, (b) COO manages `instructions_inbox.md` lifecycle (trim on version publish, truncate long files), (c) hypervisor trims verbose reasoning from inter-agent handoffs, keeps actionable conclusions only.
 
 ### Phase 5: Library (1.6.0)
@@ -388,8 +388,8 @@ _Feature tracking interface in the project focus view. Plan.md becomes a live, i
 
 44. [x] **Plan.md syntax parser for dev map** — parse Plan.md into a structured feature tree: phases → features → status (planned/in-progress/tested/verified/removed). Display as interactive list in Oversee project detail view.
 45. [x] **Feature state machine** — each feature tracks: planned → implementing → implemented → testing → verified → user-confirmed. Visual indicators for each state. Removed features show as strikethrough with removal context (removed-before-impl vs removed-after-impl vs failing-verification). **Status: DONE — FeatureStatus expanded to 9 states with parse markers ([~], [=], [t], [v], [✓]), color-coded TUI rendering, s/S keybindings for status cycling with Plan.md write-back.**
-46. [ ] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
-47. [ ] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
+46. [x] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
+47. [x] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
 48. [x] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
 49. [ ] **Diff log persistence** — all changes to the dev map are tracked. Features display visual badges: modified since last verification, newly added, reordered, removed.
 50. [ ] **User verification tracking** — user marks features as manually tested/confirmed. Confirmation persists until any code change affects that feature. Previously confirmed features are re-flagged when implementation changes. Release readiness view shows unconfirmed features.
@@ -411,9 +411,9 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 59. [x] **API valves (manual provider shutoff)** — per-provider on/off toggle in Library > Models. `v` = instant toggle, `V` = timed close (24h default). ValveStore persisted to `~/.config/orrchestrator/valves.json`. Visual `BLOCKED` badges on affected models. Auto-reopen ticker with countdown display.
 60. [x] **MCP server config management** — McpServerEntry struct with stdio/sse transport, enable/disable toggle (`e` key), role assignment. Loaded from `library/mcp_servers/*.md`. Displayed in Library > MCP sub-panel.
 61. [x] **orrch-mcp server** — MOVED to Critical Path (CP-7). Done: 12 tools including module_api, codebase_brief, develop_feature, agent_invoke.
-62. [ ] **External MCP server management** — configure connections to user's existing MCP servers (github, context7, etc.) through the Library > MCP panel. Assign servers to agent roles.
+62. [x] **External MCP server management** — configure connections to user's existing MCP servers (github, context7, etc.) through the Library > MCP panel. Assign servers to agent roles.
 63. [ ] **Syntax translation engine** — research session to catalog prompt/tool-call syntax differences across models and harnesses. Generate translated versions of context files (agent profiles, CLAUDE.md equivalents) per model/harness combination. Stored in Library.
-64. [ ] **Valve integration with Resource Optimizer** — Resource Optimizer checks valve state before recommending a model. Blocked providers are excluded from optimization suggestions. IRM auto-closes valves when rate limits are detected.
+64. [x] **Valve integration with Resource Optimizer** — Resource Optimizer checks valve state before recommending a model. Blocked providers are excluded from optimization suggestions. IRM auto-closes valves when rate limits are detected.
 
 ### Carried Forward (from 1.0.0 queued items)
 - [ ] **Agent profile management** — swappable CLAUDE.md/GEMINI.md profiles per project
