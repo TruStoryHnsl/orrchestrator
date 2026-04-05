@@ -422,6 +422,7 @@ pub struct App {
     pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
     pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
     pub valve_store: orrch_library::ValveStore,
+    pub usage_tracker: orrch_core::UsageTracker,
 
     // Workforce Design
     pub workforce_files: Vec<(String, std::path::PathBuf)>, // (name, path)
@@ -546,8 +547,6 @@ pub struct App {
     /// Selected index in workflow picker
     pub workflow_picker_idx: usize,
 
-    // Usage tracking (Intelligence Resources Manager)
-    pub usage_tracker: UsageTracker,
 }
 
 /// A versioned release entry for the Production panel.
@@ -589,6 +588,8 @@ impl App {
         let library_tools = scan_md_dir(&library_root.join("tools"));
         let library_profiles = scan_md_dir(&library_root.join("profiles"));
         let valve_store = orrch_library::ValveStore::load();
+        let mut usage_tracker = orrch_core::UsageTracker::new();
+        usage_tracker.set_defaults();
 
         let mut app = Self {
             pm: ProcessManager::new(tx),
@@ -641,6 +642,7 @@ impl App {
             library_tools,
             library_profiles,
             valve_store,
+            usage_tracker,
             workforce_files,
             workforce_selected: 0,
             operation_files,
@@ -709,7 +711,6 @@ impl App {
             ideas_audit_expanded: None,
             workflow_choices: Vec::new(),
             workflow_picker_idx: 0,
-            usage_tracker: UsageTracker::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -978,6 +979,23 @@ impl App {
 
     /// Spawn a Claude session as a tmux window in the orrch session.
     pub fn spawn_session(&mut self, project_dir: &Path, backend: BackendKind, goal: Option<&str>) -> Result<String> {
+        // Check valve state — block spawn if provider valve is closed
+        let provider = backend.provider_name();
+        let (blocked, reason) = self.valve_store.check_provider(provider);
+        if blocked {
+            let msg = format!("{} blocked: {}", provider, reason);
+            self.notify(msg.clone());
+            return Err(anyhow::anyhow!(msg));
+        }
+
+        // Check throttle state
+        if self.usage_tracker.is_throttled(provider) {
+            let reason = self.usage_tracker.throttle_reason(provider).unwrap_or("rate limited");
+            let msg = format!("{} throttled: {}", provider, reason);
+            self.notify(msg.clone());
+            return Err(anyhow::anyhow!(msg));
+        }
+
         let backend_cmd = match self.pm.backends.get_command(backend) {
             Some(cmd) => cmd,
             None => {
@@ -1001,7 +1019,7 @@ impl App {
             &session_name,
         ) {
             Ok(window_name) => {
-                // Record usage event
+                // Record usage event (JSONL persistence)
                 let _ = self.usage_tracker.record(&UsageRecord {
                     timestamp: usage::iso_now(),
                     provider: backend.label().to_string(),
@@ -1010,6 +1028,8 @@ impl App {
                     project: Some(proj_name.to_string()),
                     duration_secs: None,
                 });
+                // Record for throttle tracking (in-memory rolling window)
+                self.usage_tracker.record_request(provider, 0);
                 self.notify(format!("tmux:{} — {} {}", window_name, backend.label(), goal_display));
                 Ok(format!("tmux:{window_name}"))
             }

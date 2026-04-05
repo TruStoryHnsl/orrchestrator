@@ -206,6 +206,24 @@ impl ValveStore {
         let _ = self.save();
     }
 
+    /// Auto-close a valve with a timed reopen. Used by IRM throttling.
+    pub fn auto_close(&mut self, provider: &str, reason: &str, duration_secs: u64) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.close(provider, reason, Some(now + duration_secs));
+    }
+
+    /// Check if a provider is currently blocked, considering auto-reopen.
+    /// Returns (blocked, reason) tuple.
+    pub fn check_provider(&self, provider: &str) -> (bool, String) {
+        match self.valves.get(provider) {
+            Some(v) if v.closed => (true, v.reason.clone()),
+            _ => (false, String::new()),
+        }
+    }
+
     /// Check all valves for auto-reopen and return names of any that reopened.
     pub fn tick(&mut self) -> Vec<String> {
         let mut reopened = Vec::new();

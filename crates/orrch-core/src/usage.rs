@@ -1,12 +1,16 @@
-//! Background usage tracking — records per-provider session metrics to JSONL.
+//! Background usage tracking — records per-provider session metrics to JSONL,
+//! plus in-memory rate limit detection for dynamic throttling.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::config::config_dir;
+
+// ─── Persistent JSONL types ─────────────────────────────────────────
 
 /// A single usage event persisted as one JSONL line.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,17 +33,61 @@ pub enum UsageEvent {
     ApiCall { tokens_in: u64, tokens_out: u64 },
 }
 
-/// Append-only tracker backed by `~/.config/orrchestrator/usage.jsonl`.
+// ─── Rate limiting types ────────────────────────────────────────────
+
+/// Per-provider rate limit thresholds.
+#[derive(Debug, Clone)]
+pub struct RateLimitConfig {
+    /// Max requests per minute before throttling.
+    pub requests_per_min: u32,
+    /// Max tokens per minute before throttling (0 = no limit).
+    pub tokens_per_min: u64,
+    /// How long to throttle when limits are exceeded (seconds).
+    pub cooldown_secs: u64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            requests_per_min: 60,
+            tokens_per_min: 0,
+            cooldown_secs: 60,
+        }
+    }
+}
+
+/// A single in-memory throttle event (request or token consumption).
+#[derive(Debug, Clone)]
+struct ThrottleEvent {
+    timestamp: Instant,
+    tokens: u64,
+}
+
+// ─── Unified tracker ────────────────────────────────────────────────
+
+/// Combined usage tracker: JSONL persistence for historical analysis,
+/// plus in-memory rolling windows for real-time rate limit detection.
 pub struct UsageTracker {
+    // JSONL persistence
     log_path: PathBuf,
+    // Rate limiting (in-memory rolling window)
+    rate_limits: HashMap<String, RateLimitConfig>,
+    events: HashMap<String, Vec<ThrottleEvent>>,
+    /// Providers currently throttled, with reason strings.
+    pub throttled: HashMap<String, String>,
 }
 
 impl UsageTracker {
     pub fn new() -> Self {
         Self {
             log_path: config_dir().join("usage.jsonl"),
+            rate_limits: HashMap::new(),
+            events: HashMap::new(),
+            throttled: HashMap::new(),
         }
     }
+
+    // ─── JSONL persistence methods ──────────────────────────────
 
     /// Append a record to the JSONL log.
     pub fn record(&self, record: &UsageRecord) -> std::io::Result<()> {
@@ -70,8 +118,7 @@ impl UsageTracker {
         let period_hours = 24;
         let records = self.load_recent(period_hours);
 
-        let mut providers: std::collections::HashMap<String, ProviderUsage> =
-            std::collections::HashMap::new();
+        let mut providers: HashMap<String, ProviderUsage> = HashMap::new();
         let mut total_sessions: u64 = 0;
 
         for rec in &records {
@@ -88,7 +135,6 @@ impl UsageTracker {
                 UsageEvent::SessionStart => {
                     entry.session_count += 1;
                     total_sessions += 1;
-                    // Update last_used to most recent timestamp
                     match (&entry.last_used, &rec.timestamp) {
                         (None, ts) => entry.last_used = Some(ts.clone()),
                         (Some(prev), ts) if ts > prev => entry.last_used = Some(ts.clone()),
@@ -139,6 +185,119 @@ impl UsageTracker {
             })
             .collect()
     }
+
+    // ─── Rate limiting methods ──────────────────────────────────
+
+    /// Set rate limit config for a provider.
+    pub fn set_rate_limit(&mut self, provider: &str, config: RateLimitConfig) {
+        self.rate_limits.insert(provider.to_string(), config);
+    }
+
+    /// Set default rate limits for known providers.
+    pub fn set_defaults(&mut self) {
+        self.rate_limits.insert("Anthropic".into(), RateLimitConfig {
+            requests_per_min: 50,
+            tokens_per_min: 80_000,
+            cooldown_secs: 60,
+        });
+        self.rate_limits.insert("Google".into(), RateLimitConfig {
+            requests_per_min: 30,
+            tokens_per_min: 0,
+            cooldown_secs: 60,
+        });
+        self.rate_limits.insert("Mistral".into(), RateLimitConfig {
+            requests_per_min: 30,
+            tokens_per_min: 0,
+            cooldown_secs: 60,
+        });
+        self.rate_limits.insert("OpenAI".into(), RateLimitConfig {
+            requests_per_min: 60,
+            tokens_per_min: 100_000,
+            cooldown_secs: 60,
+        });
+    }
+
+    /// Record a request to a provider (for throttle tracking).
+    pub fn record_request(&mut self, provider: &str, tokens: u64) {
+        self.events
+            .entry(provider.to_string())
+            .or_default()
+            .push(ThrottleEvent {
+                timestamp: Instant::now(),
+                tokens,
+            });
+    }
+
+    /// Prune events older than the rolling window (1 minute).
+    fn prune(&mut self) {
+        let cutoff = Instant::now() - std::time::Duration::from_secs(60);
+        for events in self.events.values_mut() {
+            events.retain(|e| e.timestamp > cutoff);
+        }
+    }
+
+    /// Check all providers against their rate limits.
+    /// Returns list of (provider, reason, cooldown_secs) that should be throttled.
+    pub fn check_throttle(&mut self) -> Vec<(String, String, u64)> {
+        self.prune();
+        let mut results = Vec::new();
+
+        for (provider, config) in &self.rate_limits {
+            if let Some(events) = self.events.get(provider) {
+                let req_count = events.len() as u32;
+                let token_count: u64 = events.iter().map(|e| e.tokens).sum();
+
+                if req_count >= config.requests_per_min {
+                    let reason = format!(
+                        "rate limit: {}/{} req/min",
+                        req_count, config.requests_per_min
+                    );
+                    self.throttled.insert(provider.clone(), reason.clone());
+                    results.push((provider.clone(), reason, config.cooldown_secs));
+                    continue;
+                }
+
+                if config.tokens_per_min > 0 && token_count >= config.tokens_per_min {
+                    let reason = format!(
+                        "token limit: {}/{} tok/min",
+                        token_count, config.tokens_per_min
+                    );
+                    self.throttled.insert(provider.clone(), reason.clone());
+                    results.push((provider.clone(), reason, config.cooldown_secs));
+                    continue;
+                }
+
+                // Clear throttle if under limits
+                self.throttled.remove(provider);
+            }
+        }
+
+        results
+    }
+
+    /// Check if a specific provider is currently throttled.
+    pub fn is_throttled(&self, provider: &str) -> bool {
+        self.throttled.contains_key(provider)
+    }
+
+    /// Get throttle reason for a provider, if any.
+    pub fn throttle_reason(&self, provider: &str) -> Option<&str> {
+        self.throttled.get(provider).map(|s| s.as_str())
+    }
+
+    /// Get a summary of current rolling-window usage for all tracked providers.
+    pub fn throttle_summary(&self) -> Vec<(String, u32, u64)> {
+        let cutoff = Instant::now() - std::time::Duration::from_secs(60);
+        self.events
+            .iter()
+            .map(|(provider, events)| {
+                let recent: Vec<_> = events.iter().filter(|e| e.timestamp > cutoff).collect();
+                let req_count = recent.len() as u32;
+                let token_count: u64 = recent.iter().map(|e| e.tokens).sum();
+                (provider.clone(), req_count, token_count)
+            })
+            .collect()
+    }
 }
 
 /// Aggregated usage summary for display.
@@ -169,7 +328,6 @@ fn now_epoch_secs() -> u64 {
 /// Generate an ISO 8601 timestamp string (UTC).
 pub fn iso_now() -> String {
     let secs = now_epoch_secs();
-    // Convert epoch to YYYY-MM-DDTHH:MM:SSZ using manual calendar math.
     epoch_to_iso(secs)
 }
 
@@ -181,14 +339,12 @@ fn epoch_to_iso(epoch: u64) -> String {
     let m = (time_of_day % 3600) / 60;
     let s = time_of_day % 60;
 
-    // Days since 1970-01-01 → date
     let (year, month, day) = days_to_date(days);
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{m:02}:{s:02}Z")
 }
 
 /// Parse an ISO 8601 timestamp back to epoch seconds. Returns None on failure.
 fn parse_epoch(iso: &str) -> Option<u64> {
-    // Expected format: YYYY-MM-DDTHH:MM:SSZ
     if iso.len() < 19 {
         return None;
     }
@@ -203,9 +359,7 @@ fn parse_epoch(iso: &str) -> Option<u64> {
     Some(days * 86400 + hour * 3600 + min * 60 + sec)
 }
 
-/// Convert days since epoch (1970-01-01) to (year, month, day).
 fn days_to_date(days: u64) -> (u64, u64, u64) {
-    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
     let z = days + 719468;
     let era = z / 146097;
     let doe = z - era * 146097;
@@ -219,7 +373,6 @@ fn days_to_date(days: u64) -> (u64, u64, u64) {
     (y, m, d)
 }
 
-/// Convert (year, month, day) to days since epoch (1970-01-01).
 fn date_to_days(year: u64, month: u64, day: u64) -> u64 {
     let y = if month <= 2 { year - 1 } else { year };
     let m = if month <= 2 { month + 9 } else { month - 3 };
@@ -276,9 +429,17 @@ mod tests {
     use super::*;
     use std::io::Read;
 
+    fn test_tracker(log_path: PathBuf) -> UsageTracker {
+        UsageTracker {
+            log_path,
+            rate_limits: HashMap::new(),
+            events: HashMap::new(),
+            throttled: HashMap::new(),
+        }
+    }
+
     #[test]
     fn test_epoch_iso_roundtrip() {
-        // 2025-01-15T10:30:00Z
         let iso = "2025-01-15T10:30:00Z";
         let epoch = parse_epoch(iso).unwrap();
         let back = epoch_to_iso(epoch);
@@ -287,14 +448,12 @@ mod tests {
 
     #[test]
     fn test_epoch_known_date() {
-        // 2024-01-01T00:00:00Z = 1704067200
         let epoch = parse_epoch("2024-01-01T00:00:00Z").unwrap();
         assert_eq!(epoch, 1704067200);
     }
 
     #[test]
     fn test_format_ago() {
-        // Just test the formatting logic paths
         assert_eq!(format_ago("invalid"), "—");
     }
 
@@ -309,9 +468,7 @@ mod tests {
     #[test]
     fn test_record_and_load() {
         let dir = tempfile::tempdir().unwrap();
-        let tracker = UsageTracker {
-            log_path: dir.path().join("usage.jsonl"),
-        };
+        let tracker = test_tracker(dir.path().join("usage.jsonl"));
 
         let rec = UsageRecord {
             timestamp: iso_now(),
@@ -327,7 +484,6 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].provider, "claude");
 
-        // Verify JSONL is valid
         let mut contents = String::new();
         File::open(&tracker.log_path)
             .unwrap()
@@ -340,12 +496,9 @@ mod tests {
     #[test]
     fn test_summary_aggregation() {
         let dir = tempfile::tempdir().unwrap();
-        let tracker = UsageTracker {
-            log_path: dir.path().join("usage.jsonl"),
-        };
+        let tracker = test_tracker(dir.path().join("usage.jsonl"));
 
         let now = iso_now();
-        // Two claude starts
         for _ in 0..2 {
             tracker
                 .record(&UsageRecord {
@@ -358,7 +511,6 @@ mod tests {
                 })
                 .unwrap();
         }
-        // One claude end with duration
         tracker
             .record(&UsageRecord {
                 timestamp: now.clone(),
@@ -369,7 +521,6 @@ mod tests {
                 duration_secs: Some(300.0),
             })
             .unwrap();
-        // One gemini start
         tracker
             .record(&UsageRecord {
                 timestamp: now.clone(),
@@ -404,11 +555,8 @@ mod tests {
     #[test]
     fn test_load_recent_filters_old() {
         let dir = tempfile::tempdir().unwrap();
-        let tracker = UsageTracker {
-            log_path: dir.path().join("usage.jsonl"),
-        };
+        let tracker = test_tracker(dir.path().join("usage.jsonl"));
 
-        // Record with a very old timestamp
         tracker
             .record(&UsageRecord {
                 timestamp: "2020-01-01T00:00:00Z".into(),
@@ -419,7 +567,6 @@ mod tests {
                 duration_secs: None,
             })
             .unwrap();
-        // Record with current timestamp
         tracker
             .record(&UsageRecord {
                 timestamp: iso_now(),
@@ -432,7 +579,7 @@ mod tests {
             .unwrap();
 
         let recent = tracker.load_recent(24);
-        assert_eq!(recent.len(), 1); // only the current one
+        assert_eq!(recent.len(), 1);
     }
 
     #[test]
@@ -461,5 +608,44 @@ mod tests {
             }
             _ => panic!("wrong event type"),
         }
+    }
+
+    #[test]
+    fn test_usage_tracker_basic() {
+        let mut tracker = UsageTracker::new();
+        tracker.set_rate_limit("TestProvider", RateLimitConfig {
+            requests_per_min: 5,
+            tokens_per_min: 0,
+            cooldown_secs: 30,
+        });
+
+        for _ in 0..4 {
+            tracker.record_request("TestProvider", 100);
+        }
+        assert!(tracker.check_throttle().is_empty());
+
+        tracker.record_request("TestProvider", 100);
+        let throttled = tracker.check_throttle();
+        assert_eq!(throttled.len(), 1);
+        assert_eq!(throttled[0].0, "TestProvider");
+        assert!(tracker.is_throttled("TestProvider"));
+    }
+
+    #[test]
+    fn test_token_limit() {
+        let mut tracker = UsageTracker::new();
+        tracker.set_rate_limit("TokenProvider", RateLimitConfig {
+            requests_per_min: 100,
+            tokens_per_min: 1000,
+            cooldown_secs: 60,
+        });
+
+        tracker.record_request("TokenProvider", 500);
+        assert!(tracker.check_throttle().is_empty());
+
+        tracker.record_request("TokenProvider", 600);
+        let throttled = tracker.check_throttle();
+        assert_eq!(throttled.len(), 1);
+        assert!(throttled[0].1.contains("token limit"));
     }
 }
