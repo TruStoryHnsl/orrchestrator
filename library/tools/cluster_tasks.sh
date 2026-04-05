@@ -112,13 +112,39 @@ cluster_and_output() {
         parent[tid] = tid
         rank[tid]   = 0
 
-        # Union tasks that share a file
+        # Count file frequency across all tasks (for central file detection)
         if (files != "" && files != "none") {
             nf = split(files, fa, ",")
             for (i = 1; i <= nf; i++) {
                 f = fa[i]
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", f)
                 if (f == "") continue
+                file_freq[f]++
+            }
+        }
+    }
+
+    END {
+        # ── Detect central files (touched by >60% of tasks) ──────────────
+        threshold = int(n * 0.6)
+        if (threshold < 2) threshold = 2  # need at least 2 tasks to be "central"
+        for (f in file_freq) {
+            if (file_freq[f] > threshold) {
+                central_file[f] = 1
+                central_file_list = central_file_list \
+                    (central_file_list == "" ? "" : ", ") f
+            }
+        }
+
+        # ── Union tasks that share NON-central files ─────────────────────
+        for (i = 1; i <= n; i++) {
+            tid = task_order[i]
+            if (task_files[tid] == "" || task_files[tid] == "none") continue
+            nf = split(task_files[tid], fa, ",")
+            for (j = 1; j <= nf; j++) {
+                f = fa[j]
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", f)
+                if (f == "" || (f in central_file)) continue
                 if (f in file_owner) {
                     unite(tid, file_owner[f])
                 } else {
@@ -126,9 +152,7 @@ cluster_and_output() {
                 }
             }
         }
-    }
 
-    END {
         # ── Resolve roots & build cluster membership ──────────────────────
         for (i = 1; i <= n; i++) {
             tid  = task_order[i]
@@ -242,6 +266,13 @@ cluster_and_output() {
 
         print "## Clusters"
         print ""
+
+        # Print central file notice if any were excluded
+        if (central_file_list != "") {
+            print "**Central files** (shared by all clusters, excluded from clustering):"
+            print "  " central_file_list
+            print ""
+        }
 
         clust_num = 0
         for (w = 1; w <= max_wave; w++) {
