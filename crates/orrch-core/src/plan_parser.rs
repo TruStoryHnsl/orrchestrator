@@ -1,23 +1,158 @@
 /// Structured parser for Plan.md files.
 /// Extracts phases, features, and status into a navigable tree.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Context for why a feature was removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovalContext {
+    RemovedBeforeImpl,
+    RemovedAfterImpl,
+    FailingVerification,
+}
+
+/// Feature lifecycle state machine.
+///
+/// Parse markers: `[ ]`=Planned, `[~]`=Implementing, `[=]`=Implemented,
+/// `[t]`=Testing, `[v]`=Verified, `[✓]`=UserConfirmed, `[x]`=Done,
+/// strikethrough=Deprecated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureStatus {
-    Pending,
-    Done,
-    Deprecated,
-    InProgress,
+    Planned,         // [ ] — not started
+    Implementing,    // [~] — work in progress
+    Implemented,     // [=] — code done, not tested
+    Testing,         // [t] — tests running
+    Verified,        // [v] — tests passed
+    UserConfirmed,   // [✓] — user manually confirmed
+    Done,            // [x] — shipped
+    Deprecated,      // strikethrough text
+    Pending,         // alias for Planned (backward compat)
+    InProgress,      // alias for Implementing (backward compat)
+    Removed(RemovalContext),
 }
 
 impl FeatureStatus {
     pub fn icon(&self) -> &'static str {
         match self {
+            Self::Planned | Self::Pending => "[ ]",
+            Self::Implementing | Self::InProgress => "[~]",
+            Self::Implemented => "[=]",
+            Self::Testing => "[t]",
+            Self::Verified => "[v]",
+            Self::UserConfirmed => "[✓]",
             Self::Done => "[x]",
-            Self::Pending => "[ ]",
             Self::Deprecated => "[D]",
-            Self::InProgress => "[~]",
+            Self::Removed(_) => "[R]",
         }
     }
+
+    /// Status icon for TUI display.
+    pub fn display_icon(&self) -> &'static str {
+        match self {
+            Self::Planned | Self::Pending => "○",
+            Self::Implementing | Self::InProgress => "◑",
+            Self::Implemented => "◉",
+            Self::Testing => "⚙",
+            Self::Verified => "✔",
+            Self::UserConfirmed => "✓",
+            Self::Done => "✓",
+            Self::Deprecated => "⊘",
+            Self::Removed(_) => "✗",
+        }
+    }
+
+    /// Whether this status counts as "done" (shipped or beyond).
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Done | Self::UserConfirmed | Self::Verified)
+    }
+
+    /// Whether this status counts as "open" (still needs work).
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Planned | Self::Pending | Self::Implementing | Self::InProgress | Self::Implemented | Self::Testing)
+    }
+
+    /// The markdown checkbox marker for write-back.
+    pub fn write_marker(&self) -> &'static str {
+        match self {
+            Self::Planned | Self::Pending => "[ ]",
+            Self::Implementing | Self::InProgress => "[~]",
+            Self::Implemented => "[=]",
+            Self::Testing => "[t]",
+            Self::Verified => "[v]",
+            Self::UserConfirmed => "[✓]",
+            Self::Done => "[x]",
+            Self::Deprecated => "[ ]",   // deprecated indicated by strikethrough, not marker
+            Self::Removed(_) => "[ ]",
+        }
+    }
+
+    /// Short label for the status.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Planned | Self::Pending => "planned",
+            Self::Implementing | Self::InProgress => "implementing",
+            Self::Implemented => "implemented",
+            Self::Testing => "testing",
+            Self::Verified => "verified",
+            Self::UserConfirmed => "confirmed",
+            Self::Done => "done",
+            Self::Deprecated => "deprecated",
+            Self::Removed(_) => "removed",
+        }
+    }
+
+    /// Cycle forward through the mutable states.
+    /// Done, Deprecated, and Removed are terminal.
+    pub fn cycle_forward(&self) -> Self {
+        match self {
+            Self::Planned | Self::Pending => Self::Implementing,
+            Self::Implementing | Self::InProgress => Self::Implemented,
+            Self::Implemented => Self::Testing,
+            Self::Testing => Self::Verified,
+            Self::Verified => Self::UserConfirmed,
+            Self::UserConfirmed => Self::Done,
+            Self::Done => Self::Done,
+            Self::Deprecated => Self::Deprecated,
+            Self::Removed(ctx) => Self::Removed(*ctx),
+        }
+    }
+
+    /// Cycle backward through the mutable states.
+    pub fn cycle_backward(&self) -> Self {
+        match self {
+            Self::Done => Self::UserConfirmed,
+            Self::UserConfirmed => Self::Verified,
+            Self::Verified => Self::Testing,
+            Self::Testing => Self::Implemented,
+            Self::Implemented => Self::Implementing,
+            Self::Implementing | Self::InProgress => Self::Planned,
+            Self::Planned | Self::Pending => Self::Planned,
+            Self::Deprecated => Self::Deprecated,
+            Self::Removed(ctx) => Self::Removed(*ctx),
+        }
+    }
+}
+
+/// Parse a status marker from the start of a string.
+/// Returns the status and the number of bytes consumed.
+pub fn parse_status_marker(s: &str) -> Option<(FeatureStatus, usize)> {
+    // Check multi-byte markers first (✓ is 3 bytes in UTF-8)
+    if s.starts_with("[✓]") {
+        let len = "[✓]".len(); // 5 bytes
+        return Some((FeatureStatus::UserConfirmed, len));
+    }
+    if s.len() >= 3 {
+        let marker = &s[..3];
+        let status = match marker {
+            "[x]" | "[X]" => FeatureStatus::Done,
+            "[ ]" => FeatureStatus::Planned,
+            "[~]" => FeatureStatus::Implementing,
+            "[=]" => FeatureStatus::Implemented,
+            "[t]" | "[T]" => FeatureStatus::Testing,
+            "[v]" | "[V]" => FeatureStatus::Verified,
+            _ => return None,
+        };
+        return Some((status, 3));
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +173,7 @@ pub struct PlanPhase {
 
 impl PlanPhase {
     pub fn done_count(&self) -> usize {
-        self.features.iter().filter(|f| f.status == FeatureStatus::Done).count()
+        self.features.iter().filter(|f| f.status.is_done()).count()
     }
 
     pub fn total_count(&self) -> usize {
@@ -215,14 +350,13 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     // Strip the leading prefix to get to the checkbox
     let (id, rest) = strip_feature_prefix(trimmed)?;
 
-    // Must have a checkbox
-    let (done, after_checkbox) = if rest.starts_with("[x]") || rest.starts_with("[X]") {
-        (true, rest[3..].trim_start())
-    } else if rest.starts_with("[ ]") {
-        (false, rest[3..].trim_start())
+    // Must have a status marker
+    let (mut status, consumed) = if let Some((s, n)) = parse_status_marker(rest) {
+        (s, n)
     } else {
         return None;
     };
+    let after_checkbox = rest[consumed..].trim_start();
 
     // Parse title and description
     let (title, description) = parse_title_description(after_checkbox);
@@ -231,23 +365,15 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
         return None;
     }
 
-    // Determine status
-    let status = if done {
-        FeatureStatus::Done
-    } else if description.to_uppercase().contains("DEPRECATED")
-        || description.contains("MOVED")
-        || title.to_uppercase().contains("DEPRECATED")
-    {
-        FeatureStatus::Deprecated
-    } else if description.contains("deferred")
-        || description.contains("requires ")
-        || description.contains("needs ")
-    {
-        // Items that mention deferred/requires are blocked, show as pending
-        FeatureStatus::Pending
-    } else {
-        FeatureStatus::Pending
-    };
+    // Override status for deprecated/deferred items (text-based detection)
+    if status == FeatureStatus::Planned {
+        if description.to_uppercase().contains("DEPRECATED")
+            || description.contains("MOVED")
+            || title.to_uppercase().contains("DEPRECATED")
+        {
+            status = FeatureStatus::Deprecated;
+        }
+    }
 
     Some(PlanFeature {
         id,
@@ -331,7 +457,7 @@ mod tests {
         let f = try_parse_feature_line("44. [ ] **Plan.md syntax parser** — parse into tree").unwrap();
         assert_eq!(f.id, Some(44));
         assert_eq!(f.title, "Plan.md syntax parser");
-        assert_eq!(f.status, FeatureStatus::Pending);
+        assert_eq!(f.status, FeatureStatus::Planned);
     }
 
     #[test]
@@ -353,7 +479,7 @@ mod tests {
         let f = try_parse_feature_line("- [ ] **Agent profile management** — swappable profiles").unwrap();
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Agent profile management");
-        assert_eq!(f.status, FeatureStatus::Pending);
+        assert_eq!(f.status, FeatureStatus::Planned);
     }
 
     #[test]

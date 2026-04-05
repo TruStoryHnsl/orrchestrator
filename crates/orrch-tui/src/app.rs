@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
 use orrch_core::process_manager::SessionEvent;
+use orrch_core::usage::{self, UsageRecord, UsageEvent, UsageTracker};
 use orrch_core::{
     analyze_output, infer_state, load_projects, BackendKind, ColorTag,
     OutputSignal, ProcessManager, Project, SessionState, Temperature, CONTINUE_DEV_PROMPT,
@@ -267,6 +268,7 @@ impl LibrarySub {
 /// Focus within the project detail view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailFocus {
+    Roadmap,
     Sessions,
     DevMap,
     Browser,
@@ -367,6 +369,7 @@ pub struct App {
     pub facilities: Vec<Project>,   // hyperfolders (admin, etc.)
     pub project_selected: usize,    // global selection index into the rendered list
     pub session_selected: usize,
+    pub roadmap_selected: usize,
     pub expanded_projects: HashSet<usize>,
     pub show_deprecated: bool,      // toggled in facilities section
 
@@ -542,6 +545,9 @@ pub struct App {
     pub workflow_choices: Vec<(String, String)>,
     /// Selected index in workflow picker
     pub workflow_picker_idx: usize,
+
+    // Usage tracking (Intelligence Resources Manager)
+    pub usage_tracker: UsageTracker,
 }
 
 /// A versioned release entry for the Production panel.
@@ -599,6 +605,7 @@ impl App {
             facilities,
             project_selected: 0,
             session_selected: 0,
+            roadmap_selected: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
             app_menu_selected: 0,
@@ -702,6 +709,7 @@ impl App {
             ideas_audit_expanded: None,
             workflow_choices: Vec::new(),
             workflow_picker_idx: 0,
+            usage_tracker: UsageTracker::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -993,6 +1001,15 @@ impl App {
             &session_name,
         ) {
             Ok(window_name) => {
+                // Record usage event
+                let _ = self.usage_tracker.record(&UsageRecord {
+                    timestamp: usage::iso_now(),
+                    provider: backend.label().to_string(),
+                    event: UsageEvent::SessionStart,
+                    session_name: Some(window_name.clone()),
+                    project: Some(proj_name.to_string()),
+                    duration_secs: None,
+                });
                 self.notify(format!("tmux:{} — {} {}", window_name, backend.label(), goal_display));
                 Ok(format!("tmux:{window_name}"))
             }
@@ -1146,6 +1163,18 @@ impl App {
                     }
                 }
                 SessionEvent::Died { sid } => {
+                    // Record usage before marking dead
+                    if let Some(session) = self.pm.get_session(&sid) {
+                        let duration = session.started_at.elapsed().as_secs_f64();
+                        let _ = self.usage_tracker.record(&UsageRecord {
+                            timestamp: usage::iso_now(),
+                            provider: session.backend.label().to_string(),
+                            event: UsageEvent::SessionEnd,
+                            session_name: Some(sid.clone()),
+                            project: Some(session.project_dir.file_name().unwrap_or_default().to_string_lossy().to_string()),
+                            duration_secs: Some(duration),
+                        });
+                    }
                     if let Some(session) = self.pm.get_session_mut(&sid) {
                         session.state = SessionState::Dead;
                     }
@@ -1218,6 +1247,13 @@ impl App {
             }
             SubView::ProjectDetail(pidx) => {
                 match self.detail_focus {
+                    DetailFocus::Roadmap => {
+                        if delta < 0 {
+                            self.roadmap_selected = self.roadmap_selected.saturating_sub((-delta) as usize);
+                        } else {
+                            self.roadmap_selected += delta as usize;
+                        }
+                    }
                     DetailFocus::Sessions => {
                         if delta < 0 {
                             self.session_selected = self.session_selected.saturating_sub((-delta) as usize);
@@ -2173,7 +2209,13 @@ impl App {
                         ListEntry::Project(idx) => {
                             let idx = *idx;
                             self.session_selected = 0;
-                            self.detail_focus = DetailFocus::Sessions;
+                            self.roadmap_selected = 0;
+                            // Default focus to roadmap if it has items, else sessions
+                            self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                                DetailFocus::Roadmap
+                            } else {
+                                DetailFocus::Sessions
+                            };
                             if let Some(proj) = self.projects.get(idx) {
                                 self.browser_open(&proj.path.clone());
                             }
@@ -2457,14 +2499,18 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Cycle focus: sessions → dev map (if available) → browser
+                // Cycle focus: Roadmap → Sessions → DevMap → Browser → Roadmap
                 let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
+                let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
+                    DetailFocus::Roadmap => DetailFocus::Sessions,
                     DetailFocus::Sessions => {
                         if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser }
                     }
                     DetailFocus::DevMap => DetailFocus::Browser,
-                    DetailFocus::Browser => DetailFocus::Sessions,
+                    DetailFocus::Browser => {
+                        if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
+                    }
                 };
                 return Ok(());
             }
@@ -2472,6 +2518,7 @@ impl App {
         }
 
         match self.detail_focus {
+            DetailFocus::Roadmap => self.key_detail_roadmap(key, proj_idx),
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
             DetailFocus::DevMap => self.key_detail_devmap(key, proj_idx),
             DetailFocus::Browser => {
@@ -2490,6 +2537,76 @@ impl App {
         }
     }
 
+    fn key_detail_roadmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        let roadmap_len = self.projects.get(proj_idx).map(|p| p.roadmap.len()).unwrap_or(0);
+        if roadmap_len == 0 {
+            self.detail_focus = DetailFocus::Sessions;
+            return Ok(());
+        }
+
+        match key {
+            KeyCode::Up => {
+                if self.roadmap_selected == 0 {
+                    // Already at top — stay
+                } else {
+                    self.roadmap_selected = self.roadmap_selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                if self.roadmap_selected + 1 < roadmap_len {
+                    self.roadmap_selected += 1;
+                } else {
+                    // Past last roadmap item → move to sessions
+                    self.detail_focus = DetailFocus::Sessions;
+                }
+            }
+            KeyCode::Char('s') => {
+                // Cycle feature status forward
+                if let Some(proj) = self.projects.get_mut(proj_idx) {
+                    if let Some(item) = proj.roadmap.get_mut(self.roadmap_selected) {
+                        let old = item.status;
+                        item.status = old.cycle_forward();
+                        if item.status != old {
+                            if let Some(ref plan_file) = proj.meta.plan_file {
+                                let plan_path = proj.path.join(plan_file);
+                                let title = item.title.clone();
+                                let new_status = item.status;
+                                if let Err(e) = orrch_core::update_feature_status_in_plan(&plan_path, &title, new_status) {
+                                    self.notify(format!("Failed to update plan: {e}"));
+                                } else {
+                                    self.notify(format!("{}: {} → {}", title, old.label(), new_status.label()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('S') => {
+                // Cycle feature status backward
+                if let Some(proj) = self.projects.get_mut(proj_idx) {
+                    if let Some(item) = proj.roadmap.get_mut(self.roadmap_selected) {
+                        let old = item.status;
+                        item.status = old.cycle_backward();
+                        if item.status != old {
+                            if let Some(ref plan_file) = proj.meta.plan_file {
+                                let plan_path = proj.path.join(plan_file);
+                                let title = item.title.clone();
+                                let new_status = item.status;
+                                if let Err(e) = orrch_core::update_feature_status_in_plan(&plan_path, &title, new_status) {
+                                    self.notify(format!("Failed to update plan: {e}"));
+                                } else {
+                                    self.notify(format!("{}: {} → {}", title, old.label(), new_status.label()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn key_detail_sessions(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         let session_count = if let Some(proj) = self.projects.get(proj_idx) {
             self.sessions_for_project(&proj.path).len()
@@ -2498,7 +2615,12 @@ impl App {
 
         match key {
             KeyCode::Up => {
-                self.session_selected = self.session_selected.saturating_sub(1);
+                if self.session_selected == 0 {
+                    // At top of sessions → move to roadmap
+                    self.detail_focus = DetailFocus::Roadmap;
+                } else {
+                    self.session_selected = self.session_selected.saturating_sub(1);
+                }
             }
             KeyCode::Down => {
                 if session_count > 0 && self.session_selected < session_count - 1 {

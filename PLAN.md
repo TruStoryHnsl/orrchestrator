@@ -347,7 +347,7 @@ _Expand beyond Claude+Gemini. Add API usage intelligence._
 22. [x] **Provider abstraction layer** — unified `Provider` trait with `cli_pty` and `api_http` variants. CLI providers use existing PTY spawn. API providers use `reqwest` with streaming response parsing.
 23. [ ] **Ollama backend via Crush/OpenCode** — integrate Crush (primary) or OpenCode (fallback) as `BackendKind::Crush`, same PTY model. If neither works, build native agentic modules wrapping Ollama's API.
 24. [ ] **Raw API backends** — Anthropic Messages API, OpenAI Chat Completions API. Direct HTTP, no CLI dependency.
-25. [ ] **Intelligence Resources Manager** — background task tracking per-provider: requests/minute, tokens/minute, remaining quota (where APIs report it). Stores in `~/.config/orrchestrator/usage.jsonl`.
+25. [x] **Intelligence Resources Manager** — background task tracking per-provider: requests/minute, tokens/minute, remaining quota (where APIs report it). Stores in `~/.config/orrchestrator/usage.jsonl`. **Status: DONE — UsageTracker with append-only JSONL persistence, SessionStart/SessionEnd recording on spawn/death, Analyze panel replaced with per-provider usage summary table.**
 26. [ ] **Dynamic throttling** — when a provider approaches rate limits, the IRM pauses workforce queues using that provider. Shifts work to alternative providers when possible. Resumes automatically.
 27. [ ] **Token optimization pipeline** — three layers: (a) COO one-time feedback compression during intake, (b) COO manages `instructions_inbox.md` lifecycle (trim on version publish, truncate long files), (c) hypervisor trims verbose reasoning from inter-agent handoffs, keeps actionable conclusions only.
 
@@ -387,7 +387,7 @@ _The predefined workforces that process different types of user input. Completin
 _Feature tracking interface in the project focus view. Plan.md becomes a live, interactive development map._
 
 44. [x] **Plan.md syntax parser for dev map** — parse Plan.md into a structured feature tree: phases → features → status (planned/in-progress/tested/verified/removed). Display as interactive list in Oversee project detail view.
-45. [ ] **Feature state machine** — each feature tracks: planned → implementing → implemented → testing → verified → user-confirmed. Visual indicators for each state. Removed features show as strikethrough with removal context (removed-before-impl vs removed-after-impl vs failing-verification).
+45. [x] **Feature state machine** — each feature tracks: planned → implementing → implemented → testing → verified → user-confirmed. Visual indicators for each state. Removed features show as strikethrough with removal context (removed-before-impl vs removed-after-impl vs failing-verification). **Status: DONE — FeatureStatus expanded to 9 states with parse markers ([~], [=], [t], [v], [✓]), color-coded TUI rendering, s/S keybindings for status cycling with Plan.md write-back.**
 46. [ ] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
 47. [ ] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
 48. [x] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
