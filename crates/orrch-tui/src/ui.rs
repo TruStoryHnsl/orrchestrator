@@ -410,15 +410,18 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
             orrch_library::ModelTier::MidTier => CYAN,
             orrch_library::ModelTier::Local => GREEN,
         };
-        let valve_badge = if blocked {
+        let throttled = app.usage_tracker.is_throttled(&model.provider);
+        let status_badge = if blocked {
             Span::styled(" ⊘ BLOCKED", Style::default().fg(ACCENT))
+        } else if throttled {
+            Span::styled(" [THROTTLED]", Style::default().fg(WAITING_COLOR))
         } else {
             Span::raw("")
         };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("{marker}{}", model.name), style),
             Span::styled(format!(" {}", model.tier.label()), Style::default().fg(tier_color)),
-            valve_badge,
+            status_badge,
         ])));
     }
     if items.is_empty() { items.push(ListItem::new(Line::styled("  No models in library/models/", Style::default().fg(TEXT_MUTED)))); }
@@ -427,7 +430,8 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
 
     let preview = if let Some(m) = app.library_models.get(app.library_selected) {
         let blocked = app.valve_store.is_blocked(&m.provider);
-        let valve_info = if blocked {
+        let throttled = app.usage_tracker.is_throttled(&m.provider);
+        let status_info = if blocked {
             let valve = app.valve_store.valves.get(&m.provider);
             let reason = valve.map(|v| v.reason.as_str()).unwrap_or("unknown");
             let reopen = valve.map(|v| v.reopen_display()).unwrap_or_else(|| "manual".into());
@@ -436,10 +440,16 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
                 Line::styled(format!("  Reopens: {}", reopen), Style::default().fg(WAITING_COLOR)),
                 Line::raw(""),
             ]
+        } else if throttled {
+            let reason = app.usage_tracker.throttle_reason(&m.provider).unwrap_or("rate limited");
+            vec![
+                Line::styled(format!("[THROTTLED] — {}", reason), Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD)),
+                Line::raw(""),
+            ]
         } else {
             vec![]
         };
-        let mut lines = valve_info;
+        let mut lines = status_info;
         lines.extend(vec![
             Line::styled(&m.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Line::styled(format!("Provider: {}", m.provider), Style::default().fg(TEXT)),
