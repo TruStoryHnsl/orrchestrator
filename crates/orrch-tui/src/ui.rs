@@ -25,6 +25,22 @@ const CYAN: Color = Color::Rgb(100, 200, 220);
 /// Standard scroll padding for all lists — keeps 3 items visible below cursor.
 const SCROLL_PAD: usize = 3;
 
+/// Map FeatureStatus to a display style with distinct colors.
+fn feature_status_style(status: orrch_core::FeatureStatus) -> Style {
+    use orrch_core::FeatureStatus;
+    match status {
+        FeatureStatus::Planned | FeatureStatus::Pending => Style::default().fg(TEXT_DIM),
+        FeatureStatus::Implementing | FeatureStatus::InProgress => Style::default().fg(WAITING_COLOR),
+        FeatureStatus::Implemented => Style::default().fg(CYAN),
+        FeatureStatus::Testing => Style::default().fg(Color::Rgb(180, 120, 220)),
+        FeatureStatus::Verified => Style::default().fg(GREEN),
+        FeatureStatus::UserConfirmed => Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+        FeatureStatus::Done => Style::default().fg(GREEN),
+        FeatureStatus::Deprecated => Style::default().fg(Color::Rgb(90, 90, 110)).add_modifier(Modifier::CROSSED_OUT),
+        FeatureStatus::Removed(_) => Style::default().fg(Color::Rgb(200, 60, 60)).add_modifier(Modifier::CROSSED_OUT),
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
@@ -130,7 +146,7 @@ fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
         Panel::Design => draw_design(frame, app, area),
         Panel::Oversee => draw_projects(frame, app, area),
         Panel::Hypervise => draw_sessions_tab(frame, app, area),
-        Panel::Analyze => draw_placeholder(frame, area, "Analyze", "Token efficiency calibration — coming soon.\n\nWill display cost metrics, model usage stats, and optimization recommendations."),
+        Panel::Analyze => draw_analyze(frame, app, area),
         Panel::Publish => draw_placeholder(frame, area, "Publish", "Release packaging & marketing — coming soon.\n\n• Legal analysis of packages\n• Monetization strategy tools\n• Marketing campaign designer\n• Ad broker integration\n• Distribution platform management"),
     }
 }
@@ -202,6 +218,68 @@ fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
         .style(Style::default().fg(TEXT_DIM))
         .block(Block::default().title(format!(" {} ", title)).borders(Borders::ALL));
     frame.render_widget(msg, area);
+}
+
+fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
+    use orrch_core::usage;
+
+    let summary = app.usage_tracker.summary();
+
+    if summary.per_provider.is_empty() {
+        let msg = Paragraph::new("No usage data yet. Session metrics will appear here as you spawn sessions.")
+            .style(Style::default().fg(TEXT_DIM))
+            .block(Block::default()
+                .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)));
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let header = Row::new(vec![
+        Cell::from("Provider").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Sessions").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    ]).height(1).bottom_margin(1);
+
+    let mut rows: Vec<Row> = Vec::new();
+    let mut total_duration: f64 = 0.0;
+
+    for p in &summary.per_provider {
+        total_duration += p.total_duration_secs;
+        let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
+        rows.push(Row::new(vec![
+            Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
+            Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
+            Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
+            Cell::from(last).style(Style::default().fg(TEXT_DIM)),
+        ]));
+    }
+
+    rows.push(Row::new(vec![
+        Cell::from("Total").style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Cell::from(format!("{}", summary.total_sessions)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Cell::from(usage::format_duration(total_duration)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Cell::from(""),
+    ]).top_margin(1));
+
+    let widths = [
+        Constraint::Length(14),
+        Constraint::Length(10),
+        Constraint::Length(12),
+        Constraint::Length(12),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default()
+            .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(2);
+
+    frame.render_widget(table, area);
 }
 
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1316,14 +1394,21 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
-    // Roadmap
-    let roadmap_items: Vec<ListItem> = proj.roadmap.iter().map(|item| {
-        let style = if item.done { Style::default().fg(TEXT_MUTED) } else { Style::default().fg(TEXT) };
-        ListItem::new(format!("{} {}", item.status_icon(), item.title)).style(style)
+    // Roadmap — color-coded by feature status
+    let in_roadmap = app.detail_focus == crate::app::DetailFocus::Roadmap;
+    let roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
+        let style = feature_status_style(item.status);
+        let sel_prefix = if in_roadmap && i == app.roadmap_selected { "▸" } else { " " };
+        ListItem::new(format!("{}{} {}", sel_prefix, item.status_icon(), item.title)).style(style)
     }).collect();
+    let roadmap_border = if in_roadmap {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_DIM)
+    };
     let roadmap = List::new(roadmap_items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
+        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(roadmap_border));
     frame.render_widget(roadmap, layout[1]);
 
     // Sessions — selectable, shows managed + external, with duplicate-goal badges
@@ -1502,12 +1587,9 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
 
         if expanded {
             for feat in &phase.features {
-                let (icon, color) = match feat.status {
-                    FeatureStatus::Done => ("[x]", GREEN),
-                    FeatureStatus::Pending => ("[ ]", TEXT),
-                    FeatureStatus::Deprecated => ("[D]", TEXT_MUTED),
-                    FeatureStatus::InProgress => ("[~]", ACCENT),
-                };
+                let icon = feat.status.icon();
+                let style = feature_status_style(feat.status);
+                let color = style.fg.unwrap_or(TEXT);
                 let id_str = feat.id.map(|n| format!("{n}. ")).unwrap_or_default();
                 let title = format!("  {icon} {id_str}{}", feat.title);
                 items.push(ListItem::new(title).style(Style::default().fg(color)));

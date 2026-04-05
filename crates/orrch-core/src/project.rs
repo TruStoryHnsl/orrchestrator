@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::plan_parser::{self, PlanPhase};
+use crate::plan_parser::{self, FeatureStatus, PlanPhase, parse_status_marker};
 
 /// A roadmap item parsed from PLAN.md.
 #[derive(Debug, Clone)]
@@ -8,12 +8,19 @@ pub struct RoadmapItem {
     pub number: usize,
     pub title: String,
     pub description: String,
-    pub done: bool,
+    pub status: FeatureStatus,
+    /// Line number in the plan file (1-indexed), used for write-back.
+    pub source_line: Option<usize>,
 }
 
 impl RoadmapItem {
+    /// Backward-compatible: whether the item is considered "done".
+    pub fn done(&self) -> bool {
+        self.status.is_done()
+    }
+
     pub fn status_icon(&self) -> &'static str {
-        if self.done { "✓" } else { "○" }
+        self.status.display_icon()
     }
 }
 
@@ -261,19 +268,19 @@ impl Project {
     }
 
     pub fn done_count(&self) -> usize {
-        self.roadmap.iter().filter(|r| r.done).count()
+        self.roadmap.iter().filter(|r| r.done()).count()
     }
 
     pub fn open_count(&self) -> usize {
-        self.roadmap.iter().filter(|r| !r.done).count()
+        self.roadmap.iter().filter(|r| !r.done()).count()
     }
 
     pub fn open_roadmap_items(&self) -> Vec<&RoadmapItem> {
-        self.roadmap.iter().filter(|r| !r.done).collect()
+        self.roadmap.iter().filter(|r| !r.done()).collect()
     }
 
     pub fn next_priority(&self) -> Option<&RoadmapItem> {
-        self.roadmap.iter().find(|r| !r.done)
+        self.roadmap.iter().find(|r| !r.done())
     }
 
     pub fn default_action(&self) -> &'static str {
@@ -733,10 +740,16 @@ fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
     let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
     let rest = rest.trim_start();
 
-    let (done, rest) = if rest.starts_with("[x]") || rest.starts_with("[X]") {
-        (true, &rest[3..])
-    } else if rest.starts_with("[ ]") {
-        (false, &rest[3..])
+    // Check for strikethrough → Deprecated
+    let (status, rest) = if rest.starts_with("~~") && rest.ends_with("~~") {
+        let inner = &rest[2..rest.len()-2];
+        if let Some((_inner_status, consumed)) = parse_status_marker(inner) {
+            (FeatureStatus::Deprecated, &inner[consumed..])
+        } else {
+            (FeatureStatus::Deprecated, inner)
+        }
+    } else if let Some((s, consumed)) = parse_status_marker(rest) {
+        (s, &rest[consumed..])
     } else {
         return None;
     };
@@ -778,8 +791,42 @@ fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
         number,
         title,
         description,
-        done,
+        status,
+        source_line: None,
     })
+}
+
+/// Update a feature's status marker in a plan file on disk.
+pub fn update_feature_status_in_plan(plan_path: &Path, item_title: &str, new_status: FeatureStatus) -> std::io::Result<()> {
+    let contents = std::fs::read_to_string(plan_path)?;
+    let mut lines: Vec<String> = contents.lines().map(|l| l.to_string()).collect();
+    let new_marker = new_status.write_marker();
+
+    for line in lines.iter_mut() {
+        if !line.contains(item_title) {
+            continue;
+        }
+        let trimmed = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ');
+        if parse_status_marker(trimmed).is_some() {
+            if let Some(bracket_start) = line.find('[') {
+                if let Some(bracket_end) = line[bracket_start..].find(']') {
+                    let old_marker = &line[bracket_start..bracket_start + bracket_end + 1];
+                    if matches!(old_marker, "[ ]" | "[x]" | "[X]" | "[~]" | "[=]" | "[t]" | "[T]" | "[v]" | "[V]")
+                        || old_marker == "[✓]"
+                    {
+                        *line = format!("{}{}{}", &line[..bracket_start], new_marker, &line[bracket_start + old_marker.len()..]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut output = lines.join("\n");
+    if contents.ends_with('\n') {
+        output.push('\n');
+    }
+    std::fs::write(plan_path, output)
 }
 
 fn count_queued_prompts(path: &Path) -> usize {
@@ -800,7 +847,8 @@ mod tests {
     #[test]
     fn test_parse_roadmap_done() {
         let item = parse_roadmap_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
-        assert!(item.done);
+        assert!(item.done());
+        assert_eq!(item.status, FeatureStatus::Done);
         assert_eq!(item.number, 1);
         assert_eq!(item.title, "Core process manager");
     }
@@ -808,8 +856,28 @@ mod tests {
     #[test]
     fn test_parse_roadmap_open() {
         let item = parse_roadmap_line("5. [ ] **Editor view** — embedded vim").unwrap();
-        assert!(!item.done);
+        assert!(!item.done());
+        assert_eq!(item.status, FeatureStatus::Planned);
         assert_eq!(item.number, 5);
+    }
+
+    #[test]
+    fn test_parse_roadmap_implementing() {
+        let item = parse_roadmap_line("3. [~] **Feature X** — in progress").unwrap();
+        assert_eq!(item.status, FeatureStatus::Implementing);
+    }
+
+    #[test]
+    fn test_parse_roadmap_testing() {
+        let item = parse_roadmap_line("4. [t] **Feature Y** — under test").unwrap();
+        assert_eq!(item.status, FeatureStatus::Testing);
+    }
+
+    #[test]
+    fn test_parse_roadmap_verified() {
+        let item = parse_roadmap_line("6. [v] **Feature Z** — verified").unwrap();
+        assert_eq!(item.status, FeatureStatus::Verified);
+        assert!(item.done()); // verified counts as done
     }
 
     #[test]
