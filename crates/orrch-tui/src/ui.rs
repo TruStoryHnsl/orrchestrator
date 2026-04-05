@@ -1278,18 +1278,36 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     use crate::app::DetailFocus;
     let Some(proj) = app.projects.get(proj_idx) else { return; };
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
+    let in_devmap = app.detail_focus == DetailFocus::DevMap;
     let in_browser = app.detail_focus == DetailFocus::Browser;
 
+    let has_devmap = !proj.plan_phases.is_empty();
+    let devmap_height: u16 = if has_devmap {
+        // Show at least a few lines for the dev map
+        let visible_items = app.devmap_flat_count(proj_idx);
+        (visible_items.min(10) as u16).max(3) + 2 // +2 for borders
+    } else {
+        0
+    };
+
     let roadmap_height = proj.roadmap.len().min(8) as u16 + 3;
+    let mut constraints = vec![
+        Constraint::Length(2),              // header
+        Constraint::Length(roadmap_height), // roadmap
+        Constraint::Length(8),             // sessions (compact)
+    ];
+    if has_devmap {
+        constraints.push(Constraint::Length(devmap_height)); // dev map
+    }
+    constraints.push(Constraint::Min(5)); // file browser
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2),          // header
-            Constraint::Length(roadmap_height), // roadmap
-            Constraint::Length(8),          // sessions (compact)
-            Constraint::Min(5),            // file browser
-        ])
+        .constraints(constraints)
         .split(area);
+
+    let devmap_slot = if has_devmap { 3 } else { usize::MAX };
+    let browser_slot = if has_devmap { 4 } else { 3 };
 
     // Header
     let header = Paragraph::new(Line::from(vec![
@@ -1370,6 +1388,11 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         frame.render_stateful_widget(table, layout[2], &mut state);
     }
 
+    // Dev map — interactive feature tree from Plan.md
+    if has_devmap {
+        draw_dev_map(frame, app, layout[devmap_slot], proj_idx, in_devmap);
+    }
+
     // File browser — single tree column + preview pane
     let browser_border = if in_browser { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
     let unfocused_border = Style::default().fg(TEXT_MUTED);
@@ -1378,7 +1401,7 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(layout[3]);
+        .split(layout[browser_slot]);
 
     // Build tree items: current directory entries, with child entries expanded inline
     let mut tree_items: Vec<ListItem> = Vec::new();
@@ -1432,6 +1455,79 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
             .wrap(Wrap { trim: false });
         frame.render_widget(preview, hsplit[1]);
     }
+}
+
+// ─── Dev Map ─────────────────────────────────────────────────────────
+
+fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, focused: bool) {
+    use orrch_core::FeatureStatus;
+
+    let Some(proj) = app.projects.get(proj_idx) else { return; };
+    let border_style = if focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+
+    // Build flat list items from phases + expanded features
+    let mut items: Vec<ListItem> = Vec::new();
+
+    for (pi, phase) in proj.plan_phases.iter().enumerate() {
+        let expanded = app.devmap_phase_idx == pi;
+        let arrow = if expanded { "▾" } else { "▸" };
+        let done = phase.done_count();
+        let total = phase.total_count();
+        let progress = if total > 0 {
+            format!(" ({done}/{total})")
+        } else {
+            String::new()
+        };
+
+        // Phase header color: all done = green, some done = dim, none = text
+        let phase_color = if done == total && total > 0 {
+            GREEN
+        } else if done > 0 {
+            TEXT_DIM
+        } else {
+            TEXT
+        };
+
+        let phase_name = if let Some(num) = phase.number {
+            format!("{arrow} Phase {num}: {}{progress}", phase.name)
+        } else {
+            format!("{arrow} {}{progress}", phase.name)
+        };
+
+        items.push(
+            ListItem::new(Line::from(vec![
+                Span::styled(phase_name, Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
+            ]))
+        );
+
+        if expanded {
+            for feat in &phase.features {
+                let (icon, color) = match feat.status {
+                    FeatureStatus::Done => ("[x]", GREEN),
+                    FeatureStatus::Pending => ("[ ]", TEXT),
+                    FeatureStatus::Deprecated => ("[D]", TEXT_MUTED),
+                    FeatureStatus::InProgress => ("[~]", ACCENT),
+                };
+                let id_str = feat.id.map(|n| format!("{n}. ")).unwrap_or_default();
+                let title = format!("  {icon} {id_str}{}", feat.title);
+                items.push(ListItem::new(title).style(Style::default().fg(color)));
+            }
+        }
+    }
+
+    let total_done: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
+    let total_all: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
+    let block_title = format!(" Dev Map ({total_done}/{total_all}) ");
+
+    let list = List::new(items)
+        .scroll_padding(SCROLL_PAD)
+        .block(Block::default().title(block_title).borders(Borders::ALL).style(border_style))
+        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▶ ");
+
+    let sel = if focused { Some(app.devmap_selected) } else { None };
+    let mut state = ListState::default().with_selected(sel);
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 // ─── Session Focus ────────────────────────────────────────────────────
@@ -1965,19 +2061,30 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 50, 10);
     frame.render_widget(Clear, popup);
     let avail = app.pm.backends.available();
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![Span::raw("Goal: "), Span::styled(
             if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text },
             Style::default().fg(GREEN))]),
         Line::raw(""),
         Line::styled("Backend (Tab to toggle):", Style::default().fg(TEXT_DIM)),
-        Line::styled(format!("{} Claude{}", if app.spawn_backend == BackendKind::Claude { "▶" } else { " " },
-            if avail.contains(&BackendKind::Claude) { "" } else { " (not found)" }),
-            if app.spawn_backend == BackendKind::Claude { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) }),
-        Line::styled(format!("{} Gemini{}", if app.spawn_backend == BackendKind::Gemini { "▶" } else { " " },
-            if avail.contains(&BackendKind::Gemini) { "" } else { " (not found)" }),
-            if app.spawn_backend == BackendKind::Gemini { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) }),
     ];
+    for &backend in BackendKind::cli_backends() {
+        let selected = app.spawn_backend == backend;
+        let found = avail.contains(&backend);
+        let marker = if selected { "▶" } else { " " };
+        let suffix = if found { "" } else { " (not found)" };
+        let label = match backend {
+            BackendKind::Claude => "Claude",
+            BackendKind::Gemini => "Gemini",
+            BackendKind::Crush => "Crush",
+            BackendKind::OpenCode => "OpenCode",
+            _ => backend.label(),
+        };
+        lines.push(Line::styled(
+            format!("{marker} {label}{suffix}"),
+            if selected { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        ));
+    }
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Backend ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
 }
@@ -2139,7 +2246,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
         (_, SubView::ProjectDetail(_)) => hint_line(&[
             ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
             ("|", ""),
-            ("Tab", "sess↔files"), ("Esc", "back"),
+            ("Tab", "cycle focus"), ("Esc", "back"),
         ]),
         (_, SubView::ExternalSessionView(_)) => hint_line(&[
             ("r", "refresh"), ("Esc", "back"),

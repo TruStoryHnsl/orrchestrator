@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::plan_parser::{self, PlanPhase};
+
 /// A roadmap item parsed from PLAN.md.
 #[derive(Debug, Clone)]
 pub struct RoadmapItem {
@@ -191,6 +193,7 @@ pub struct Project {
     pub color_tag: ColorTag,
     pub description: String,
     pub roadmap: Vec<RoadmapItem>,
+    pub plan_phases: Vec<PlanPhase>,
     pub queued_prompts: usize,
     pub has_plan: bool,
     pub has_master_plan: bool,
@@ -211,11 +214,22 @@ impl Project {
         let scope = load_scope(path);
         let color_tag = load_color_tag(path);
         let meta = scan_project_meta(path);
-        let (roadmap, description, has_plan) = if let Some(ref plan_file) = meta.plan_file {
-            parse_plan_file(&path.join(plan_file))
+        let (roadmap, description, has_plan, plan_phases) = if let Some(ref plan_file) = meta.plan_file {
+            let plan_path = path.join(plan_file);
+            let (rm, desc, hp) = parse_plan_file(&plan_path);
+            let phases = if hp {
+                if let Ok(content) = std::fs::read_to_string(&plan_path) {
+                    plan_parser::parse_plan(&content)
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+            (rm, desc, hp, phases)
         } else {
             let desc = read_description_from_claude_md(path);
-            (Vec::new(), desc, false)
+            (Vec::new(), desc, false, Vec::new())
         };
         let queued_prompts = count_queued_prompts(path);
 
@@ -235,6 +249,7 @@ impl Project {
             color_tag,
             description,
             roadmap,
+            plan_phases,
             queued_prompts,
             has_plan,
             has_master_plan: meta.has_master_plan,
@@ -715,16 +730,8 @@ fn read_description_from_claude_md(path: &Path) -> String {
 }
 
 fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
-    // Strip leading numbering: "1.", "65.", "CP-1.", "CP-7.", "- ", etc.
-    let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == '-');
+    let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
     let rest = rest.trim_start();
-    // Also handle "CP-N." prefix (strip remaining alpha prefix after digit stripping)
-    let rest = if rest.starts_with(|c: char| c.is_ascii_uppercase() && c != '[') {
-        let after_prefix = rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-' || c == '.');
-        after_prefix.trim_start()
-    } else {
-        rest
-    };
 
     let (done, rest) = if rest.starts_with("[x]") || rest.starts_with("[X]") {
         (true, &rest[3..])
@@ -833,6 +840,7 @@ mod tests {
             color_tag: ColorTag::None,
             description: String::new(),
             roadmap: Vec::new(),
+            plan_phases: Vec::new(),
             queued_prompts: 0,
             has_plan: false,
             has_master_plan: false,

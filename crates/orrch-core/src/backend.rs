@@ -2,12 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Supported AI CLI backends.
+use crate::provider::{ProviderConfig, ProviderKind};
+
+/// Supported AI backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     Claude,
     Gemini,
+    Crush,
+    OpenCode,
+    #[serde(rename = "anthropic_api")]
+    AnthropicApi,
+    #[serde(rename = "openai_api")]
+    OpenAiApi,
 }
 
 impl BackendKind {
@@ -15,6 +23,10 @@ impl BackendKind {
         match self {
             Self::Claude => "claude",
             Self::Gemini => "gemini",
+            Self::Crush => "crush",
+            Self::OpenCode => "opencode",
+            Self::AnthropicApi => "anthropic-api",
+            Self::OpenAiApi => "openai-api",
         }
     }
 
@@ -22,7 +34,86 @@ impl BackendKind {
         match self {
             Self::Claude => "[claude]",
             Self::Gemini => "[gemini]",
+            Self::Crush => "[crush]",
+            Self::OpenCode => "[opencode]",
+            Self::AnthropicApi => "[anthropic-api]",
+            Self::OpenAiApi => "[openai-api]",
         }
+    }
+
+    /// Whether this backend uses a CLI/PTY transport.
+    pub fn is_cli(&self) -> bool {
+        matches!(self, Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode)
+    }
+
+    /// Whether this backend uses a direct HTTP API transport.
+    pub fn is_api(&self) -> bool {
+        matches!(self, Self::AnthropicApi | Self::OpenAiApi)
+    }
+
+    /// Convert this backend kind into a unified ProviderConfig.
+    /// For CLI backends, reads command/flags from BackendsConfig.
+    /// For API backends, produces a stub config.
+    pub fn to_provider(&self, config: &BackendsConfig) -> ProviderConfig {
+        match self {
+            Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode => {
+                if let Some(cfg) = config.backends.get(self) {
+                    ProviderConfig {
+                        name: self.label().to_string(),
+                        kind: ProviderKind::CliPty {
+                            command: cfg.command.clone(),
+                            flags: cfg.flags.clone(),
+                        },
+                        available: cfg.available,
+                    }
+                } else {
+                    // Backend not configured — return unavailable provider
+                    ProviderConfig {
+                        name: self.label().to_string(),
+                        kind: ProviderKind::CliPty {
+                            command: self.label().to_string(),
+                            flags: vec![],
+                        },
+                        available: false,
+                    }
+                }
+            }
+            Self::AnthropicApi => ProviderConfig {
+                name: "anthropic-api".to_string(),
+                kind: ProviderKind::ApiHttp {
+                    base_url: "https://api.anthropic.com".to_string(),
+                    model_id: "claude-sonnet-4-20250514".to_string(),
+                    api_key_env: "ANTHROPIC_API_KEY".to_string(),
+                },
+                available: std::env::var("ANTHROPIC_API_KEY").is_ok(),
+            },
+            Self::OpenAiApi => ProviderConfig {
+                name: "openai-api".to_string(),
+                kind: ProviderKind::ApiHttp {
+                    base_url: "https://api.openai.com".to_string(),
+                    model_id: "gpt-4o".to_string(),
+                    api_key_env: "OPENAI_API_KEY".to_string(),
+                },
+                available: std::env::var("OPENAI_API_KEY").is_ok(),
+            },
+        }
+    }
+
+    /// All known backend variants.
+    pub fn all() -> &'static [BackendKind] {
+        &[
+            Self::Claude,
+            Self::Gemini,
+            Self::Crush,
+            Self::OpenCode,
+            Self::AnthropicApi,
+            Self::OpenAiApi,
+        ]
+    }
+
+    /// Only CLI-based backends (for PTY spawning).
+    pub fn cli_backends() -> &'static [BackendKind] {
+        &[Self::Claude, Self::Gemini, Self::Crush, Self::OpenCode]
     }
 }
 
@@ -66,6 +157,22 @@ impl Default for BackendsConfig {
             BackendKind::Gemini,
             BackendConfig {
                 command: "gemini".into(),
+                flags: vec![],
+                available: false,
+            },
+        );
+        backends.insert(
+            BackendKind::Crush,
+            BackendConfig {
+                command: "crush".into(),
+                flags: vec![],
+                available: false,
+            },
+        );
+        backends.insert(
+            BackendKind::OpenCode,
+            BackendConfig {
+                command: "opencode".into(),
                 flags: vec![],
                 available: false,
             },
