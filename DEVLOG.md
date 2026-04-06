@@ -1,5 +1,35 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-06 — Items 49 + 50 (Diff Log + User Verification)
+
+### Completed
+- **49. Diff log persistence** — New `orrch-core::diff_log` module exposing `DiffEntry`, `append_diff`, `load_diffs`, `load_all_diffs`, and `diff_log_path`. Append-only JSON storage at `<project>/plans/.diff_log.json` keyed by `feature_id → Vec<DiffEntry>`. Timestamps via existing `chrono_lite_timestamp()`. Standalone API — auto-hook into plan flips deferred (needs state diffing infra). 2 unit tests cover round-trip + multi-feature load.
+- **50. User verification tracking** — `PlanFeature` gains `user_verified: bool` field, set to `true` when the parser encounters a `[v]` marker. New free function `mark_verified_in_plan(plan_path, feature_title) -> io::Result<bool>` performs a byte-precise rewrite of a single `[x]` to `[v]` matching the trimmed title. 2 new tests verify parse + idempotent rewrite.
+- **TUI rendering** — `draw_dev_map` in orrch-tui appends three conditional badges per feature row: `✓` (GREEN) when verified, `+N` (CYAN) when diff entries exist, `●N` (TEXT_MUTED) when matching git commits exist. `lookup_id` falls back from `feat.id` to `feat.title`.
+- **TUI keybinding** — `key_detail_devmap` binds `V` (uppercase) to call `mark_verified_in_plan` then reload the project plan. Silently no-ops on phase headers, missing plan file, or write errors.
+- **52 partial: git commit display** — `orrch-core::git` exposes `FeatureCommit { sha, subject }` and `commits_for_feature(project_dir, feature_id)`. Spawns `git -C <dir> log --oneline -n 50 --fixed-strings --grep <id>`, returns up to 3 entries, empty on any failure. Smoke test asserts no panic on nonexistent dir. **The Repository Manager advisory loop on PM grouping is NOT implemented — only the display side. Item 52 stays unchecked.**
+
+### Verification
+- 2 isolated tester subagents (orrch-core and orrch-tui scopes) independently verified PASS with no issues
+- `cargo build` workspace: PASS
+- `cargo test -p orrch-core`: 68 passed (+4 new), 0 failed
+- `cargo clippy`: 0 errors (pre-existing warnings only)
+- API contract verified for all 4 tasks
+
+### Files Changed
+- `crates/orrch-core/src/diff_log.rs` — **new**: ~144 lines, DiffEntry + append/load API + 2 tests
+- `crates/orrch-core/src/lib.rs` — registered `diff_log` module + re-exports
+- `crates/orrch-core/src/plan_parser.rs` — `user_verified` field, `mark_verified_in_plan`, 2 tests
+- `crates/orrch-core/src/git.rs` — +64 lines: `FeatureCommit`, `commits_for_feature`, smoke test
+- `crates/orrch-tui/src/ui.rs` — `draw_dev_map` badge rendering (lines ~1600-1647)
+- `crates/orrch-tui/src/app.rs` — `key_detail_devmap` V keybinding (lines ~2805-2823)
+
+### Workflow
+- Executed `develop_feature` MCP dispatch loop end-to-end
+- 1 PM planning agent → 4 tasks → 2 file-clustered impl agents (parallel) → 2 isolated verifier agents (parallel) → 1 PM evaluator → PASS
+
+---
+
 ## Dev Session: 2026-04-03 — INS-004 through INS-009 (UI Polish & Infrastructure)
 
 ### Completed

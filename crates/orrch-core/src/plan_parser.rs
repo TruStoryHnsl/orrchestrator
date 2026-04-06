@@ -162,6 +162,10 @@ pub struct PlanFeature {
     pub title: String,
     pub description: String,
     pub status: FeatureStatus,
+    /// True when the feature was marked with `[v]` (user-verified). Distinct
+    /// from status because a feature can progress past Verified while still
+    /// carrying its "user verified" provenance.
+    pub user_verified: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -375,11 +379,16 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
         }
     }
 
+    // `[v]` is the only parser path that produces Verified, so any Verified
+    // status at this point implies the feature was explicitly user-verified.
+    let user_verified = status == FeatureStatus::Verified;
+
     Some(PlanFeature {
         id,
         title,
         description,
         status,
+        user_verified,
     })
 }
 
@@ -625,6 +634,59 @@ pub fn append_feature_to_plan(
     Ok(true)
 }
 
+/// Mark a feature as user-verified in PLAN.md by flipping its `[x]` marker
+/// to `[v]`. Loose match on the title (trim + contains). Returns true if a
+/// change was written.
+///
+/// Preserves all other bytes in the file exactly — only the single `[x]`
+/// token on the matched line is replaced.
+pub fn mark_verified_in_plan(
+    plan_path: &std::path::Path,
+    feature_title: &str,
+) -> std::io::Result<bool> {
+    let contents = std::fs::read_to_string(plan_path)?;
+    let needle = feature_title.trim();
+    if needle.is_empty() {
+        return Ok(false);
+    }
+
+    // Work on raw bytes / slices so we can reconstruct exactly.
+    let mut out = String::with_capacity(contents.len());
+    let mut changed = false;
+
+    for line in contents.split_inclusive('\n') {
+        // Strip the trailing newline (if any) to inspect the line content,
+        // but keep it for the output.
+        let (body, nl) = if let Some(stripped) = line.strip_suffix('\n') {
+            (stripped, "\n")
+        } else {
+            (line, "")
+        };
+
+        if !changed && body.contains("[x]") && body.contains(needle) {
+            // Replace ONLY the first occurrence of `[x]` on this line.
+            if let Some(pos) = body.find("[x]") {
+                let mut replaced = String::with_capacity(body.len());
+                replaced.push_str(&body[..pos]);
+                replaced.push_str("[v]");
+                replaced.push_str(&body[pos + 3..]);
+                out.push_str(&replaced);
+                out.push_str(nl);
+                changed = true;
+                continue;
+            }
+        }
+
+        out.push_str(body);
+        out.push_str(nl);
+    }
+
+    if changed {
+        std::fs::write(plan_path, out)?;
+    }
+    Ok(changed)
+}
+
 /// Find the line index of a feature by its title.
 fn find_feature_line(lines: &[&str], title: &str) -> Option<usize> {
     for (i, line) in lines.iter().enumerate() {
@@ -700,6 +762,55 @@ mod tests {
         let p = try_parse_phase_header("### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)").unwrap();
         assert!(p.name.contains("CRITICAL PATH"));
         assert_eq!(p.number, None);
+    }
+
+    #[test]
+    fn test_parse_verified_sets_user_verified() {
+        let content = r#"# Test Plan
+
+## Phase 0: Foundation (1.0.0)
+
+1. [v] **Verified feature** — has been user-verified
+2. [x] **Done feature** — shipped
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 1);
+        let feats = &phases[0].features;
+        assert_eq!(feats.len(), 2);
+        assert_eq!(feats[0].status, FeatureStatus::Verified);
+        assert!(feats[0].user_verified, "[v] feature should be user_verified");
+        assert_eq!(feats[1].status, FeatureStatus::Done);
+        assert!(!feats[1].user_verified, "[x] feature must not be user_verified");
+    }
+
+    #[test]
+    fn test_mark_verified_in_plan_flips_marker() {
+        let tmp = std::env::temp_dir().join(format!(
+            "orrch_plan_mark_verified_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let plan_path = tmp.join("PLAN.md");
+
+        let original = "# Plan\n\n## Phase 0: Test\n\n1. [x] **My Feature** — did a thing\n2. [x] **Other Feature** — untouched\n";
+        std::fs::write(&plan_path, original).unwrap();
+
+        let changed = mark_verified_in_plan(&plan_path, "My Feature").unwrap();
+        assert!(changed, "should return true when a change was made");
+
+        let after = std::fs::read_to_string(&plan_path).unwrap();
+        let expected = "# Plan\n\n## Phase 0: Test\n\n1. [v] **My Feature** — did a thing\n2. [x] **Other Feature** — untouched\n";
+        assert_eq!(after, expected, "only the matched line's [x] should become [v]");
+
+        // Idempotency: second call should find no `[x]` matching the title and return false.
+        let changed2 = mark_verified_in_plan(&plan_path, "My Feature").unwrap();
+        assert!(!changed2, "second call should be a no-op");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

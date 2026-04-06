@@ -2801,6 +2801,24 @@ impl App {
                     self.sub = SubView::AddFeature(proj_idx);
                 }
             }
+            // Task 3: Mark currently selected feature as user-verified.
+            KeyCode::Char('V') => {
+                if let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                    if !is_phase {
+                        let resolved = self.projects.get(proj_idx).and_then(|proj| {
+                            let plan_file = proj.meta.plan_file.as_ref()?;
+                            let plan_path = proj.path.join(plan_file);
+                            let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
+                            Some((plan_path, feat.title.clone()))
+                        });
+                        if let Some((plan_path, title)) = resolved {
+                            if orrch_core::plan_parser::mark_verified_in_plan(&plan_path, &title).is_ok() {
+                                self.reload_project_plan(proj_idx);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
