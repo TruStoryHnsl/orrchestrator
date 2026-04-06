@@ -1009,49 +1009,255 @@ fn workflow_cluster(server: &OrrchMcpServer, args: &Value) -> String {
     }
 }
 
-fn workflow_compress(server: &OrrchMcpServer, args: &Value) -> String {
+fn workflow_compress(_server: &OrrchMcpServer, args: &Value) -> String {
     let output = match args.get("output").and_then(|v| v.as_str()) {
         Some(o) => o,
         None => return "Error: 'output' parameter is required".into(),
     };
 
-    let script = server.library_dir.join("tools/compress_output.sh");
-    if !script.exists() {
-        return format!("Error: compress_output.sh not found at {}", script.display());
+    if output.trim().is_empty() {
+        return "## Compressed Output\n\n(empty input)".into();
     }
 
-    let tmp = std::env::temp_dir().join(format!("orrch-compress-{}.txt", std::process::id()));
-    if let Err(e) = std::fs::write(&tmp, output) {
-        return format!("Error: cannot write temp file: {e}");
-    }
+    compress_agent_output(output)
+}
 
-    let tmp_file = match std::fs::File::open(&tmp) {
-        Ok(f) => f,
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return format!("Error: cannot open temp file: {e}");
+/// Strip markdown formatting: **bold**, `backticks`, leading #, bullet markers.
+fn strip_md(s: &str) -> String {
+    s.replace("**", "")
+        .replace('`', "")
+        .replace("\\*", "*")
+}
+
+/// Extract file paths from a line. Matches crates/…, src/…, library/…, agents/…, etc.
+fn extract_paths(line: &str) -> Vec<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?:crates|src|library|agents|operations|workforces|plans)/[A-Za-z0-9_./-]+\.(?:rs|sh|toml|md|json|yaml)")
+            .unwrap()
+    });
+    re.find_iter(line).map(|m| m.as_str().to_string()).collect()
+}
+
+/// Compress raw agent output into a structured summary.
+/// Handles both structured agent summaries and raw cargo/test output.
+fn compress_agent_output(output: &str) -> String {
+    let clean = strip_md(output);
+    let lines: Vec<&str> = clean.lines().collect();
+
+    // ── 1. Extract file changes with per-file descriptions ──────────
+    let mut file_entries: Vec<(String, String, String)> = Vec::new(); // (path, verb, description)
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Pattern: lines containing a file path followed by a separator and description
+    // Matches: "- path/file.rs — Added foo()", "path/file.rs: description", "Modified: path"
+    for line in &lines {
+        let trimmed = line.trim().trim_start_matches("- ").trim_start_matches("* ");
+        let paths = extract_paths(trimmed);
+        if paths.is_empty() {
+            continue;
         }
-    };
 
-    let result = std::process::Command::new("bash")
-        .arg(&script)
-        .stdin(tmp_file)
-        .output();
+        for path in &paths {
+            if seen_paths.contains(path) {
+                continue;
+            }
 
-    let _ = std::fs::remove_file(&tmp);
-
-    match result {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            if stdout.is_empty() && !stderr.is_empty() {
-                format!("Error from compress_output.sh:\n{stderr}")
+            // Try to extract description after the path
+            let desc = if let Some(after) = trimmed.split(path).nth(1) {
+                let after = after.trim().trim_start_matches("—").trim_start_matches("--")
+                    .trim_start_matches(':').trim_start_matches(',').trim();
+                if after.is_empty() { String::new() } else { after.to_string() }
             } else {
-                stdout
+                String::new()
+            };
+
+            // Classify as Created or Modified
+            let lower = trimmed.to_lowercase();
+            let verb = if lower.contains("creat") || lower.contains("new file")
+                || lower.contains("added file")
+            {
+                "Created"
+            } else {
+                "Modified"
+            };
+
+            seen_paths.insert(path.clone());
+            file_entries.push((path.clone(), verb.to_string(), desc));
+        }
+    }
+
+    // ── 2. Extract change descriptions ──────────────────────────────
+    // Lines that describe what was done, not just file paths
+    let change_verbs = [
+        "add", "implement", "introduc", "creat", "wire", "hook", "bind",
+        "extend", "expand", "replac", "refactor", "renam", "remov", "delet",
+        "updat", "convert", "migrat", "integrat", "support", "enabl", "show",
+        "render", "display", "handl", "track", "persist", "configur", "spawn",
+        "dispatch", "inject", "pars", "extract", "validat", "check", "block",
+        "reject", "auto-clos", "auto-reopen", "throttl",
+    ];
+
+    let mut changes: Vec<String> = Vec::new();
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("```")
+            || trimmed.starts_with("---") || trimmed.starts_with('|')
+        {
+            continue;
+        }
+
+        let lower = trimmed.to_lowercase();
+
+        // Skip lines that are just file paths with no description
+        if extract_paths(trimmed).len() > 0 && trimmed.len() < 60 {
+            continue;
+        }
+
+        // Lines starting with action verbs or containing them after a bullet
+        let is_change = change_verbs.iter().any(|v| lower.contains(v));
+        if !is_change {
+            continue;
+        }
+
+        // Skip lines that are clearly section headers or noise
+        if lower.starts_with("files") || lower.starts_with("status")
+            || lower.starts_with("build") || lower.starts_with("test")
+        {
+            continue;
+        }
+
+        let entry = trimmed.trim_start_matches("- ").trim_start_matches("* ").to_string();
+        if entry.len() > 15 && entry.len() < 300 && !changes.contains(&entry) {
+            changes.push(entry);
+        }
+    }
+    // Cap at 25 most relevant changes
+    changes.truncate(25);
+
+    // ── 3. Extract build/test status ────────────────────────────────
+    let build_status = extract_build_status(&lines);
+    let test_status = extract_test_status(&lines);
+
+    // ── 4. Extract issues/concerns ──────────────────────────────────
+    let issue_keywords = ["concern", "warning:", "issue:", "bug:", "blocker",
+        "todo:", "fixme:", "note:", "error:", "panic", "unwrap"];
+    let mut issues: Vec<String> = Vec::new();
+    for line in &lines {
+        let lower = line.to_lowercase();
+        // Skip code lines
+        if line.trim().starts_with("//") || line.trim().starts_with("use ")
+            || line.trim().starts_with("mod ") || line.trim().starts_with("#[")
+        {
+            continue;
+        }
+        if issue_keywords.iter().any(|k| lower.contains(k)) {
+            let entry = line.trim().to_string();
+            if !issues.contains(&entry) && entry.len() > 5 {
+                issues.push(entry);
             }
         }
-        Err(e) => format!("Error: failed to run compress_output.sh: {e}"),
     }
+    issues.truncate(10);
+
+    // ── 5. Format output ────────────────────────────────────────────
+    let mut out = String::from("## Compressed Output\n\n");
+
+    // Files
+    out.push_str("### Files\n");
+    if file_entries.is_empty() {
+        out.push_str("(none detected)\n");
+    } else {
+        for (path, verb, desc) in &file_entries {
+            if desc.is_empty() {
+                out.push_str(&format!("{verb}: {path}\n"));
+            } else {
+                out.push_str(&format!("{verb}: {path} — {desc}\n"));
+            }
+        }
+    }
+    out.push('\n');
+
+    // Changes
+    out.push_str("### Changes\n");
+    if changes.is_empty() {
+        out.push_str("(none detected)\n");
+    } else {
+        for c in &changes {
+            out.push_str(&format!("- {c}\n"));
+        }
+    }
+    out.push('\n');
+
+    // Status
+    out.push_str("### Status\n");
+    out.push_str(&format!("Build: {build_status}\n"));
+    out.push_str(&format!("Tests: {test_status}\n"));
+    if issues.is_empty() {
+        out.push_str("Issues: none\n");
+    } else {
+        out.push_str("Issues:\n");
+        for i in &issues {
+            out.push_str(&format!("  {i}\n"));
+        }
+    }
+
+    out
+}
+
+fn extract_build_status(lines: &[&str]) -> String {
+    // Look for cargo build output or narrative statements
+    for line in lines.iter().rev() {
+        let lower = line.to_lowercase();
+        if lower.contains("error[e") || lower.contains("error:") && lower.contains("could not compile") {
+            return format!("FAIL — {}", line.trim());
+        }
+    }
+    for line in lines.iter().rev() {
+        let lower = line.to_lowercase();
+        if lower.contains("finished") && (lower.contains("dev") || lower.contains("release") || lower.contains("test")) {
+            return "pass".into();
+        }
+        if lower.contains("build") && (lower.contains("pass") || lower.contains("succeed") || lower.contains("clean")) {
+            return "pass".into();
+        }
+        if lower.contains("compil") && (lower.contains("clean") || lower.contains("succeed") || lower.contains("success")) {
+            return "pass".into();
+        }
+    }
+    "(no build output detected)".into()
+}
+
+fn extract_test_status(lines: &[&str]) -> String {
+    // Try to find "test result: ok. N passed" or "N tests pass" or "N/N pass"
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)(?:test result:.*?(\d+)\s*passed|(\d+)\s*(?:tests?\s*)?pass|all\s*(\d+)\s*tests?\s*pass|tests?:\s*(\d+)[\s/]+(\d+))")
+            .unwrap()
+    });
+
+    let mut best_match = String::new();
+    for line in lines {
+        if re.is_match(line) {
+            best_match = line.trim().to_string();
+        }
+    }
+
+    if !best_match.is_empty() {
+        return best_match;
+    }
+
+    // Narrative fallback: "All tests pass", "138 tests pass", "Tests: 90 pass"
+    for line in lines.iter().rev() {
+        let lower = line.to_lowercase();
+        if (lower.contains("test") && lower.contains("pass"))
+            || lower.contains("test result")
+        {
+            return line.trim().to_string();
+        }
+    }
+
+    "(no test output detected)".into()
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1631,6 +1837,67 @@ pub mod inner;
         let src = "fn private_fn() {}\nstruct PrivateStruct {}\n";
         let api = extract_pub_api(src);
         assert!(api.contains("(no pub items found)"), "result: {api}");
+    }
+
+    #[test]
+    fn test_compress_agent_narrative() {
+        // Simulate actual agent output format (markdown with em-dashes, bold, backticks)
+        let input = r#"## Summary
+
+### Task 64: Valve integration with Resource Optimizer
+
+**`crates/orrch-library/src/model.rs`** -- Added two methods to `ValveStore`:
+- `auto_close(provider, reason, duration_secs)` -- closes a valve with a calculated reopen timestamp
+- `check_provider(provider) -> (bool, String)` -- returns blocked status and reason tuple
+
+**`crates/orrch-core/src/backend.rs`** -- Added:
+- `BackendKind::provider_name()` -- maps Claude to Anthropic, Gemini to Google
+
+**`crates/orrch-core/src/usage.rs`** -- New file: UsageTracker with RateLimitConfig, rolling window
+
+**`crates/orrch-tui/src/app.rs`** -- Wired valve check into `spawn_session()`
+
+**Compilation:** Success (only pre-existing warnings)
+**Tests:** 90/90 pass including 2 new tests
+"#;
+        let result = compress_agent_output(input);
+        // Should detect files
+        assert!(result.contains("crates/orrch-library/src/model.rs"), "missing model.rs: {result}");
+        assert!(result.contains("crates/orrch-core/src/backend.rs"), "missing backend.rs: {result}");
+        assert!(result.contains("crates/orrch-core/src/usage.rs"), "missing usage.rs: {result}");
+        assert!(result.contains("crates/orrch-tui/src/app.rs"), "missing app.rs: {result}");
+        // Should have descriptions
+        assert!(result.contains("Added"), "missing change verb: {result}");
+        // Should detect created file
+        assert!(result.contains("Created") && result.contains("usage.rs"),
+            "should detect new file: {result}");
+        // Should extract test status
+        assert!(result.contains("90") || result.contains("pass"), "missing test status: {result}");
+        // Changes section should not be empty
+        assert!(!result.contains("### Changes\n(none detected)"), "changes should not be empty: {result}");
+    }
+
+    #[test]
+    fn test_compress_minimal_input() {
+        let result = compress_agent_output("Just some text with no structured content.");
+        assert!(result.contains("## Compressed Output"), "missing header: {result}");
+        assert!(result.contains("(none detected)"), "should have none detected: {result}");
+    }
+
+    #[test]
+    fn test_compress_with_file_descriptions() {
+        let input = "Files changed:\n\
+            - crates/orrch-core/src/plan_parser.rs — Added MoveDirection enum and move_feature_in_plan()\n\
+            - crates/orrch-tui/src/ui.rs — Added draw_add_feature() overlay 55x12\n\
+            \n\
+            Build: passes. Tests: 138 pass.\n";
+        let result = compress_agent_output(input);
+        // Should capture per-file descriptions
+        assert!(result.contains("plan_parser.rs"), "missing plan_parser.rs: {result}");
+        assert!(result.contains("MoveDirection"), "missing description: {result}");
+        assert!(result.contains("draw_add_feature"), "missing ui desc: {result}");
+        // Should find test status
+        assert!(result.contains("138") || result.contains("pass"), "missing tests: {result}");
     }
 
     #[test]
