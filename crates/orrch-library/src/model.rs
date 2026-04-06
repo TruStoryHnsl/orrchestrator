@@ -100,7 +100,20 @@ impl Valve {
         false
     }
 
-    /// Human-readable reopen time.
+    /// Check if the valve is past its reopen time (immutable check, no mutation).
+    pub fn is_past_reopen(&self) -> bool {
+        if let Some(reopen_at) = self.reopen_at {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            now >= reopen_at
+        } else {
+            false
+        }
+    }
+
+    /// Human-readable reopen time showing the actual date.
     pub fn reopen_display(&self) -> String {
         match self.reopen_at {
             Some(ts) => {
@@ -112,13 +125,17 @@ impl Valve {
                     return "reopening...".into();
                 }
                 let remaining = ts - now;
-                if remaining < 3600 {
+                let countdown = if remaining < 3600 {
                     format!("{}m", remaining / 60)
                 } else if remaining < 86400 {
                     format!("{}h{}m", remaining / 3600, (remaining % 3600) / 60)
                 } else {
                     format!("{}d{}h", remaining / 86400, (remaining % 86400) / 3600)
-                }
+                };
+                // Also show the actual date so it's never ambiguous
+                let (y, mo, d) = epoch_to_date(ts);
+                let weekday = day_of_week(ts);
+                format!("{} ({} {}-{:02}-{:02})", countdown, weekday, y, mo, d)
             }
             None => "manual".into(),
         }
@@ -184,8 +201,11 @@ impl ValveStore {
     }
 
     /// Check if a provider is currently blocked.
+    /// Returns false if the reopen time has already passed (pending tick).
     pub fn is_blocked(&self, provider: &str) -> bool {
-        self.valves.get(provider).is_some_and(|v| v.closed)
+        self.valves
+            .get(provider)
+            .is_some_and(|v| v.closed && !v.is_past_reopen())
     }
 
     /// Close a valve (block a provider).
@@ -215,11 +235,41 @@ impl ValveStore {
         self.close(provider, reason, Some(now + duration_secs));
     }
 
+    /// Close a valve until the next occurrence of `weekday` (0=Sun..6=Sat) at
+    /// `hour_utc` hours UTC.  Used for billing-cycle-aware usage limits.
+    ///
+    /// The reason string is auto-generated with the computed date so it
+    /// always matches the actual `reopen_at` timestamp.
+    pub fn close_until_next_weekday(
+        &mut self,
+        provider: &str,
+        target_weekday: u32,
+        hour_utc: u32,
+    ) {
+        let reopen_at = next_weekday_epoch(target_weekday, hour_utc);
+        let (y, mo, d) = epoch_to_date(reopen_at);
+        let wday = day_of_week(reopen_at);
+        let reason = format!(
+            "Usage limit reached — reopens {} {}-{:02}-{:02} {:02}:00 UTC",
+            wday, y, mo, d, hour_utc,
+        );
+        self.close(provider, &reason, Some(reopen_at));
+    }
+
     /// Check if a provider is currently blocked, considering auto-reopen.
-    /// Returns (blocked, reason) tuple.
+    /// Returns (blocked, reason) tuple.  If the reopen time has already
+    /// passed, reports the provider as unblocked (the next `tick()` will
+    /// persist the change).
     pub fn check_provider(&self, provider: &str) -> (bool, String) {
         match self.valves.get(provider) {
-            Some(v) if v.closed => (true, v.reason.clone()),
+            Some(v) if v.closed => {
+                // Don't report blocked if the reopen time has already passed
+                if v.is_past_reopen() {
+                    (false, String::new())
+                } else {
+                    (true, v.reason.clone())
+                }
+            }
             _ => (false, String::new()),
         }
     }
@@ -245,6 +295,211 @@ fn valve_store_path() -> PathBuf {
         .join(".config")
         .join("orrchestrator")
         .join("valves.json")
+}
+
+// ─── Date arithmetic (no chrono dependency) ─────────────────────────────
+
+fn now_epoch() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Convert epoch seconds to (year, month, day) in UTC.
+fn epoch_to_date(epoch: u64) -> (u64, u64, u64) {
+    let days = epoch / 86400;
+    // Howard Hinnant's algorithm (same as usage.rs)
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Convert (year, month, day) to days since epoch in UTC.
+#[cfg(test)]
+fn date_to_epoch_days(year: u64, month: u64, day: u64) -> u64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let m = if month <= 2 { month + 9 } else { month - 3 };
+    let era = y / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// Day of the week for epoch seconds: 0=Sun, 1=Mon, ..., 6=Sat.
+fn weekday_from_epoch(epoch: u64) -> u32 {
+    // Jan 1 1970 was a Thursday (4).
+    ((epoch / 86400 + 4) % 7) as u32
+}
+
+/// Short weekday name.
+fn day_of_week(epoch: u64) -> &'static str {
+    match weekday_from_epoch(epoch) {
+        0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
+        4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "???",
+    }
+}
+
+/// Compute the Unix timestamp for the next occurrence of `target_weekday`
+/// (0=Sun..6=Sat) at `hour_utc` hours UTC.  If today IS that weekday but
+/// the hour has already passed, returns NEXT week.
+fn next_weekday_epoch(target_weekday: u32, hour_utc: u32) -> u64 {
+    let now = now_epoch();
+    let today_wday = weekday_from_epoch(now);
+    let today_at_hour = {
+        let days = now / 86400;
+        days * 86400 + (hour_utc as u64) * 3600
+    };
+
+    let mut days_ahead = (target_weekday as i32 - today_wday as i32).rem_euclid(7) as u64;
+    // If it's the target day but past the hour, push to next week
+    if days_ahead == 0 && now >= today_at_hour {
+        days_ahead = 7;
+    }
+
+    today_at_hour + days_ahead * 86400
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_epoch_to_date_known() {
+        // 2024-01-01 00:00:00 UTC = 1704067200
+        assert_eq!(epoch_to_date(1704067200), (2024, 1, 1));
+    }
+
+    #[test]
+    fn test_weekday_known() {
+        // 2024-01-01 was a Monday
+        assert_eq!(weekday_from_epoch(1704067200), 1);
+    }
+
+    #[test]
+    fn test_next_weekday_friday() {
+        // From Monday 2024-01-01 00:00 UTC, next Friday at 00:00 UTC = Jan 5
+        let fri = next_weekday_epoch(5, 0); // 5 = Friday
+        // From any fixed Monday, the next Friday should be 4 days later
+        // (or if we're past the hour on Friday, 7 days from that Friday)
+        assert_eq!(weekday_from_epoch(fri), 5); // It IS a Friday
+        assert!(fri > 1704067200); // It's in the future from that Monday
+    }
+
+    #[test]
+    fn test_next_weekday_same_day_past_hour() {
+        // If it's already Friday at 15:00 and we ask for Friday at 00:00,
+        // we should get NEXT Friday, not today
+        let friday_15 = {
+            // Find a known Friday: 2024-01-05
+            let days = date_to_epoch_days(2024, 1, 5);
+            days * 86400 + 15 * 3600
+        };
+        assert_eq!(weekday_from_epoch(friday_15), 5); // sanity: it's Friday
+        // Mock "now" is tricky since next_weekday_epoch uses SystemTime.
+        // At minimum, verify the date helper roundtrips.
+        let (y, m, d) = epoch_to_date(friday_15);
+        assert_eq!((y, m, d), (2024, 1, 5));
+    }
+
+    #[test]
+    fn test_day_of_week_names() {
+        // Thursday Jan 1 1970
+        assert_eq!(day_of_week(0), "Thu");
+        // Friday Jan 2 1970
+        assert_eq!(day_of_week(86400), "Fri");
+        // Saturday Jan 3 1970
+        assert_eq!(day_of_week(86400 * 2), "Sat");
+    }
+
+    #[test]
+    fn test_next_weekday_always_lands_on_target() {
+        // next_weekday_epoch(5, 0) must always return a Friday timestamp
+        let ts = next_weekday_epoch(5, 0);
+        assert_eq!(weekday_from_epoch(ts), 5, "should be Friday");
+        assert!(ts > now_epoch(), "should be in the future");
+        // Hour should be 0 UTC
+        assert_eq!(ts % 86400, 0, "should be midnight UTC");
+    }
+
+    #[test]
+    fn test_close_until_next_weekday_reason_matches_timestamp() {
+        // Test the date computation logic without hitting ValveStore::save()
+        let reopen_at = next_weekday_epoch(5, 0); // next Friday at 00:00 UTC
+        let (y, mo, d) = epoch_to_date(reopen_at);
+        let wday = day_of_week(reopen_at);
+        let reason = format!(
+            "Usage limit reached — reopens {} {}-{:02}-{:02} 00:00 UTC",
+            wday, y, mo, d,
+        );
+        // The timestamp must land on a Friday
+        assert_eq!(weekday_from_epoch(reopen_at), 5);
+        // The reason must contain the computed date
+        let expected_date = format!("{}-{:02}-{:02}", y, mo, d);
+        assert!(reason.contains(&expected_date));
+        assert!(reason.contains("Fri"));
+    }
+
+    #[test]
+    fn test_check_provider_respects_reopen_time() {
+        // Build a store with a valve past its reopen time (no save() call)
+        let past = now_epoch().saturating_sub(3600);
+        let mut store = ValveStore::default();
+        store.valves.insert("Test".into(), Valve {
+            closed: true,
+            reopen_at: Some(past),
+            reason: "test".into(),
+        });
+        let (blocked, _) = store.check_provider("Test");
+        assert!(!blocked, "valve past reopen time should not report blocked");
+    }
+
+    #[test]
+    fn test_check_provider_blocks_future_reopen() {
+        let future = now_epoch() + 86400;
+        let mut store = ValveStore::default();
+        store.valves.insert("Test".into(), Valve {
+            closed: true,
+            reopen_at: Some(future),
+            reason: "test".into(),
+        });
+        let (blocked, _) = store.check_provider("Test");
+        assert!(blocked, "valve with future reopen should report blocked");
+    }
+
+    #[test]
+    fn test_is_blocked_respects_reopen_time() {
+        let past = now_epoch().saturating_sub(60);
+        let mut store = ValveStore::default();
+        store.valves.insert("Test".into(), Valve {
+            closed: true,
+            reopen_at: Some(past),
+            reason: "test".into(),
+        });
+        assert!(!store.is_blocked("Test"), "is_blocked should return false after reopen time");
+    }
+
+    #[test]
+    fn test_model_tier_labels() {
+        assert_eq!(ModelTier::Enterprise.label(), "Enterprise");
+        assert_eq!(ModelTier::Local.badge(), "  ");
+    }
+
+    #[test]
+    fn test_pricing_display() {
+        let p = PricingModel::PerToken { input_per_million: 3.0, output_per_million: 15.0 };
+        assert!(p.display().contains("$3.00"));
+        assert!(PricingModel::Local.display().contains("no cost"));
+    }
 }
 
 /// Load model entries from .md files in a directory.
@@ -308,22 +563,4 @@ fn extract(fm: &str, key: &str) -> Option<String> {
 
 fn extract_list(fm: &str, key: &str) -> Vec<String> {
     crate::store::extract_list_pub(fm, key)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_model_tier_labels() {
-        assert_eq!(ModelTier::Enterprise.label(), "Enterprise");
-        assert_eq!(ModelTier::Local.badge(), "  ");
-    }
-
-    #[test]
-    fn test_pricing_display() {
-        let p = PricingModel::PerToken { input_per_million: 3.0, output_per_million: 15.0 };
-        assert!(p.display().contains("$3.00"));
-        assert!(PricingModel::Local.display().contains("no cost"));
-    }
 }

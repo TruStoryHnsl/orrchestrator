@@ -1838,13 +1838,11 @@ impl App {
             KeyCode::Char('V') if self.library_sub == LibrarySub::Models => {
                 if let Some(model) = self.library_models.get(self.library_selected) {
                     let provider = model.provider.clone();
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    let reopen_at = now + 86400;
-                    self.valve_store.close(&provider, "timed shutoff (24h)", Some(reopen_at));
-                    self.notify(format!("Valve CLOSED: {} — reopens in 24h", provider));
+                    // Close until next Friday at 00:00 UTC (billing cycle reset)
+                    self.valve_store.close_until_next_weekday(&provider, 5, 0); // 5 = Friday
+                    let valve = self.valve_store.valves.get(&provider);
+                    let display = valve.map(|v| v.reopen_display()).unwrap_or_else(|| "?".into());
+                    self.notify(format!("Valve CLOSED: {} — reopens {}", provider, display));
                 }
             }
             KeyCode::Char('e') if self.library_sub == LibrarySub::McpServers => {
