@@ -1604,7 +1604,38 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
                 let color = style.fg.unwrap_or(TEXT);
                 let id_str = feat.id.map(|n| format!("{n}. ")).unwrap_or_default();
                 let title = format!("  {icon} {id_str}{}", feat.title);
-                items.push(ListItem::new(title).style(Style::default().fg(color)));
+
+                let mut spans: Vec<Span> = vec![Span::styled(title, Style::default().fg(color))];
+
+                // Feature id used for diff/commit lookup — numeric id as string,
+                // falling back to the title when no numeric id is present.
+                let lookup_id = feat
+                    .id
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| feat.title.clone());
+
+                if feat.user_verified || feat.status == orrch_core::FeatureStatus::Verified {
+                    spans.push(Span::styled(" ✓", Style::default().fg(GREEN)));
+                }
+
+                let diff_count = orrch_core::diff_log::load_diffs(&proj.path, &lookup_id).len();
+                if diff_count > 0 {
+                    spans.push(Span::styled(
+                        format!(" +{diff_count}"),
+                        Style::default().fg(CYAN),
+                    ));
+                }
+
+                let commit_count =
+                    orrch_core::git::commits_for_feature(&proj.path, &lookup_id).len();
+                if commit_count > 0 {
+                    spans.push(Span::styled(
+                        format!(" ●{commit_count}"),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                }
+
+                items.push(ListItem::new(Line::from(spans)));
             }
         }
     }

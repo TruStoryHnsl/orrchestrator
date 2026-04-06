@@ -141,3 +141,64 @@ fn git_output(dir: &Path, args: &[&str]) -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default()
 }
+
+/// A single commit associated with a feature (via commit message grep).
+#[derive(Debug, Clone)]
+pub struct FeatureCommit {
+    pub sha: String,
+    pub subject: String,
+}
+
+/// Return up to 3 commits from the project whose messages contain `feature_id`.
+///
+/// Uses `git log --oneline -n 50 --grep=<id> --fixed-strings` so ids like
+/// "CP-1" are matched literally. Returns an empty vec on any failure.
+pub fn commits_for_feature(project_dir: &Path, feature_id: &str) -> Vec<FeatureCommit> {
+    if feature_id.is_empty() {
+        return Vec::new();
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_dir)
+        .args(["log", "--oneline", "-n", "50", "--fixed-strings", "--grep"])
+        .arg(feature_id)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    let Ok(out) = output else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut commits = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(2, char::is_whitespace);
+        let sha = parts.next().unwrap_or("").to_string();
+        let subject = parts.next().unwrap_or("").trim().to_string();
+        if sha.is_empty() {
+            continue;
+        }
+        commits.push(FeatureCommit { sha, subject });
+        if commits.len() >= 3 {
+            break;
+        }
+    }
+    commits
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commits_for_feature_nonexistent_dir_is_empty() {
+        let result = commits_for_feature(Path::new("/nonexistent"), "X");
+        assert!(result.is_empty());
+    }
+}

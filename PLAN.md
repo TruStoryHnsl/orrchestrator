@@ -391,8 +391,8 @@ _Feature tracking interface in the project focus view. Plan.md becomes a live, i
 46. [x] **Reorder features** — user can move features up/down within a phase, or between phases. Changes persist back to Plan.md.
 47. [x] **Add feature popup** — syntax-controlling text input that guides the user to write a feature request matching COO optimization format. Appended to Plan.md.
 48. [x] **Quick-spawn for feature** — select a feature on the map, press Enter to spawn a dedicated session targeting that feature specifically with priority.
-49. [ ] **Diff log persistence** — all changes to the dev map are tracked. Features display visual badges: modified since last verification, newly added, reordered, removed.
-50. [ ] **User verification tracking** — user marks features as manually tested/confirmed. Confirmation persists until any code change affects that feature. Previously confirmed features are re-flagged when implementation changes. Release readiness view shows unconfirmed features.
+49. [x] **Diff log persistence** — all changes to the dev map are tracked. Features display visual badges: modified since last verification, newly added, reordered, removed. **Status: DONE — `orrch-core::diff_log` module with append-only `plans/.diff_log.json` storage; `+N` cyan badge in Oversee dev map.**
+50. [x] **User verification tracking** — user marks features as manually tested/confirmed. Confirmation persists until any code change affects that feature. Previously confirmed features are re-flagged when implementation changes. Release readiness view shows unconfirmed features. **Status: DONE — `user_verified` field on `PlanFeature`, `mark_verified_in_plan` mutator, `V` keybinding in Oversee, `✓` green badge.**
 51. [ ] **Direct PM interaction** — open a live session with the Project Manager agent for natural-language plan changes. PM updates Plan.md, dev map reflects changes in real time.
 52. [ ] **Git commit grouping display** — show how the workforce intends to package commits by phase. Repository Manager reviews and advises on the PM's chosen feature grouping for optimal git workflow.
 
