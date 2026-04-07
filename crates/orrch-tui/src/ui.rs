@@ -313,9 +313,12 @@ fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
     let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
     frame.render_widget(Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)), chunks[0]);
 
-    // Poll for pending intake reviews when viewing Intentions and none is loaded
+    // Poll for pending intake reviews when viewing Intentions and none is loaded.
+    // (The main loop also polls every 3s; this gives an immediate refresh on
+    // panel switch so the user doesn't have to wait for the next tick.)
     if app.design_sub == DesignSub::Intentions && app.intake_review.is_none() {
-        app.intake_review = orrch_core::intake_review::load_intake_review(&app.projects);
+        let vault = orrch_core::vault::vault_dir(&app.projects_dir);
+        app.intake_review = orrch_core::intake_review::load_intake_review(&vault, &app.projects);
     }
 
     match app.design_sub {

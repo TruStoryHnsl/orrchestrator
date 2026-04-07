@@ -1,0 +1,12 @@
+{
+  "progress": 57,
+  "targets": [
+    {
+      "project": "concord",
+      "instruction_count": 7,
+      "implemented_count": 1
+    }
+  ],
+  "package_name": "Concord channel labels and presence",
+  "submitted_at": 1775523722
+}

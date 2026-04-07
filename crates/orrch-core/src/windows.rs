@@ -135,10 +135,27 @@ pub fn spawn_tmux_session(
 ) -> anyhow::Result<String> {
     let dir_str = project_dir.to_string_lossy();
 
-    // Write goal to temp file for safe shell escaping
+    // Write goal to temp file for safe shell escaping. The filename includes
+    // the PID, the sanitized session name, and a nanosecond timestamp so
+    // back-to-back spawns from the same orrchestrator process don't race
+    // each other into a shared file.
     let goal_file = if let Some(g) = goal {
         if !g.is_empty() {
-            let tmp = std::env::temp_dir().join(format!("orrch-goal-{}.txt", std::process::id()));
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let safe_session: String = session_name
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                .take(40)
+                .collect();
+            let tmp = std::env::temp_dir().join(format!(
+                "orrch-goal-{}-{}-{}.txt",
+                std::process::id(),
+                safe_session,
+                nanos,
+            ));
             let _ = std::fs::write(&tmp, g);
             Some(tmp)
         } else { None }
