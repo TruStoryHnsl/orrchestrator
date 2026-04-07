@@ -1007,6 +1007,22 @@ impl App {
 
     /// Spawn a Claude session as a tmux window in the orrch session.
     pub fn spawn_session(&mut self, project_dir: &Path, backend: BackendKind, goal: Option<&str>) -> Result<String> {
+        self.spawn_session_named(project_dir, backend, goal, None)
+    }
+
+    /// Spawn a session with an optional caller-supplied session name. When
+    /// `explicit_name` is `None`, the name is derived from the goal prefix
+    /// (legacy behavior). When provided, the caller's name is used verbatim
+    /// — this is critical for cases like rapid intake submissions where the
+    /// goal prefix is identical across submissions and would otherwise
+    /// cause `spawn_in_category` to kill in-flight sessions.
+    pub fn spawn_session_named(
+        &mut self,
+        project_dir: &Path,
+        backend: BackendKind,
+        goal: Option<&str>,
+        explicit_name: Option<&str>,
+    ) -> Result<String> {
         // Check valve state — block spawn if provider valve is closed
         let provider = backend.provider_name();
         let (blocked, reason) = self.valve_store.check_provider(provider);
@@ -1034,11 +1050,18 @@ impl App {
 
         let proj_name = project_dir.file_name().unwrap_or_default().to_string_lossy();
         let goal_display = goal.unwrap_or("continue development");
-        // Sanitize session name: only alphanumeric, hyphens, underscores
-        let session_name: String = format!("{}-{}", proj_name, goal_display.chars().take(25).collect::<String>())
-            .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-            .collect();
+        let session_name: String = if let Some(name) = explicit_name {
+            // Caller supplied a name — sanitize but otherwise use as-is.
+            name.chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                .collect()
+        } else {
+            // Legacy: derive from project name + first 25 chars of goal.
+            format!("{}-{}", proj_name, goal_display.chars().take(25).collect::<String>())
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                .collect()
+        };
 
         match orrch_core::windows::spawn_tmux_session(
             project_dir,
@@ -1920,20 +1943,45 @@ impl App {
                 }
             }
             KeyCode::Char('s') => {
-                // Submit selected idea to instruction intake pipeline
+                // Submit selected idea to instruction intake pipeline.
+                //
+                // Each submission gets its own per-idea workspace under
+                // plans/.pipeline/<stem>/ so concurrent submissions cannot
+                // clobber each other's workflow.json or review.json.
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     if idea.pipeline.is_submitted() {
                         self.notify(format!("Already submitted ({}%)", idea.pipeline.progress));
                     } else {
                         let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                         let idea_path = idea.path.clone();
+                        let idea_filename = idea.filename.clone();
                         let idea_title = idea.title.clone();
                         match orrch_core::vault::submit_to_pipeline(&vault, idea) {
                             Ok(_) => {
-                                // Spawn a session that calls the instruction_intake MCP tool
+                                // Pre-create the per-idea workspace so the
+                                // skill doesn't have to mkdir on first write.
+                                let workspace = orrch_core::vault::intake_workspace(&vault, &idea_filename);
+                                let _ = std::fs::create_dir_all(&workspace);
+
                                 let project_dir = self.projects_dir.join("orrchestrator");
-                                let goal = format!("Call the instruction_intake tool with file_path: {}", idea_path.display());
-                                let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
+                                let goal = format!(
+                                    "Call the instruction_intake tool with arguments file_path={}, workspace={}, source_idea={}",
+                                    idea_path.display(),
+                                    workspace.display(),
+                                    idea_filename,
+                                );
+                                // Unique session name keyed on the idea
+                                // stem so concurrent submissions don't kill
+                                // each other (spawn_in_category kills any
+                                // existing window with the same name).
+                                let stem = idea_filename.trim_end_matches(".md");
+                                let session_name = format!("intake-{stem}");
+                                let _ = self.spawn_session_named(
+                                    &project_dir,
+                                    BackendKind::Claude,
+                                    Some(&goal),
+                                    Some(&session_name),
+                                );
                                 self.notify(format!("Pipeline started: {}", idea_title));
                                 self.ideas = orrch_core::vault::load_ideas(&vault);
                             }
@@ -1943,15 +1991,31 @@ impl App {
                 }
             }
             KeyCode::Char('r') => {
-                // Review selected idea — show raw idea (left) vs its derived instructions (right)
+                // Review selected idea — show raw idea (left) vs its derived
+                // instructions (right). Prefer the per-idea workspace's
+                // review.json (which has the actual COO output) and fall
+                // back to scanning the project inbox if no review exists.
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     let raw = std::fs::read_to_string(&idea.path).unwrap_or_default();
+                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                    let workspace = orrch_core::vault::intake_workspace(&vault, &idea.filename);
+                    let review_path = workspace.join("review.json");
+
+                    if review_path.exists() {
+                        if let Some(loaded) = orrch_core::load_review_at(&workspace) {
+                            self.intake_review = Some(loaded);
+                            self.intake_review_scroll_raw = 0;
+                            self.intake_review_scroll_opt = 0;
+                            self.intake_review_focus = IntakeReviewFocus::Raw;
+                            return Ok(());
+                        }
+                    }
+
+                    // Fallback: read-only view scraped from the orrchestrator inbox.
                     let inbox_path = self.projects_dir.join("orrchestrator").join("instructions_inbox.md");
                     let optimized = if let Ok(inbox) = std::fs::read_to_string(&inbox_path) {
-                        // Find instructions sourced from this idea by matching filename
                         let source_marker = format!("plans/{}", idea.filename);
                         if inbox.contains(&source_marker) {
-                            // Extract the package block for this source
                             let mut in_block = false;
                             let mut block = String::new();
                             for line in inbox.lines() {
@@ -1973,7 +2037,8 @@ impl App {
                     self.intake_review = Some(orrch_core::IntakeReview {
                         raw,
                         optimized,
-                        source_project: self.projects_dir.join("orrchestrator"),
+                        source_idea: Some(idea.filename.clone()),
+                        workspace,
                         source_path: inbox_path,
                     });
                     self.intake_review_scroll_raw = 0;
@@ -2046,10 +2111,13 @@ impl App {
                 }
             }
             KeyCode::Char('e') => {
-                // Edit optimized text in vim
+                // Edit optimized text in vim. Scratch file lives in the
+                // per-idea workspace so concurrent reviews never collide.
                 if let Some(review) = &self.intake_review {
-                    let edit_path = review.source_project.join(".orrch").join("intake_optimized_edit.md");
-                    let _ = std::fs::create_dir_all(edit_path.parent().unwrap());
+                    let edit_path = review.workspace.join("intake_optimized_edit.md");
+                    if let Some(parent) = edit_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
                     let _ = std::fs::write(&edit_path, &review.optimized);
                     self.vim_request = Some(VimRequest {
                         file: edit_path,
@@ -2059,10 +2127,41 @@ impl App {
                 }
             }
             KeyCode::Char('y') => {
-                // Confirm review
+                // Confirm review. Two side effects beyond writing the
+                // decision file:
+                //   1. Bump the source idea's vault progress to 50, so the
+                //      gradient moves out of the yellow intake band.
+                //   2. Spawn a continuation session to run skill steps 5-7
+                //      (route → append inboxes → PM incorporate). The
+                //      original intake session has already exited.
                 if let Some(review) = self.intake_review.take() {
+                    let source_idea = review.source_idea.clone();
+                    let workspace = review.workspace.clone();
+                    let optimized = review.optimized.clone();
                     match orrch_core::write_intake_decision(&review, "confirmed", &review.optimized) {
-                        Ok(_) => self.notify("Intake review confirmed — instructions will be distributed".into()),
+                        Ok(_) => {
+                            if let Some(idea_filename) = source_idea {
+                                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                                let _ = orrch_core::vault::update_pipeline_progress(
+                                    &vault, &idea_filename, 50,
+                                );
+                                self.ideas = orrch_core::vault::load_ideas(&vault);
+
+                                // Continuation session: run skill steps 5-7
+                                // against the confirmed review.
+                                let project_dir = self.projects_dir.join("orrchestrator");
+                                let goal = format!(
+                                    "Continue intake from confirmed review at {}/review.json. \
+                                     Run skill steps 5-7: route the optimized instructions to projects, \
+                                     append them to instructions_inbox.md files, then have the PM \
+                                     incorporate them into PLAN.md. The optimized text is:\n\n{}",
+                                    workspace.display(),
+                                    optimized,
+                                );
+                                let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
+                            }
+                            self.notify("Intake confirmed — distribution session spawned".into());
+                        }
                         Err(e) => self.notify(format!("Failed to confirm: {e}")),
                     }
                     self.intake_review_scroll_raw = 0;
@@ -2070,10 +2169,22 @@ impl App {
                 }
             }
             KeyCode::Char('N') => {
-                // Reject review (capital N to avoid accidental rejection)
+                // Reject review (capital N to avoid accidental rejection).
+                // Resets the source idea's vault progress to 0 so the user
+                // can re-edit and re-submit it.
                 if let Some(review) = self.intake_review.take() {
+                    let source_idea = review.source_idea.clone();
                     match orrch_core::write_intake_decision(&review, "rejected", &review.optimized) {
-                        Ok(_) => self.notify("Intake review rejected".into()),
+                        Ok(_) => {
+                            if let Some(idea_filename) = source_idea {
+                                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                                let _ = orrch_core::vault::update_pipeline_progress(
+                                    &vault, &idea_filename, 0,
+                                );
+                                self.ideas = orrch_core::vault::load_ideas(&vault);
+                            }
+                            self.notify("Intake review rejected — idea returned to draft".into());
+                        }
                         Err(e) => self.notify(format!("Failed to reject: {e}")),
                     }
                     self.intake_review_scroll_raw = 0;

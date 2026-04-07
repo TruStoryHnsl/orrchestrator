@@ -179,9 +179,31 @@ async fn run_loop(
             last_retrospect = Instant::now();
         }
 
-        // Intake review polling — check for pending review files every 3s
-        if last_intake_poll.elapsed() > Duration::from_secs(3) && app.intake_review.is_none() {
-            app.intake_review = orrch_core::load_intake_review(&app.projects);
+        // Intake review polling — every 3s, check for:
+        //   1. pending review files in per-idea workspaces
+        //   2. step-counter advances in workflow.json for in-progress intakes
+        if last_intake_poll.elapsed() > Duration::from_secs(3) {
+            let vault = orrch_core::vault::vault_dir(&app.projects_dir);
+
+            // Sync intake-phase progress (1→49) for any submitted ideas
+            // that haven't yet reached the user-confirmation gate.
+            let mut any_changed = false;
+            for idea in &app.ideas {
+                if idea.pipeline.is_submitted() && idea.pipeline.progress < 50 {
+                    if orrch_core::vault::sync_intake_progress(&vault, &idea.filename) {
+                        any_changed = true;
+                    }
+                }
+            }
+            if any_changed {
+                app.ideas = orrch_core::vault::load_ideas(&vault);
+            }
+
+            // Surface a pending review when one exists and none is loaded.
+            if app.intake_review.is_none() {
+                app.intake_review = orrch_core::load_intake_review(&vault, &app.projects);
+            }
+
             last_intake_poll = Instant::now();
         }
 

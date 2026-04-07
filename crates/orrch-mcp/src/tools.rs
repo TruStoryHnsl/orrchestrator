@@ -83,7 +83,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "instruction_intake",
-            "description": "Load the instruction-intake workflow skill with embedded instructions. Returns the skill content for the harness to execute.",
+            "description": "Load the instruction-intake workflow skill with embedded instructions. Returns the skill content for the harness to execute. The skill writes its working state to the workspace directory provided (per-idea isolation prevents concurrent submissions from clobbering each other).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -94,6 +94,14 @@ pub fn tool_definitions() -> Vec<Value> {
                     "file_path": {
                         "type": "string",
                         "description": "Path to a file containing instructions"
+                    },
+                    "workspace": {
+                        "type": "string",
+                        "description": "Absolute path to the per-idea intake workspace dir. The skill writes workflow.json and review.json here. If omitted, defaults to .orrch/ in the current working directory (legacy behavior)."
+                    },
+                    "source_idea": {
+                        "type": "string",
+                        "description": "Filename of the originating idea in the vault (e.g. '2026-04-21-00-14.md'). Embedded in review.json so the TUI can advance vault progress when the user confirms."
                     }
                 }
             }
@@ -488,9 +496,35 @@ fn instruction_intake(server: &OrrchMcpServer, args: &Value) -> String {
         return "Error: either 'instructions' or 'file_path' must be provided".into();
     };
 
-    format!(
-        "## Instructions to process\n\n{instructions}\n\n---\n\n{skill_content}"
-    )
+    // Workspace + source_idea: substitute into the skill template so the
+    // skill writes state files to a per-idea directory and tags review.json
+    // with the originating idea filename. Falls back to legacy `.orrch/`
+    // behavior if not provided.
+    let workspace = args
+        .get("workspace")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".orrch");
+    let source_idea = args
+        .get("source_idea")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let resolved_skill = skill_content
+        .replace("{{WORKSPACE}}", workspace)
+        .replace("{{SOURCE_IDEA}}", source_idea);
+
+    let preamble = format!(
+        "## Instructions to process\n\n{instructions}\n\n\
+         ## Workspace\n\n\
+         All state files (workflow.json, review.json) MUST be written to: `{workspace}`\n\
+         Do NOT write to `.orrch/` — that path is reserved for in-project workflows.\n\n\
+         ## Source Idea\n\n\
+         This intake originated from vault idea: `{source_idea}`\n\
+         Every JSON file you write must include `\"source_idea\": \"{source_idea}\"`.\n\n\
+         ---\n\n"
+    );
+
+    format!("{preamble}{resolved_skill}")
 }
 
 fn workflow_status(args: &Value) -> String {

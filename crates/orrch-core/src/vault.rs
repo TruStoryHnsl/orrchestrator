@@ -245,7 +245,94 @@ pub fn submit_to_pipeline(vault_dir: &Path, idea: &Idea) -> std::io::Result<Pipe
 pub fn update_pipeline_progress(vault_dir: &Path, filename: &str, progress: u8) -> std::io::Result<()> {
     let mut state = load_pipeline_state(&vault_dir.join(".pipeline"), filename);
     state.progress = progress.min(100);
+    if progress == 0 {
+        // Reset: clear submission marker so the idea looks "not submitted" again.
+        state.submitted_at = None;
+    }
     save_pipeline_state(vault_dir, filename, &state)
+}
+
+/// Per-idea intake workspace directory: `<vault>/.pipeline/<idea_stem>/`
+/// where idea_stem is the filename with the `.md` extension stripped.
+///
+/// This is the canonical location for the instruction-intake skill's working
+/// files (workflow.json, review.json, log files). Each idea gets its own
+/// isolated directory so concurrent submissions cannot clobber each other.
+pub fn intake_workspace(vault_dir: &Path, idea_filename: &str) -> PathBuf {
+    let stem = idea_filename.trim_end_matches(".md");
+    vault_dir.join(".pipeline").join(stem)
+}
+
+/// Map a skill workflow step (0-7) to a vault progress percentage in the
+/// intake range (5-49). Used by `sync_intake_progress` to translate the
+/// skill's discrete step counter into the vault's continuous gradient.
+///
+/// The intake range stops at 49 — progress only advances to 50 once the
+/// user has *explicitly confirmed* the optimized review in the TUI.
+fn intake_step_to_progress(step: u32) -> u8 {
+    match step {
+        0 => 5,   // initialized
+        1 => 10,  // executive assistant triaging
+        2 => 20,  // COO optimizing
+        3 => 30,  // pending review (waiting on user)
+        4 => 32,  // user reviewing
+        5 => 38,  // COO routing
+        6 => 44,  // appending to inboxes
+        7 => 49,  // PM incorporating
+        _ => 49,
+    }
+}
+
+/// Read the per-idea intake workspace's `workflow.json` and translate the
+/// current step into a vault progress percentage. Only updates the vault
+/// state if the new value is strictly greater than the current value AND
+/// the idea is still in the intake phase (progress < 50).
+///
+/// Returns true if the vault state changed.
+pub fn sync_intake_progress(vault_dir: &Path, idea_filename: &str) -> bool {
+    let workspace = intake_workspace(vault_dir, idea_filename);
+    let workflow_path = workspace.join("workflow.json");
+    let bytes = match std::fs::read(&workflow_path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    // Parse just the fields we care about.
+    #[derive(Deserialize)]
+    struct WorkflowFile {
+        #[serde(default)]
+        step: u32,
+        #[serde(default)]
+        status: String,
+    }
+    let parsed: WorkflowFile = match serde_json::from_slice(&bytes) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let pipeline_dir = vault_dir.join(".pipeline");
+    let mut state = load_pipeline_state(&pipeline_dir, idea_filename);
+    // Don't touch ideas that have already advanced past intake.
+    if state.progress >= 50 { return false; }
+    // Don't touch ideas that were never submitted.
+    if state.progress == 0 { return false; }
+
+    let new_progress: u8 = match parsed.status.as_str() {
+        // Skill marked itself failed/rejected — surface as 1 (stuck) so the
+        // user sees the problem but the submission marker is preserved.
+        "failed" | "rejected" => 1,
+        // Skill ran all 7 steps without pausing at user-review (rare — the
+        // gate at step 4 normally pauses execution). Advance to 50.
+        "complete" => 50,
+        // Normal case: map the discrete step counter into 5-49.
+        _ => intake_step_to_progress(parsed.step),
+    };
+
+    if new_progress != state.progress {
+        state.progress = new_progress;
+        let _ = save_pipeline_state(vault_dir, idea_filename, &state);
+        return true;
+    }
+    false
 }
 
 /// Set pipeline targets (called when instructions are distributed to projects).
@@ -350,6 +437,137 @@ mod tests {
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         // Should be roughly between yellow and default
         assert!(color.0 > 200 && color.0 < 255);
+    }
+
+    #[test]
+    fn test_intake_workspace_strips_md_extension() {
+        let vault = std::path::Path::new("/tmp/vault");
+        let ws = intake_workspace(vault, "2026-04-21-00-14.md");
+        assert_eq!(ws, std::path::PathBuf::from("/tmp/vault/.pipeline/2026-04-21-00-14"));
+    }
+
+    #[test]
+    fn test_intake_workspace_handles_no_extension() {
+        let vault = std::path::Path::new("/tmp/vault");
+        let ws = intake_workspace(vault, "raw_idea");
+        assert_eq!(ws, std::path::PathBuf::from("/tmp/vault/.pipeline/raw_idea"));
+    }
+
+    #[test]
+    fn test_intake_step_progress_mapping_monotonic() {
+        let mut prev = 0u8;
+        for step in 0..=7u32 {
+            let p = intake_step_to_progress(step);
+            assert!(p >= prev, "step {step} -> {p} regressed from {prev}");
+            assert!(p < 50, "step {step} -> {p} exceeded intake ceiling 49");
+            prev = p;
+        }
+    }
+
+    #[test]
+    fn test_sync_intake_progress_advances_on_step() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        std::fs::create_dir_all(vault.join(".pipeline")).unwrap();
+        // Pre-existing vault state at progress=1 (just submitted).
+        let mut state = PipelineState::default();
+        state.progress = 1;
+        state.submitted_at = Some(123);
+        save_pipeline_state(vault, "test.md", &state).unwrap();
+
+        // Skill writes step 3 to per-idea workspace.
+        let ws = intake_workspace(vault, "test.md");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("workflow.json"),
+            r#"{"workflow":"instruction-intake","step":3,"total_steps":7,"status":"running","agents":[]}"#,
+        ).unwrap();
+
+        let changed = sync_intake_progress(vault, "test.md");
+        assert!(changed, "expected progress to advance");
+        let reloaded = load_pipeline_state(&vault.join(".pipeline"), "test.md");
+        assert_eq!(reloaded.progress, 30);
+    }
+
+    #[test]
+    fn test_sync_intake_progress_skips_when_past_intake() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        std::fs::create_dir_all(vault.join(".pipeline")).unwrap();
+        // Idea has already been confirmed (progress=50).
+        let mut state = PipelineState::default();
+        state.progress = 50;
+        save_pipeline_state(vault, "test.md", &state).unwrap();
+
+        let ws = intake_workspace(vault, "test.md");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("workflow.json"),
+            r#"{"workflow":"instruction-intake","step":1,"total_steps":7,"status":"running","agents":[]}"#,
+        ).unwrap();
+
+        let changed = sync_intake_progress(vault, "test.md");
+        assert!(!changed, "should not regress past-intake state");
+        let reloaded = load_pipeline_state(&vault.join(".pipeline"), "test.md");
+        assert_eq!(reloaded.progress, 50);
+    }
+
+    #[test]
+    fn test_sync_intake_progress_skips_unsubmitted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        std::fs::create_dir_all(vault.join(".pipeline")).unwrap();
+        // Never submitted (progress=0).
+        let state = PipelineState::default();
+        save_pipeline_state(vault, "test.md", &state).unwrap();
+
+        let ws = intake_workspace(vault, "test.md");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("workflow.json"),
+            r#"{"workflow":"instruction-intake","step":3,"total_steps":7,"status":"running","agents":[]}"#,
+        ).unwrap();
+
+        let changed = sync_intake_progress(vault, "test.md");
+        assert!(!changed, "should not advance unsubmitted ideas");
+    }
+
+    #[test]
+    fn test_sync_intake_progress_failed_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        std::fs::create_dir_all(vault.join(".pipeline")).unwrap();
+        let mut state = PipelineState::default();
+        state.progress = 30;
+        save_pipeline_state(vault, "test.md", &state).unwrap();
+
+        let ws = intake_workspace(vault, "test.md");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("workflow.json"),
+            r#"{"workflow":"instruction-intake","step":3,"total_steps":7,"status":"failed","agents":[]}"#,
+        ).unwrap();
+
+        let changed = sync_intake_progress(vault, "test.md");
+        assert!(changed);
+        let reloaded = load_pipeline_state(&vault.join(".pipeline"), "test.md");
+        assert_eq!(reloaded.progress, 1, "failed status should drop to 1");
+    }
+
+    #[test]
+    fn test_update_pipeline_progress_to_zero_clears_submission() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path();
+        std::fs::create_dir_all(vault.join(".pipeline")).unwrap();
+        let mut state = PipelineState::default();
+        state.progress = 30;
+        state.submitted_at = Some(999);
+        save_pipeline_state(vault, "test.md", &state).unwrap();
+
+        update_pipeline_progress(vault, "test.md", 0).unwrap();
+        let reloaded = load_pipeline_state(&vault.join(".pipeline"), "test.md");
+        assert_eq!(reloaded.progress, 0);
+        assert_eq!(reloaded.submitted_at, None, "rejecting should clear submission");
     }
 
     #[test]

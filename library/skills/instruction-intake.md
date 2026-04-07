@@ -8,35 +8,38 @@ allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent
 
 You are the Hypervisor — the orchestrator of the instruction intake pipeline. You spawn agents to triage, optimize, and route user instructions into the correct project inboxes. The user reviews and confirms before anything is routed.
 
+## Workspace and source idea (CRITICAL)
+
+The MCP tool injects two values into the prompt above this body:
+
+- **WORKSPACE_DIR** — absolute path to a per-idea directory you must use for ALL state files. Look for the `## Workspace` section above for the exact path. If no path is given, fall back to `.orrch/` in the current working directory.
+- **SOURCE_IDEA** — vault filename (e.g. `2026-04-21-00-14.md`) that originated this intake. Look for the `## Source Idea` section above. Embed this verbatim in every JSON file you write.
+
+Throughout this skill, the literal token `{{WORKSPACE}}` refers to the workspace directory and `{{SOURCE_IDEA}}` refers to the source idea filename. The MCP server replaces these placeholders before handing the prompt to you. **Use the substituted values, never the literal placeholders.**
+
 ## Setup
 
-1. Determine the working directory. Use the current working directory as the default project context.
-2. Create `.orrch/` directory if it does not exist.
-3. Write initial status to `.orrch/workflow.json`:
-   ```json
-   {"workflow": "instruction-intake", "step": 0, "total_steps": 7, "status": "initializing", "agents": []}
+1. Create the workspace directory if it does not exist:
    ```
-4. Locate the orrchestrator agents directory at `~/projects/orrchestrator/agents/`. You will read agent profiles from here before each spawn.
+   mkdir -p {{WORKSPACE}}
+   ```
+2. Write initial status to `{{WORKSPACE}}/workflow.json`:
+   ```json
+   {"workflow": "instruction-intake", "step": 0, "total_steps": 7, "status": "initializing", "agents": [], "source_idea": "{{SOURCE_IDEA}}"}
+   ```
+3. Locate the orrchestrator agents directory at `~/projects/orrchestrator/agents/`. You will read agent profiles from here before each spawn.
 
 ## Parse $ARGUMENTS
 
-- **If arguments look like a file path** (ends in `.md`, `.txt`, or starts with `/`, `./`, `~`): Read the file at that path. The file contents are the raw instructions.
-- **If arguments are plain text**: Use the argument text directly as the raw instructions.
-- **If no arguments**: Search the current directory for unprocessed feedback files:
-  - Look for: `instructions.md`, `INSTRUCTIONS.md`, `TODO.md`, `notes.md`, `dev_notes.md`, `feedback.md`, `feedback.txt`, and any `.md`/`.txt` file whose first line contains "instructions", "plan", "todo", "goals", or "feedback" (case-insensitive).
-  - Exclude known project files: `CLAUDE.md`, `README.md`, `PLAN.md`, `CHANGELOG.md`, `DEVLOG.md`, `fb2p.md`, `instructions_inbox.md`.
-  - If multiple candidates found, list them and ask the user to choose.
-  - If none found, report this and stop.
-
-Store the collected text as `RAW_INPUT`.
+The instructions text was already loaded for you and is included in the `## Instructions to process` section above. Use that as `RAW_INPUT`. Do not search for files — the orchestrator already supplied the content.
 
 ---
 
 ## Step 1: Executive Assistant — triage
 
-Update `.orrch/workflow.json`:
+Update `{{WORKSPACE}}/workflow.json`:
 ```json
-{"workflow": "instruction-intake", "step": 1, "total_steps": 7, "status": "running", "agents": [{"role": "Executive Assistant", "status": "running"}]}
+{"workflow": "instruction-intake", "step": 1, "total_steps": 7, "status": "running", "agents": [{"role": "Executive Assistant", "status": "running"}], "source_idea": "{{SOURCE_IDEA}}"}
 ```
 
 Read the agent profile from `~/projects/orrchestrator/agents/executive_assistant.md`.
@@ -75,13 +78,13 @@ Store the Agent's output as `TRIAGE_RESULT`.
 
 **Handle ambiguous items**: If any items are flagged as ambiguous, present them to the user and ask for classification before proceeding. Wait for the user's response.
 
-Extract the development instructions portion and store as `DEV_INSTRUCTIONS`. If there are no development instructions, report this and stop — the pipeline only processes dev work.
+Extract the development instructions portion and store as `DEV_INSTRUCTIONS`. If there are no development instructions, mark the workflow as `failed` in `{{WORKSPACE}}/workflow.json` and stop — the pipeline only processes dev work.
 
 ---
 
 ## Step 2: COO — optimize
 
-Update `.orrch/workflow.json` — step 2, Chief Operations Officer running.
+Update `{{WORKSPACE}}/workflow.json` — step 2, Chief Operations Officer running, source_idea preserved.
 
 Read the agent profile from `~/projects/orrchestrator/agents/chief_operations_officer.md`.
 
@@ -117,55 +120,50 @@ Store the Agent's output as `OPTIMIZED_INSTRUCTIONS`.
 
 ## Step 3: Write review file
 
-Update `.orrch/workflow.json` — step 3, status "pending_review".
+Update `{{WORKSPACE}}/workflow.json` — step 3, status `"pending_review"`, source_idea preserved.
 
-Write `.orrch/intake_review.json` with the following content:
+Write `{{WORKSPACE}}/review.json` with the following content (note: status is `"pending"`, NOT `"pending_review"` — the TUI loader only matches `"pending"`):
 
 ```json
 {
-  "status": "pending_review",
   "raw": "<DEV_INSTRUCTIONS as a string>",
   "optimized": "<OPTIMIZED_INSTRUCTIONS as a string>",
-  "timestamp": "<current ISO 8601 timestamp>"
+  "status": "pending",
+  "source_idea": "{{SOURCE_IDEA}}"
 }
 ```
+
+Be careful to JSON-escape newlines and quotes inside `raw` and `optimized`.
 
 ---
 
 ## Step 4: User review (BLOCKING)
 
-Present to the user a side-by-side comparison:
+After writing `{{WORKSPACE}}/review.json` you MUST stop and end your turn. The user reviews and confirms via the orrchestrator TUI (`Design > Intentions` panel) — they do NOT type a confirmation into your chat. The TUI will write back to `{{WORKSPACE}}/review.json` with `"status": "confirmed"` or `"status": "rejected"`.
+
+Print this message to the user before stopping:
 
 ```
-## Instruction Intake Review
+Step 3 complete. Review written to {{WORKSPACE}}/review.json.
 
-### Raw Instructions (your words)
-<DEV_INSTRUCTIONS>
+Open the orrchestrator TUI → Design → Intentions panel to review and confirm
+the optimized instructions for source idea {{SOURCE_IDEA}}.
 
-### Optimized Instructions (token-efficient versions)
-<OPTIMIZED_INSTRUCTIONS>
+This session will exit. The TUI will spawn a fresh continuation session
+once you confirm the review.
+```
+
+Then exit. Do not poll. Do not loop. Steps 5-7 will be executed by a separate, fresh session that the TUI launches when the user confirms.
 
 ---
 
-Do these optimized versions accurately capture your intent?
-- **confirm** — route as-is
-- **edit** — tell me what to change and I will update
-- **reject** — discard and stop
-```
+## Steps 5-7: continuation (only run if invoked specifically for steps 5-7)
 
-**This step blocks.** Do NOT proceed until the user explicitly confirms.
+If you were invoked with the explicit instruction "continue intake from confirmed review at {{WORKSPACE}}/review.json", read that file, verify `"status": "confirmed"`, then run steps 5-7 below using the `optimized` field as the input. Otherwise these steps are not yours to run — they belong to the continuation session.
 
-- **If the user says "confirm"** (or "yes", "looks good", "ship it", "go"): Proceed to step 5.
-- **If the user requests edits**: Apply the edits to `OPTIMIZED_INSTRUCTIONS`, update `.orrch/intake_review.json`, and re-present for confirmation.
-- **If the user says "reject"**: Update `.orrch/workflow.json` to status "rejected" and stop.
+### Step 5: COO — route to projects
 
-After confirmation, update `.orrch/intake_review.json` status to `"confirmed"`.
-
----
-
-## Step 5: COO — route to projects
-
-Update `.orrch/workflow.json` — step 5, Chief Operations Officer running.
+Update `{{WORKSPACE}}/workflow.json` — step 5, Chief Operations Officer running.
 
 Spawn an Agent with the COO profile:
 
@@ -176,11 +174,9 @@ Spawn an Agent with the COO profile:
 > **Your task**: Determine which project each optimized instruction should be routed to.
 >
 > **Optimized instructions**:
-> {OPTIMIZED_INSTRUCTIONS}
+> {OPTIMIZED_INSTRUCTIONS from review.json}
 >
 > **Available projects**: List the directories in `~/projects/` and read each project's `CLAUDE.md` or `README.md` to understand what it does. Also check `.scope` files.
->
-> **Current working directory context**: The user submitted these instructions while working in `{current working directory}`. This is the default target project unless an instruction clearly belongs elsewhere.
 >
 > **Output**: A routing table:
 > ```
@@ -195,11 +191,9 @@ Spawn an Agent with the COO profile:
 
 Store the Agent's output as `ROUTING_TABLE`.
 
----
+### Step 6: Append to instruction inboxes
 
-## Step 6: Append to instruction inboxes
-
-Update `.orrch/workflow.json` — step 6, status "routing".
+Update `{{WORKSPACE}}/workflow.json` — step 6, status "routing".
 
 For each project in the `ROUTING_TABLE`:
 
@@ -209,15 +203,13 @@ For each project in the `ROUTING_TABLE`:
    # <Project Name> — Instruction Inbox
    ```
 3. Read the existing inbox to find the highest instruction number (e.g., if INS-009 exists, next is INS-010).
-4. Append each routed instruction in this format:
+4. Append each routed instruction in this format. Include the source idea so the vault sync can later detect implementation:
    ```markdown
 
-   ### INS-NNN: <title>
+   ### INS-NNN: <title> (source: plans/{{SOURCE_IDEA}})
    <optimized instruction text>
    ```
 5. Keep instructions in the order they were numbered (OPT-001 before OPT-002, etc.).
-
-Update `.orrch/intake_review.json` status to `"routed"` and add the routing details.
 
 Report to the user what was routed where:
 ```
@@ -226,11 +218,9 @@ Routed N instructions:
 - <project>: INS-NNN (<title>)
 ```
 
----
+### Step 7: PM incorporates into project plans
 
-## Step 7: PM incorporates into project plans
-
-Update `.orrch/workflow.json` — step 7, Project Manager running.
+Update `{{WORKSPACE}}/workflow.json` — step 7, Project Manager running.
 
 For each project that received new instructions, read the agent profile from `~/projects/orrchestrator/agents/project_manager.md` and spawn an Agent. If multiple projects are affected, spawn them **in parallel**.
 
@@ -261,9 +251,9 @@ For each project that received new instructions, read the agent profile from `~/
 
 ## Completion
 
-Update `.orrch/workflow.json`:
+Update `{{WORKSPACE}}/workflow.json`:
 ```json
-{"workflow": "instruction-intake", "step": 7, "total_steps": 7, "status": "complete", "agents": []}
+{"workflow": "instruction-intake", "step": 7, "total_steps": 7, "status": "complete", "agents": [], "source_idea": "{{SOURCE_IDEA}}"}
 ```
 
 Report to the user:
