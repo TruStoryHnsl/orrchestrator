@@ -1,8 +1,8 @@
 {
   "workflow": "instruction-intake",
-  "source_idea": "2026-04-20-12-34.md",
   "step": 7,
   "total_steps": 7,
   "status": "complete",
+  "source_idea": "2026-04-22-01-27.md",
   "agents": []
 }

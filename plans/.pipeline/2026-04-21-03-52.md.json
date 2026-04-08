@@ -1,6 +1,6 @@
 {
-  "progress": 0,
-  "targets": [],
+  "progress": 100,
+  "targets": ["orrapus"],
   "package_name": null,
-  "submitted_at": null
+  "submitted_at": 1775615174
 }

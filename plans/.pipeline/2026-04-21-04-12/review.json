@@ -1,7 +1,6 @@
 {
-  "status": "pending_review",
-  "source_idea": "2026-04-21-04-12.md",
   "raw": "CONCORD - Feedback\n\n- The server display column should be tucked away after the server is chosen and only expanded when the user clicks a button",
-  "optimized": "### OPT-001: Collapse server list sidebar after server selection\nModify Concord chat UI: auto-collapse the server list sidebar once a server is selected. Add a toggle button to re-expand it on demand. Default state post-selection: collapsed. Preserve current selection state while collapsed.\n\nSource: \"The server display column should be tucked away after the server is chosen and only expanded when the user clicks a button\"",
-  "timestamp": "2026-04-06T21:18:30Z"
+  "optimized": "### OPT-001: Tuck away server display column after selection\nIn Concord, tuck away the server display column after a server is chosen. Expand it only when the user clicks a button.\n\n\n",
+  "status": "confirmed",
+  "source_idea": "2026-04-21-04-12.md"
 }

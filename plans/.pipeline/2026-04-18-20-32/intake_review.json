@@ -1,0 +1,20 @@
+{
+  "status": "complete_already_covered",
+  "source_idea": "2026-04-18-20-32.md",
+  "timestamp": "2026-04-07T00:00:00Z",
+  "raw": "Orrapus Update - FORK\n+ GLSR Generic Live Stream Recorder\n\nThis add functionality to monitor many other streaming websites in the same fashion with which we monitor chaturbate.\n\nOur favorites list will not be seperated by platform but the experience for the end user will be identical. They can submit a link and the live stream recorder will add that url to the list to be monitored for live status.\n\nI want all of the stream recording logic to be made generic. It all still needs to work with chaturbate thte way that it has, but other platforms should he supported too. I want the logic to be so versatile and so robust that GLSR is able to monitor twitch streams, chaturbate shows, or any other periodic stream all the same.",
+  "resolution": {
+    "user_clarification": "omnipus is the repo-level fork of orrapus. cbsr lives in orrapus (untouched). glsr lives in omnipus and replaces omnipus's inherited cbsr. orrapus is never touched when working on omnipus. glsr is the Rust replacement for cbsr.",
+    "outcome": "Already covered by existing omnipus plan — no new INS items added, no files routed. Initial routing to orrapus was reverted (orrapus PLAN.md and instructions_inbox.md restored to pre-intake state).",
+    "covered_by": {
+      "OPT-001": ["omnipus repo exists", "omnipus INS-001"],
+      "OPT-002": ["omnipus INS-002", "omnipus P1-03..06"],
+      "OPT-003": ["omnipus INS-003", "omnipus INS-004", "omnipus INS-005"],
+      "OPT-004": ["omnipus INS-006", "omnipus P4-06..07"],
+      "OPT-005": ["omnipus INS-007", "omnipus INS-011", "omnipus P2-10..11"],
+      "OPT-006": ["omnipus INS-003 (zero regression clause)", "omnipus P2-04"],
+      "OPT-007": ["omnipus INS-007", "omnipus INS-010", "omnipus INS-013", "omnipus INS-015"],
+      "OPT-008": ["omnipus PLAN.md Phase 1 → Phase 5 sequence"]
+    }
+  }
+}
