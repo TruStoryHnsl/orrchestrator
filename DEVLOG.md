@@ -1,5 +1,35 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-08 — Items 23 + 24 (Crush/OpenCode Backends + Raw API Backends)
+
+### Completed
+- **23. Ollama backend via Crush/OpenCode** — `BackendKind::Crush` and `BackendKind::OpenCode` were already wired into `BackendsConfig::default()` (commands `crush` / `opencode`), `detect_availability()` (via `which`), and `process_manager::spawn()` (same `to_provider()` → `cli_args()` PTY path as Claude/Gemini). This session verified the wiring end-to-end and added unit coverage: `test_crush_default_command`, `test_crush_availability_detection`, `test_crush_to_provider_routes_cli_pty`, plus extended `test_default_config` and `test_backend_labels` to assert Crush + OpenCode entries.
+- **24. Raw API backends** — `AnthropicApi` and `OpenAiApi` now dispatch real HTTP requests instead of `bail!`-ing. Added in `crates/orrch-core/src/backend.rs`: `send_api_message(backend, model_id, prompt)` dispatcher, `http_client()` (reqwest blocking, 120s timeout), `send_anthropic()` (POST `https://api.anthropic.com/v1/messages` with `x-api-key` + `anthropic-version: 2023-06-01`, parses `content[].text`), `send_openai()` (POST `https://api.openai.com/v1/chat/completions` with bearer auth, parses `choices[0].message.content`). `is_provider_available()` now reports API backends as available iff their env var (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) is set. `process_manager::spawn_api_oneshot()` runs the HTTP call on `tokio::task::spawn_blocking` and emits the response as `SessionEvent::Output` followed by `SessionEvent::Died`. Added `reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"] }` to workspace Cargo.toml. Coverage: `test_all_backends_route_to_correct_provider_kind` (all 6 variants), `test_valve_blocked_overrides_all_backends`, `test_api_backend_env_var_availability` (single test using save/restore to avoid parallel races), `test_session_new_preserves_backend_for_all_variants` (in `session.rs`).
+
+### Verification
+- 1 build verifier (run inline due to API overload): `cargo check --workspace` clean, `cargo test -p orrch-core` 90 passed / 0 failed (up from 86 baseline — 4 new tests), only pre-existing dead-code warnings
+- 1 contract verifier subagent: PASS on contract integrity, dependencies, and B1 backend coverage. Flagged minor follow-ups (logged below as known gaps) but explicitly marked severity as **minor — not blocking**
+
+### Known follow-ups (logged in PLAN.md)
+- **Hardcoded model_id**: `BackendKind::to_provider()` hardcodes `"claude-sonnet-4-20250514"` and `"gpt-4o"` for the API providers. The Library > Models system (`library/models/*.md`) is not yet wired through to the spawn path. Future work: source `model_id` from the active model selection in `ProviderConfig`.
+- **Session-tracking asymmetry**: `spawn_api_oneshot` returns a sid but does not insert into `ProcessManager.sessions`. `get_session(sid)` will return `None` for API sessions; `write_to_session` / `kill_session` silently no-op. Currently fine because the API path is one-shot, but multi-turn API conversations will require a parallel session model.
+- **Error surfacing**: HTTP errors (401 / 429 / network) are stringified into `"[error] {e}"` and emitted on the same `Output` channel as success responses. `SessionEvent::Died` has no exit-code field. Pre-spawn env-var check guards the happy path. Acceptable for `private` scope.
+
+### Files Changed
+- `Cargo.toml` (workspace) — added `reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }`
+- `crates/orrch-core/Cargo.toml` — `reqwest.workspace = true`
+- `crates/orrch-core/src/backend.rs` — ~110 lines added (HTTP send functions, env-var availability checks, 8 new tests)
+- `crates/orrch-core/src/process_manager.rs` — ~40 lines net (`spawn_api_oneshot` helper, removed `bail!` for API backends)
+- `crates/orrch-core/src/session.rs` — new test module with `test_session_new_preserves_backend_for_all_variants`
+- `PLAN.md` — items 23 and 24 marked `[x]` with status notes
+
+### Workflow
+- Executed `develop_feature` MCP dispatch loop end-to-end
+- 1 PM planning agent → 4 tasks → 2 file-clustered Wave 1 agents (Developer for B1, Software Engineer for B2/B3, run sequentially due to shared central files `backend.rs` + `process_manager.rs`) → 1 Wave 2 agent (Feature Tester for B4) → 2 verifiers (1 inline build verifier, 1 isolated contract reviewer subagent) → SHIP_WITH_ISSUES (minor follow-ups documented, not blocking)
+- Note: 2 verifier subagent attempts hit Anthropic API 529 (overloaded); fallback to inline `cargo` invocation succeeded
+
+---
+
 ## Dev Session: 2026-04-07 — Items 40 + 52 (instruction-intake Operation + Commit Grouping Display)
 
 ### Completed
