@@ -1629,8 +1629,9 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
                     ));
                 }
 
-                let commit_count =
-                    orrch_core::git::commits_for_feature(&proj.path, &lookup_id).len();
+                let commits =
+                    orrch_core::git::commits_for_feature(&proj.path, &lookup_id);
+                let commit_count = commits.len();
                 if commit_count > 0 {
                     spans.push(Span::styled(
                         format!(" ●{commit_count}"),
@@ -1638,7 +1639,37 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
                     ));
                 }
 
-                items.push(ListItem::new(Line::from(spans)));
+                // Build the multi-line ListItem: header line + up to 3 commit
+                // child lines. Child lines are part of the same ListItem so they
+                // don't affect the flat selection index used by devmap_item_at.
+                let mut lines: Vec<Line> = vec![Line::from(spans)];
+                if !commits.is_empty() {
+                    // Reserve space for the indent ("    "), 7-char short sha,
+                    // and a separating space. Subject gets whatever's left.
+                    let max_subject = (area.width as usize)
+                        .saturating_sub(2)  // list border padding
+                        .saturating_sub(4)  // indent
+                        .saturating_sub(8); // "abcdef1 "
+                    for c in commits.iter().take(3) {
+                        let short = c.sha.chars().take(7).collect::<String>();
+                        let subject: String = if c.subject.chars().count() > max_subject {
+                            let truncated: String =
+                                c.subject.chars().take(max_subject.saturating_sub(1)).collect();
+                            format!("{truncated}…")
+                        } else {
+                            c.subject.clone()
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("    {short} "),
+                                Style::default().fg(TEXT_MUTED),
+                            ),
+                            Span::styled(subject, Style::default().fg(TEXT_DIM)),
+                        ]));
+                    }
+                }
+
+                items.push(ListItem::new(lines));
             }
         }
     }
