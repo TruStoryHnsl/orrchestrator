@@ -8,7 +8,8 @@ use nix::unistd::Pid;
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::backend::{BackendKind, BackendsConfig};
+use crate::backend::{BackendKind, BackendsConfig, send_api_message};
+use crate::provider::ProviderKind;
 use crate::session::{ExternalSession, Session, SessionState};
 
 /// Events emitted by the process manager.
@@ -55,7 +56,8 @@ impl ProcessManager {
     }
 
     /// Spawn a new AI session in a PTY.
-    /// CLI backends spawn via PTY fork/exec. API backends are not yet implemented.
+    /// CLI backends spawn via PTY fork/exec. API backends do a one-shot HTTP request
+    /// and emit the response as a single Output event followed by a Died event.
     pub fn spawn(
         &mut self,
         project_dir: &Path,
@@ -68,7 +70,7 @@ impl ProcessManager {
         let provider = backend.to_provider(&self.backends);
 
         if provider.is_api() {
-            anyhow::bail!("{} is an API provider — PTY spawn not supported (API dispatch coming in a future release)", backend.label());
+            return self.spawn_api_oneshot(backend, &provider, prompt);
         }
 
         let cmd_args = provider
@@ -151,6 +153,43 @@ impl ProcessManager {
         let sid_clone = sid.clone();
         tokio::spawn(async move {
             read_pty_loop(master_fd, sid_clone, tx).await;
+        });
+
+        Ok(sid)
+    }
+
+    /// One-shot HTTP API dispatch. Allocates a session id, runs the request on a
+    /// background tokio task, and emits the response as a SessionEvent::Output
+    /// followed by SessionEvent::Died. No PTY/Session struct is created — API
+    /// backends are stateless from this manager's POV.
+    fn spawn_api_oneshot(
+        &mut self,
+        backend: BackendKind,
+        provider: &crate::provider::ProviderConfig,
+        prompt: Option<&str>,
+    ) -> anyhow::Result<String> {
+        if !provider.available {
+            anyhow::bail!("{} backend not available — api key env var not set", backend.label());
+        }
+        let model_id = match &provider.kind {
+            ProviderKind::ApiHttp { model_id, .. } => model_id.clone(),
+            _ => anyhow::bail!("{} is not an http api provider", backend.label()),
+        };
+        let prompt = prompt.unwrap_or("").to_string();
+
+        let sid = format!("s{}", self.next_id);
+        self.next_id += 1;
+
+        let tx = self.event_tx.clone();
+        let sid_clone = sid.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = send_api_message(backend, &model_id, &prompt);
+            let payload = match result {
+                Ok(text) => text.into_bytes(),
+                Err(e) => format!("[error] {e}").into_bytes(),
+            };
+            let _ = tx.send(SessionEvent::Output { sid: sid_clone.clone(), data: payload });
+            let _ = tx.send(SessionEvent::Died { sid: sid_clone });
         });
 
         Ok(sid)

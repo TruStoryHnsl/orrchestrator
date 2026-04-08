@@ -133,6 +133,32 @@ impl ExternalSession {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_new_preserves_backend_for_all_variants() {
+        // Exercise Session::new for each BackendKind and assert the backend
+        // field round-trips. This gives the session module coverage of
+        // backend selection at construction time.
+        for kind in BackendKind::all() {
+            let session = Session::new(
+                format!("sid-{}", kind.label()),
+                PathBuf::from("/tmp/orrch-test-project"),
+                nix::unistd::Pid::from_raw(1),
+                -1,
+                *kind,
+                Some(format!("goal for {}", kind.label())),
+            );
+            assert_eq!(session.backend, *kind);
+            assert_eq!(session.state, SessionState::Working);
+            assert_eq!(session.goal_display(), &format!("goal for {}", kind.label()));
+            assert_eq!(session.display_name(), "orrch-test-project");
+        }
+    }
+}
+
 /// Read the session name from Claude's session file (~/.claude/sessions/<PID>.json).
 pub fn read_session_name(pid: u32) -> String {
     let home = std::env::var("HOME").unwrap_or_default();
