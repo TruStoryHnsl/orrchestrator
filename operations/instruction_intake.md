@@ -6,11 +6,12 @@ Blocker: none
 ### Order of Operations
 #### <index> | <agent> | <tool or skill> | <operation>
 
-1 | Executive Assistant | * | separate development instructions from other input and pass them to COO
-1 | Executive Assistant | * | immediately address input unrelated to direct software development
-2 | Chief Operations Officer | skill:clarify | process raw instructions into optimized token-efficient instructions
-3 | Chief Operations Officer | skill:parse | determine which project each instruction should be sent to
-4 | Chief Operations Officer | tool:copy-file | append the new instructions to the appropriate project instruction_inbox.md files
-5 | Project Manager | skill:synthesize_instructions | incorporate the new instructions into the project plan
+1 | Executive Assistant | skill:triage | triage raw user input — separate development instructions from status inquiries and general conversation, address non-dev items immediately, flag ambiguous items for the user
+2 | Chief Operations Officer | skill:clarify | optimize raw development instructions into token-efficient numbered prompts (OPT-NNN), preserving user intent and stripping conversational filler
+3 | Chief Operations Officer | tool:write-review | write the raw and optimized instructions to {{WORKSPACE}}/review.json with status pending and the source idea filename
+4 | Hypervisor | * | BLOCKING — stop and end turn while the user reviews the side-by-side raw vs optimized comparison in Design > Intentions; the TUI sets review.json status to confirmed or rejected and spawns a fresh continuation session
+5 | Chief Operations Officer | skill:parse | determine which project each confirmed instruction routes to by reading project CLAUDE.md/README.md/.scope; split cross-project instructions and route unattached ideas to scratchpad
+6 | Chief Operations Officer | tool:copy-file | append each routed instruction to the appropriate project instructions_inbox.md as INS-NNN entries with source idea reference, creating the inbox file if missing
+7 | Project Manager | skill:synthesize_instructions | for each affected project, incorporate new INS entries into PLAN.md (extend, modify, add, or flag conflicts) and report what was incorporated
 
 Interrupts: none

@@ -1,5 +1,28 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-07 — Items 40 + 52 (instruction-intake Operation + Commit Grouping Display)
+
+### Completed
+- **40. workforce:instruction-intake** — `operations/instruction_intake.md` expanded from a stub into a 7-step pipe-delimited table mirroring the canonical pipeline in `library/skills/instruction-intake.md`: (1) EA Triage → (2) COO Optimize → (3) COO Write Review → (4) Hypervisor BLOCKING user confirm (`tool=*`) → (5) COO Parse/Route → (6) COO Append via `tool:copy-file` → (7) PM Incorporate via `skill:synthesize_instructions`. Parses cleanly via `parse_operation_markdown`; `cargo test -p orrch-workforce` reports 12 passed / 0 failed, including `test_parse_instruction_intake` and `test_instruction_intake_module`.
+- **52. Git commit grouping display (core)** — `crates/orrch-tui/src/ui.rs` dev map feature rendering now shows up to 3 child lines beneath each feature: `  <short-sha> <subject>` in `TEXT_MUTED` / `TEXT_DIM`. Data sourced from the existing `orrch_core::git::commits_for_feature()` — no new git plumbing required. Implemented as additional `Line`s inside the **same** `ListItem` so `App::devmap_flat_count` / `devmap_item_at` selection math in `app.rs` stays correct without modification. Advanced Repository-Manager advisory layer is a future enhancement.
+
+### Verification
+- 2 isolated verifier subagents reviewed both changes in parallel (Tester A + Tester B)
+- Both returned PASS / VERIFIED for both changes with cross-checked file:line evidence
+- `cargo build --release`: clean, only pre-existing dead-code warnings
+- Non-blocker notes logged: `commits_for_feature` shells out to `git log` per render frame (candidate for `Project` struct caching if devmap gets sluggish); subject truncation is char-count based (wide CJK could slightly over-fill); `operations/instruction_intake.md` omits an optional `Blocker:` line (parser defaults to `None`, harmless)
+
+### Files Changed
+- `operations/instruction_intake.md` — stub → full 7-step table
+- `crates/orrch-tui/src/ui.rs` — dev map feature row render (lines ~1632-1672)
+- `PLAN.md` — items 40 and 52 marked `[x]` with status notes
+
+### Workflow
+- Executed `develop_feature` MCP dispatch loop end-to-end
+- 1 PM planning agent → 2 tasks → 2 file-clustered Developer agents (parallel, Wave 1) → 2 isolated Feature Tester agents (parallel) → consensus PASS → ship
+
+---
+
 ## Dev Session: 2026-04-07 — Items 41 + 42 + 43 (Intake Operation Modules)
 
 ### Completed
