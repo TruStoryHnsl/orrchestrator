@@ -1,5 +1,32 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-07 — Items 41 + 42 + 43 (Intake Operation Modules)
+
+### Completed
+- **41. workforce:plan-intake** — New `operations/plan_intake.md` operation module modeled on the canonical `instruction_intake.md`. 5-step sequential pipeline: EA separates plan/design input → COO clarifies scope → COO parses for routing → COO routes to target project workspace → PM incorporates into existing PLAN.md or scaffolds a new project plan. Trigger: UserSubmit. Parses cleanly via `parse_operation_markdown`.
+- **42. workforce:idea-intake** — New `operations/idea_intake.md`. 4-step sequential pipeline: EA classifies input as idea → COO stores via `tool:save-idea` (backed by `save_idea()` in `orrch-core::vault`) → Mentor reviews for feasibility → idea remains dormant in `plans/` vault, unattached, no PM dispatch. Matches acceptance criterion that ideas not be forced into immediate execution.
+- **43. workforce:knowledge-intake** — New `operations/knowledge_intake.md`. 4-step sequential pipeline: EA classifies input as a custom library item → COO determines target subdirectory from `library/{skills, tools, mcp_servers, models, harnesses}` → Mentor scans for duplicates/conflicts → Repository Manager commits the new `.md` to the chosen subdir.
+
+### Verification
+- 2 isolated verifier subagents reviewed all 3 files in parallel
+- Structural parse verified against `crates/orrch-workforce/src/parser.rs::parse_operation_markdown` — all 3 files yield operation name, `TriggerCondition::UserSubmit`, and complete step list
+- Defect found + fixed in rework cycle: `knowledge_intake.md` step 2 originally listed a nonexistent `library/agents` subdir; corrected to the real set (`library/skills, library/tools, library/mcp_servers, library/models, library/harnesses`)
+- Known issues (pre-existing, not this cluster's responsibility):
+  - Parser silently drops `Blocker:` and `Interrupts:` content — affects `instruction_intake.md` identically
+  - Step rows reference `skill:` and `tool:` names that don't exist as library items — matches canonical convention, ecosystem catch-up is a separate task
+
+### Files Changed
+- `operations/plan_intake.md` — **new**: 5-step EA → COO → PM intake pipeline
+- `operations/idea_intake.md` — **new**: 4-step EA → COO → Mentor dormant-vault pipeline
+- `operations/knowledge_intake.md` — **new**: 4-step EA → COO → Mentor → Repository Manager library-insert pipeline
+- `PLAN.md` — items 41, 42, 43 marked `[x]`
+
+### Workflow
+- Executed `develop_feature` MCP dispatch loop end-to-end
+- 1 PM planning agent → 3 tasks → 3 file-clustered impl agents (parallel) → 2 isolated verifier agents (parallel) → 1 PM evaluator → 1 REWORK cycle (single-file fix) → 1 re-verifier → PASS
+
+---
+
 ## Dev Session: 2026-04-06 — Items 49 + 50 (Diff Log + User Verification)
 
 ### Completed
