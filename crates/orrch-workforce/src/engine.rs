@@ -1,4 +1,5 @@
-use crate::operation::{Operation, Step, BlockCondition};
+use crate::operation::{BlockCondition, Operation, Step};
+use crate::template::Workforce;
 
 /// Execution state of an operation module.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +182,90 @@ pub fn expand_nested_workforce(
         output_agent_id: output_agent.id.clone(),
         output_agent_profile: output_agent.agent_profile.clone(),
     })
+}
+
+/// A step resolved for runtime dispatch: carries the effective agent profile
+/// name (possibly resolved through a nested workforce expansion) and any
+/// per-step model override pulled off `Step::model_override`.
+///
+/// Task 35 + Task 57 runtime wiring. Produced by [`resolve_step_for_dispatch`]
+/// and consumed by agent dispatch layers (e.g. the hypervisor in orrch-agents)
+/// so both nested workforce expansion and mixed-model execution happen at the
+/// actual spawn site rather than in ad-hoc callers.
+#[derive(Debug, Clone)]
+pub struct ResolvedStep {
+    /// Step index (e.g. "1", "2B") — preserved verbatim from the source step.
+    pub step_index: String,
+    /// Final agent profile name to spawn. If the step's agent node pointed at a
+    /// nested workforce, this is the nested workforce's user-facing output
+    /// agent profile; otherwise it equals `step.agent`.
+    pub agent_profile: String,
+    /// Optional: the inner workforce that expansion resolved to. When `Some`,
+    /// the dispatcher can further walk the nested workforce. When `None`, the
+    /// step is a flat single-agent spawn.
+    pub nested_workforce: Option<Workforce>,
+    /// Per-step model override from `Step::model_override`. Passed through
+    /// verbatim so dispatchers can route to the correct backend.
+    pub model_override: Option<String>,
+}
+
+/// Resolve a `Step` against its executing workforce for runtime dispatch.
+///
+/// Lookup logic:
+/// 1. Find an `AgentNode` in `workforce.agents` whose `agent_profile` matches
+///    `step.agent`. If none matches, return a direct resolution (flat step).
+/// 2. If that node has `nested_workforce: Some(...)`, call
+///    [`expand_nested_workforce`] to resolve the inner workforce's output
+///    agent. If expansion succeeds, the resolved profile is the inner output
+///    agent's profile and `nested_workforce` is populated.
+/// 3. Otherwise, the resolved profile is `step.agent` (unchanged).
+/// 4. `model_override` is always forwarded from `step.model_override`.
+///
+/// This is the single point where Task 35 (nested workforce expansion) and
+/// Task 57 (mixed-model overrides) feed runtime dispatch. Dispatchers should
+/// call this for every step before spawning an agent.
+pub fn resolve_step_for_dispatch(
+    step: &Step,
+    workforce: &Workforce,
+    all_workforces: &[Workforce],
+) -> ResolvedStep {
+    // Try to find the agent node by profile match. Workforces may have
+    // multiple nodes with the same profile (e.g. duplicate Developers per
+    // file-cluster batching); pick the first that has a nested_workforce if
+    // any, otherwise the first match.
+    let node = workforce
+        .agents
+        .iter()
+        .find(|a| a.agent_profile == step.agent && a.nested_workforce.is_some())
+        .or_else(|| {
+            workforce
+                .agents
+                .iter()
+                .find(|a| a.agent_profile == step.agent)
+        });
+
+    if let Some(node) = node {
+        if node.nested_workforce.is_some() {
+            if let Some(expansion) = expand_nested_workforce(workforce, all_workforces, &node.id) {
+                return ResolvedStep {
+                    step_index: step.index.clone(),
+                    agent_profile: expansion.output_agent_profile,
+                    nested_workforce: Some(expansion.inner_workforce),
+                    model_override: step.model_override.clone(),
+                };
+            }
+            // Expansion failed (missing inner, empty, etc.) — fall through to
+            // direct dispatch so the step still runs rather than silently
+            // disappearing.
+        }
+    }
+
+    ResolvedStep {
+        step_index: step.index.clone(),
+        agent_profile: step.agent.clone(),
+        nested_workforce: None,
+        model_override: step.model_override.clone(),
+    }
 }
 
 /// Load operation modules from markdown files in a directory.

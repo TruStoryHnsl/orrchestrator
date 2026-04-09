@@ -1,5 +1,5 @@
 use crate::profile::AgentProfile;
-use orrch_workforce::{Workforce, Operation};
+use orrch_workforce::{Operation, ResolvedStep, Workforce};
 use std::path::Path;
 
 /// Convert an agent profile name to its expected filename.
@@ -154,6 +154,58 @@ impl AgentRunner {
             ### Deliverable to Verify\n\n{}",
             deliverable_description
         ));
+
+        parts.join("\n\n---\n\n")
+    }
+
+    /// Build a prompt for a step whose model selection has been resolved at
+    /// runtime via [`orrch_workforce::resolve_step_for_dispatch`].
+    ///
+    /// This is the Task 35 + Task 57 runtime entry point: it threads the
+    /// optional per-step model override into the prompt as a directive block
+    /// that downstream backends can key on, and preserves nested-workforce
+    /// provenance for dispatchers that want to expand inner workforces.
+    ///
+    /// Behavior:
+    /// - Always calls [`build_prompt`] for the baseline agent prompt.
+    /// - If `resolved.model_override.is_some()`, prepends a `## Model Override`
+    ///   block so the backend/runner layer sees the directive even when the
+    ///   raw backend API doesn't have a structured model field.
+    /// - If `resolved.nested_workforce.is_some()`, appends a short marker so
+    ///   hypervisors can detect the nested unit boundary.
+    pub fn build_prompt_for_resolved_step(
+        agent: &AgentProfile,
+        task: &str,
+        core_context: Option<&str>,
+        resolved: &ResolvedStep,
+    ) -> String {
+        let base = Self::build_prompt(agent, task, core_context);
+
+        let mut parts: Vec<String> = Vec::with_capacity(3);
+
+        if let Some(model) = resolved.model_override.as_ref() {
+            parts.push(format!(
+                "## Model Override\n\n\
+                This step has been dispatched with an explicit model selection. \
+                The effective model is `{}`. Backends that accept a model \
+                directive should honor this selection.",
+                model
+            ));
+        }
+
+        parts.push(base);
+
+        if let Some(inner) = resolved.nested_workforce.as_ref() {
+            parts.push(format!(
+                "## Nested Workforce\n\n\
+                This step was resolved through a nested workforce expansion. \
+                The parent step targeted an agent node that delegates to the \
+                inner workforce `{}`. The output agent of that inner workforce \
+                is running now. If you need to coordinate across the inner \
+                workforce, spawn its team members via the Agent tool.",
+                inner.name
+            ));
+        }
 
         parts.join("\n\n---\n\n")
     }
