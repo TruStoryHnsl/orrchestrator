@@ -18,7 +18,7 @@ Check what `$ARGUMENTS` contains:
 
 - **If it is a file path**: Read the file and use its contents as raw instructions.
 - **If it is inline text**: Use it directly as raw instructions.
-- **If empty**: Search the current project for unprocessed feedback files (new `.txt` or `.md` files in the root that are not CLAUDE.md, README.md, PLAN.md, fb2p.md, or CHANGELOG.md). Report what you find and ask the user which to process.
+- **If empty**: Search the current project for unprocessed feedback files (new `.txt` or `.md` files in the root that are not CLAUDE.md, README.md, PLAN.md, instructions_inbox.md, or CHANGELOG.md). Report what you find and ask the user which to process.
 
 ## Step 3: Process instructions
 

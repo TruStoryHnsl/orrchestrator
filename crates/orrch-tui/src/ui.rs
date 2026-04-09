@@ -2436,7 +2436,7 @@ fn draw_routing_summary(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
     let mut lines = vec![Line::styled("Feedback processed!", Style::default().fg(GREEN).add_modifier(Modifier::BOLD)), Line::raw("")];
     if app.routing_result.is_empty() {
-        lines.push(Line::styled("No project matches — saved to workspace fb2p.md", Style::default().fg(TEXT_DIM)));
+        lines.push(Line::styled("No project matches — saved to workspace instructions_inbox.md", Style::default().fg(TEXT_DIM)));
     } else {
         lines.push(Line::styled(format!("Routed to {} project(s):", app.routing_result.len()), Style::default().fg(TEXT)));
         for (name, _) in &app.routing_result {
