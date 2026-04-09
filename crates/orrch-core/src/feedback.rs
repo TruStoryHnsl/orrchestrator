@@ -626,6 +626,142 @@ pub fn delete_feedback(filename: &str, projects_dir: &Path) {
     save_status_map(&feedback_dir, &status_map);
 }
 
+/// Truncates the project's instructions_inbox.md if it exceeds max_bytes.
+/// Keeps only the most recent `## Entry:` blocks that fit under the limit,
+/// prepends a header line and a `<!-- truncated YYYY-MM-DD HH:MM, kept N of M entries -->` marker.
+/// Returns Ok(true) if truncation occurred, Ok(false) if file missing or already small enough.
+pub fn truncate_inbox_if_large(project_dir: &Path, max_bytes: usize) -> anyhow::Result<bool> {
+    let inbox_path = project_dir.join("instructions_inbox.md");
+    if !inbox_path.exists() {
+        return Ok(false);
+    }
+
+    let contents = fs::read_to_string(&inbox_path)?;
+    if contents.len() <= max_bytes {
+        return Ok(false);
+    }
+
+    let entries = split_entries(&contents);
+    let total = entries.len();
+    if total == 0 {
+        return Ok(false);
+    }
+
+    let project_name = project_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let timestamp = chrono_lite_timestamp();
+    let header = format!("# {project_name} — Instructions Inbox\n");
+    let marker_template = |kept: usize| {
+        format!(
+            "\n<!-- truncated {timestamp}, kept {kept} of {total} entries -->\n"
+        )
+    };
+
+    // Walk newest (last) to oldest (first), accumulating bytes until the next would overflow.
+    let mut kept_rev: Vec<&String> = Vec::new();
+    let mut used_bytes: usize = header.len() + marker_template(total).len();
+    for entry in entries.iter().rev() {
+        let cost = entry.len();
+        if used_bytes + cost > max_bytes {
+            break;
+        }
+        used_bytes += cost;
+        kept_rev.push(entry);
+    }
+
+    // Always keep at least one (the most recent) even if it alone exceeds budget.
+    if kept_rev.is_empty() {
+        if let Some(last) = entries.last() {
+            kept_rev.push(last);
+        }
+    }
+
+    let kept_count = kept_rev.len();
+    let mut out = String::new();
+    out.push_str(&header);
+    out.push_str(&marker_template(kept_count));
+    for entry in kept_rev.iter().rev() {
+        out.push_str(entry);
+    }
+
+    fs::write(&inbox_path, out)?;
+    Ok(true)
+}
+
+/// Removes any `## Entry:` block from instructions_inbox.md whose `### Status` section
+/// contains `Executed: complete` or `Executed: done`. Returns the number of entries removed.
+/// Ok(0) if file missing.
+pub fn trim_completed_entries(project_dir: &Path) -> anyhow::Result<usize> {
+    let inbox_path = project_dir.join("instructions_inbox.md");
+    if !inbox_path.exists() {
+        return Ok(0);
+    }
+
+    let contents = fs::read_to_string(&inbox_path)?;
+    let preamble = extract_preamble(&contents);
+    let entries = split_entries(&contents);
+
+    let mut removed = 0usize;
+    let mut kept: Vec<&String> = Vec::new();
+    for entry in &entries {
+        if entry_is_completed(entry) {
+            removed += 1;
+        } else {
+            kept.push(entry);
+        }
+    }
+
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    let mut out = String::new();
+    out.push_str(&preamble);
+    for entry in kept {
+        out.push_str(entry);
+    }
+
+    fs::write(&inbox_path, out)?;
+    Ok(removed)
+}
+
+/// Split an inbox file into `## Entry:` blocks. Each returned entry starts with
+/// `## Entry:` and ends just before the next one (or EOF).
+fn split_entries(contents: &str) -> Vec<String> {
+    let marker = "## Entry:";
+    let mut entries: Vec<String> = Vec::new();
+    let mut search_from = 0usize;
+    let mut current_start: Option<usize> = None;
+    while let Some(rel) = contents[search_from..].find(marker) {
+        let abs = search_from + rel;
+        if let Some(start) = current_start {
+            entries.push(contents[start..abs].to_string());
+        }
+        current_start = Some(abs);
+        search_from = abs + marker.len();
+    }
+    if let Some(start) = current_start {
+        entries.push(contents[start..].to_string());
+    }
+    entries
+}
+
+/// Return everything in the file before the first `## Entry:` marker (i.e., the preamble/header).
+fn extract_preamble(contents: &str) -> String {
+    match contents.find("## Entry:") {
+        Some(idx) => contents[..idx].to_string(),
+        None => contents.to_string(),
+    }
+}
+
+/// Check whether an entry block's Status section marks it as finished.
+fn entry_is_completed(entry: &str) -> bool {
+    entry.contains("Executed: complete") || entry.contains("Executed: done")
+}
+
 /// Create a new draft feedback file and return its path.
 pub fn create_draft(projects_dir: &Path) -> anyhow::Result<PathBuf> {
     let feedback_dir = projects_dir.join(".feedback");
@@ -758,6 +894,87 @@ mod tests {
         assert!(word_boundary_match("update concord", "concord"));
         assert!(!word_boundary_match("disconcordant behavior", "concord")); // substring
         assert!(word_boundary_match("fix concord/v2 websocket", "concord")); // slash boundary
+    }
+
+    fn write_entry(buf: &mut String, ts: &str, body: &str, executed: &str) {
+        buf.push_str(&format!(
+            "\n---\n\n\
+             ## Entry: {ts} — test\n\n\
+             ### Raw Input\n\
+             {body}\n\n\
+             ### Status\n\
+             Generated: {ts}\n\
+             Executed: {executed}\n"
+        ));
+    }
+
+    #[test]
+    fn test_truncate_inbox_keeps_most_recent() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path();
+        let inbox = project.join("instructions_inbox.md");
+
+        let mut contents = String::from("# test — Instructions Inbox\n");
+        // 5 entries of varying sizes (each ~500 bytes of body)
+        for i in 1..=5 {
+            let body = format!("entry-{i}-").repeat(50);
+            write_entry(&mut contents, &format!("2026-04-08 10:0{i}"), &body, "pending");
+        }
+        fs::write(&inbox, &contents).unwrap();
+        let original_len = contents.len();
+
+        // Pick a limit that fits roughly 2 entries + header/marker
+        let limit = 2000;
+        assert!(original_len > limit, "setup: original should exceed limit");
+
+        let changed = truncate_inbox_if_large(project, limit).unwrap();
+        assert!(changed, "expected truncation to occur");
+
+        let new_contents = fs::read_to_string(&inbox).unwrap();
+        assert!(new_contents.len() <= limit + 200, "truncated output should be near limit");
+        assert!(new_contents.contains("<!-- truncated "), "marker missing");
+        assert!(new_contents.contains("kept "), "marker missing kept count");
+        assert!(new_contents.contains("of 5 entries"), "marker should show original total");
+        // Most recent entry (entry-5) must survive; oldest (entry-1) should be gone.
+        assert!(new_contents.contains("entry-5-"), "newest entry should be kept");
+        assert!(!new_contents.contains("entry-1-"), "oldest entry should be dropped");
+        assert!(new_contents.starts_with("# "), "header missing");
+        assert!(new_contents.contains("— Instructions Inbox"), "header missing inbox label");
+    }
+
+    #[test]
+    fn test_trim_completed_removes_finished() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path();
+        let inbox = project.join("instructions_inbox.md");
+
+        let mut contents = String::from("# test — Instructions Inbox\n");
+        write_entry(&mut contents, "2026-04-08 10:01", "pending-work body", "pending");
+        write_entry(&mut contents, "2026-04-08 10:02", "complete-work body", "complete");
+        write_entry(&mut contents, "2026-04-08 10:03", "done-work body", "done");
+        fs::write(&inbox, &contents).unwrap();
+
+        let removed = trim_completed_entries(project).unwrap();
+        assert_eq!(removed, 2, "should remove both complete and done entries");
+
+        let new_contents = fs::read_to_string(&inbox).unwrap();
+        assert!(new_contents.contains("pending-work body"), "pending entry should remain");
+        assert!(!new_contents.contains("complete-work body"), "complete entry should be gone");
+        assert!(!new_contents.contains("done-work body"), "done entry should be gone");
+        assert!(new_contents.contains("# test — Instructions Inbox"), "preamble should remain");
+    }
+
+    #[test]
+    fn test_inbox_lifecycle_handles_missing_file() {
+        let tmp = TempDir::new().unwrap();
+        let project = tmp.path();
+        assert!(!project.join("instructions_inbox.md").exists());
+
+        let truncated = truncate_inbox_if_large(project, 1024).unwrap();
+        assert!(!truncated, "missing file should yield Ok(false)");
+
+        let trimmed = trim_completed_entries(project).unwrap();
+        assert_eq!(trimmed, 0, "missing file should yield Ok(0)");
     }
 
     #[test]

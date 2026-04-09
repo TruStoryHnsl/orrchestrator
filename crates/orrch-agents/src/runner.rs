@@ -297,11 +297,13 @@ mod tests {
                     id: "pm".into(),
                     agent_profile: "Project Manager".into(),
                     user_facing: true,
+                    nested_workforce: None,
                 },
                 AgentNode {
                     id: "dev".into(),
                     agent_profile: "Developer".into(),
                     user_facing: false,
+                    nested_workforce: None,
                 },
             ],
             connections: vec![Connection {
