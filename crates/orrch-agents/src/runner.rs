@@ -372,6 +372,241 @@ pub fn is_verification_role(role_name: &str) -> bool {
         || lower.contains("quality assurance")
 }
 
+// ─── Task 32: Mentor auto-assignment ─────────────────────────────────────────
+//
+// `mentor_review_profile` scans an agent profile's prompt body for topic
+// keywords, then returns a formatted markdown "references" block listing the
+// most likely-relevant skills and tools from the library. This is the content
+// the Mentor injects into the agent's prompt via
+// `AgentProfile::as_preamble_with_library()` so the agent sees suggestions for
+// which skills/tools to consult for its task.
+//
+// Matching is intentionally simple keyword intersection (no LLM): both the
+// profile text and the item filename/name are lowercased, split into word-like
+// tokens, and we emit any library item whose tokens intersect the profile's
+// "topic keywords". Topic keywords are a curated subset of common domain terms
+// (test, commit, release, review, debug, ...) plus any word from the profile's
+// role/department fields.
+
+/// Format a "References" block listing library skills and tools the Mentor
+/// believes are relevant to the given agent profile.
+///
+/// `library_skills` and `library_tools` are `(display_name, path)` tuples as
+/// produced by the TUI's `scan_md_dir` helper. Returns an empty string if no
+/// items match — callers can pass the result directly to
+/// [`crate::profile::AgentProfile::as_preamble_with_library`].
+pub fn mentor_review_profile(
+    profile: &crate::profile::AgentProfile,
+    library_skills: &[(String, std::path::PathBuf)],
+    library_tools: &[(String, std::path::PathBuf)],
+) -> String {
+    let topics = extract_profile_topics(profile);
+    if topics.is_empty() {
+        return String::new();
+    }
+
+    let skills_hits: Vec<&(String, std::path::PathBuf)> = library_skills
+        .iter()
+        .filter(|(name, path)| item_matches_topics(name, path, &topics))
+        .collect();
+    let tools_hits: Vec<&(String, std::path::PathBuf)> = library_tools
+        .iter()
+        .filter(|(name, path)| item_matches_topics(name, path, &topics))
+        .collect();
+
+    if skills_hits.is_empty() && tools_hits.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("## Mentor-Suggested Library References\n\n");
+    out.push_str(
+        "Based on this agent's role and profile, the following library items look relevant. \
+         Consider loading them (via the Read tool) before you start work:\n\n",
+    );
+
+    if !skills_hits.is_empty() {
+        out.push_str("**Skills:**\n");
+        for (name, path) in skills_hits {
+            out.push_str(&format!("- `{}` — {}\n", name, path.display()));
+        }
+        out.push('\n');
+    }
+    if !tools_hits.is_empty() {
+        out.push_str("**Tools:**\n");
+        for (name, path) in tools_hits {
+            out.push_str(&format!("- `{}` — {}\n", name, path.display()));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Curated set of domain topic keywords. If any of these show up in the
+/// agent's profile body, library items whose name/path contain them become
+/// candidates.
+const MENTOR_TOPIC_KEYWORDS: &[&str] = &[
+    "test", "commit", "release", "review", "debug", "deploy", "build",
+    "branch", "pr", "pull request", "scope", "plan", "develop", "feature",
+    "instruction", "intake", "audit", "security", "penetration", "research",
+    "beta", "pm", "engineer", "developer", "tester", "coo", "ux", "ui",
+    "mentor", "repo", "repository", "interpret", "compress", "route",
+    "cluster", "workflow",
+];
+
+fn extract_profile_topics(profile: &crate::profile::AgentProfile) -> Vec<String> {
+    let mut topics: Vec<String> = Vec::new();
+
+    // Role / department / name contribute directly as tokens.
+    for field in [&profile.role, &profile.department, &profile.name] {
+        for word in tokenize(field) {
+            if !topics.contains(&word) {
+                topics.push(word);
+            }
+        }
+    }
+
+    // Scan the profile body for curated topic keywords.
+    let body_lower = profile.prompt.to_lowercase();
+    for kw in MENTOR_TOPIC_KEYWORDS {
+        if body_lower.contains(kw) && !topics.iter().any(|t| t == kw) {
+            topics.push((*kw).to_string());
+        }
+    }
+
+    // Drop trivially short tokens that would produce noise.
+    topics.retain(|t| t.len() >= 3);
+    topics
+}
+
+fn tokenize(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn item_matches_topics(
+    name: &str,
+    path: &std::path::Path,
+    topics: &[String],
+) -> bool {
+    let hay = format!(
+        "{} {}",
+        name.to_lowercase(),
+        path.to_string_lossy().to_lowercase()
+    );
+    topics.iter().any(|t| hay.contains(t.as_str()))
+}
+
+// ─── Task 58: Mentor resource updates (Researcher dispatch scaffolding) ──────
+
+/// Kind of library resource the Mentor can ask a Researcher to refresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    Model,
+    Harness,
+}
+
+impl ResourceKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Harness => "harness",
+        }
+    }
+}
+
+/// A Mentor-originated request for the Researcher to investigate changes to a
+/// specific library resource.
+#[derive(Debug, Clone)]
+pub struct ResourceUpdateRequest {
+    pub kind: ResourceKind,
+    pub target_name: String,
+    /// ISO 8601 date/time the resource was last verified. `None` means it
+    /// has never been checked.
+    pub last_checked: Option<String>,
+    pub note: Option<String>,
+}
+
+impl ResourceUpdateRequest {
+    pub fn new(kind: ResourceKind, target_name: impl Into<String>) -> Self {
+        Self {
+            kind,
+            target_name: target_name.into(),
+            last_checked: None,
+            note: None,
+        }
+    }
+
+    pub fn with_last_checked(mut self, ts: impl Into<String>) -> Self {
+        self.last_checked = Some(ts.into());
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+}
+
+/// Build the Researcher-facing task prompt that asks for a structured diff on
+/// the given resource. The output is a self-contained task string — pass it to
+/// [`AgentRunner::build_prompt`] with a Researcher `AgentProfile` to produce
+/// the full prompt for the session.
+pub fn build_researcher_resource_prompt(request: &ResourceUpdateRequest) -> String {
+    let since = request
+        .last_checked
+        .as_deref()
+        .unwrap_or("(never — initial catalog pass)");
+    let note_line = request
+        .note
+        .as_deref()
+        .map(|n| format!("\nMentor note: {}\n", n))
+        .unwrap_or_default();
+
+    format!(
+        "Investigate changes to the {kind} **{name}** since {since}.\n\
+        {note}\n\
+        Check for and report on:\n\
+        \n\
+        1. **Pricing changes** — input/output rates, subscription tiers, free-tier limits.\n\
+        2. **API endpoint changes** — base URL, auth scheme, breaking request/response shape changes.\n\
+        3. **Capability changes** — new features (e.g., tool use, structured output, vision, context-window bumps).\n\
+        4. **Deprecations** — model IDs or flags that are being retired, with end-of-life dates.\n\
+        5. **Availability / rate limits** — regional availability, new per-minute / per-day caps.\n\
+        \n\
+        Return your findings as a structured markdown diff with the following shape:\n\
+        \n\
+        ```\n\
+        ## {name} — Update Report\n\
+        Date: <today>\n\
+        \n\
+        ### Changed\n\
+        - <field>: <old> -> <new>\n\
+        \n\
+        ### Added\n\
+        - <new capability or field>\n\
+        \n\
+        ### Deprecated\n\
+        - <field> (EOL: <date>)\n\
+        \n\
+        ### Unchanged\n\
+        - <summary>\n\
+        ```\n\
+        \n\
+        If nothing has changed, still return the block with all sections empty\n\
+        except `Unchanged`. Do not speculate — only report facts you can back\n\
+        with primary sources (official docs, provider changelog, release notes).",
+        kind = request.kind.label(),
+        name = request.target_name,
+        since = since,
+        note = note_line,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,6 +731,127 @@ mod tests {
         assert!(is_verification_role("Penetration Tester"));
         assert!(!is_verification_role("Developer"));
         assert!(!is_verification_role("Project Manager"));
+    }
+
+    // ── Task 32: mentor_review_profile ──────────────────────────────────
+
+    fn tester_profile() -> crate::profile::AgentProfile {
+        crate::profile::AgentProfile {
+            name: "Feature Tester".into(),
+            department: "development".into(),
+            role: "QA / Testing".into(),
+            description: "Runs cargo test and validates behavior".into(),
+            prompt: "You are the Feature Tester. You run tests and review failures.".into(),
+            path: std::path::PathBuf::from("agents/feature_tester.md"),
+        }
+    }
+
+    fn empty_profile() -> crate::profile::AgentProfile {
+        crate::profile::AgentProfile {
+            name: "Zzz".into(),
+            department: "".into(),
+            role: "".into(),
+            description: "".into(),
+            // Body uses words that are NOT in MENTOR_TOPIC_KEYWORDS.
+            prompt: "Do abstract zzzz things. Consider xyzqplk carefully.".into(),
+            path: std::path::PathBuf::from("agents/zzz.md"),
+        }
+    }
+
+    #[test]
+    fn test_mentor_review_profile_matches_test_topics() {
+        let profile = tester_profile();
+        let skills = vec![
+            ("agent-feature-tester".to_string(), std::path::PathBuf::from("library/skills/agent-feature-tester.md")),
+            ("agent-pm".to_string(),             std::path::PathBuf::from("library/skills/agent-pm.md")),
+            ("release".to_string(),              std::path::PathBuf::from("library/skills/release.md")),
+        ];
+        let tools = vec![
+            ("workflow_status.sh".to_string(), std::path::PathBuf::from("library/tools/workflow_status.sh")),
+            ("route_instructions.sh".to_string(), std::path::PathBuf::from("library/tools/route_instructions.sh")),
+        ];
+
+        let block = mentor_review_profile(&profile, &skills, &tools);
+        assert!(!block.is_empty(), "tester profile should produce a non-empty references block");
+        assert!(block.contains("Mentor-Suggested Library References"));
+        assert!(block.contains("Skills"));
+        // agent-feature-tester matches "tester" / "feature" / "test"
+        assert!(block.contains("agent-feature-tester"));
+    }
+
+    #[test]
+    fn test_mentor_review_profile_no_matches_returns_empty() {
+        let profile = empty_profile();
+        let skills = vec![
+            ("unrelated-item-xyz".to_string(), std::path::PathBuf::from("library/skills/unrelated-item-xyz.md")),
+        ];
+        let tools: Vec<(String, std::path::PathBuf)> = vec![];
+
+        let block = mentor_review_profile(&profile, &skills, &tools);
+        assert!(
+            block.is_empty(),
+            "profile with no matching topics should yield an empty block, got: {:?}",
+            block
+        );
+    }
+
+    #[test]
+    fn test_as_preamble_with_library_empty_is_same_as_preamble() {
+        let agent = test_agent();
+        let a = agent.as_preamble("do the thing");
+        let b = agent.as_preamble_with_library("do the thing", "");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_as_preamble_with_library_inserts_block() {
+        let agent = test_agent();
+        let block = "## Mentor-Suggested Library References\n\n- foo\n";
+        let p = agent.as_preamble_with_library("do the thing", block);
+        assert!(p.contains("You are the Developer"));
+        assert!(p.contains("Mentor-Suggested Library References"));
+        assert!(p.contains("## Your Task"));
+        assert!(p.contains("do the thing"));
+        // Ordering: profile body, then references, then task
+        let profile_idx = p.find("You are the Developer").unwrap();
+        let refs_idx = p.find("Mentor-Suggested Library References").unwrap();
+        let task_idx = p.find("## Your Task").unwrap();
+        assert!(profile_idx < refs_idx);
+        assert!(refs_idx < task_idx);
+    }
+
+    // ── Task 58: ResourceUpdateRequest + build_researcher_resource_prompt ──
+
+    #[test]
+    fn test_resource_update_request_builder() {
+        let req = ResourceUpdateRequest::new(ResourceKind::Model, "Claude Opus 4.6")
+            .with_last_checked("2026-01-15")
+            .with_note("pricing may be stale");
+        assert_eq!(req.kind, ResourceKind::Model);
+        assert_eq!(req.target_name, "Claude Opus 4.6");
+        assert_eq!(req.last_checked.as_deref(), Some("2026-01-15"));
+        assert_eq!(req.note.as_deref(), Some("pricing may be stale"));
+    }
+
+    #[test]
+    fn test_build_researcher_resource_prompt_mentions_since_and_target() {
+        let req = ResourceUpdateRequest::new(ResourceKind::Harness, "Codex CLI")
+            .with_last_checked("2025-12-01");
+        let prompt = build_researcher_resource_prompt(&req);
+        assert!(prompt.contains("Codex CLI"));
+        assert!(prompt.contains("harness"));
+        assert!(prompt.contains("2025-12-01"));
+        assert!(prompt.contains("Pricing"));
+        assert!(prompt.contains("Deprecations"));
+        assert!(prompt.contains("Update Report"));
+    }
+
+    #[test]
+    fn test_build_researcher_resource_prompt_never_checked() {
+        let req = ResourceUpdateRequest::new(ResourceKind::Model, "Mistral Large");
+        let prompt = build_researcher_resource_prompt(&req);
+        assert!(prompt.contains("never"));
+        assert!(prompt.contains("Mistral Large"));
     }
 
     #[test]
