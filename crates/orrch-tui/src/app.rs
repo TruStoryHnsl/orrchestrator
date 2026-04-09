@@ -576,6 +576,12 @@ pub struct App {
     pub add_mcp_args: String,       // space-separated args (stdio only)
     pub add_mcp_roles: String,      // comma-separated role names
     pub add_mcp_field: usize,       // 0=name, 1=desc, 2=transport, 3=command/url, 4=args, 5=roles
+
+    /// Live `orrch-webedit` HTTP server, started on demand from the
+    /// Design > Workforce tab via Ctrl+w (PLAN item 37). When `Some`, the
+    /// server is running on the contained handle's `addr()`. Dropping `App`
+    /// drops the handle which signals the worker thread to stop and joins it.
+    pub webedit_server: Option<orrch_webedit::ServerHandle>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -759,6 +765,8 @@ impl App {
             add_mcp_args: String::new(),
             add_mcp_roles: String::new(),
             add_mcp_field: 0,
+
+            webedit_server: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1115,6 +1123,54 @@ impl App {
         self.last_notification = Some((msg, std::time::Instant::now()));
     }
 
+    /// Launch the local web node editor (PLAN item 37).
+    ///
+    /// Resolves a workforces directory (prefers
+    /// `<projects_dir>/orrchestrator/workforces` if it exists, else CWD), spins
+    /// up `orrch_webedit::launch_webedit_server` on an ephemeral port, stores
+    /// the handle on `self.webedit_server`, and tries to open the URL in the
+    /// system default browser via `xdg-open`. Idempotent — if a server is
+    /// already running it just re-notifies the URL.
+    ///
+    /// Wired to Ctrl+w in the Design > Workforce panel.
+    pub fn launch_webedit(&mut self) {
+        if let Some(handle) = &self.webedit_server {
+            let url = handle.url();
+            self.notify(format!("web editor already running at {url}"));
+            return;
+        }
+
+        // Prefer the orrchestrator project's workforces dir, else fall back
+        // to CWD/workforces. The server tolerates a missing directory and
+        // will surface the empty list to the browser.
+        let preferred = self.projects_dir.join("orrchestrator").join("workforces");
+        let dir = if preferred.exists() {
+            preferred
+        } else {
+            std::env::current_dir()
+                .map(|p| p.join("workforces"))
+                .unwrap_or_else(|_| PathBuf::from("workforces"))
+        };
+
+        match orrch_webedit::launch_webedit_server(dir.clone(), 0) {
+            Ok(handle) => {
+                let url = handle.url();
+                // Best-effort: open in default browser. Failure is fine —
+                // the user still sees the URL in the notification.
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&url)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                self.notify(format!("web editor running at {url} ({})", dir.display()));
+                self.webedit_server = Some(handle);
+            }
+            Err(e) => {
+                self.notify(format!("web editor failed to start: {e}"));
+            }
+        }
+    }
+
     /// Initialize browser at a project root.
     pub fn browser_open(&mut self, root: &Path) {
         self.browser_root = root.to_path_buf();
@@ -1432,6 +1488,20 @@ impl App {
             self.intake_review = None;
             self.intake_review_scroll_raw = 0;
             self.intake_review_scroll_opt = 0;
+            return Ok(());
+        }
+
+        // Ctrl+w in Design > Workforce: launch the local web node editor
+        // (PLAN item 37). Idempotent — re-pressing while running re-shows
+        // the URL. Handled here so it works at any focus depth within the
+        // Workforce panel.
+        if modifiers.contains(KeyModifiers::CONTROL)
+            && code == KeyCode::Char('w')
+            && self.panel == Panel::Design
+            && self.design_sub == DesignSub::Workforce
+            && self.sub == SubView::List
+        {
+            self.launch_webedit();
             return Ok(());
         }
 
@@ -5152,5 +5222,25 @@ mod app_tests {
         let h = ai_assistance_header("Agent");
         assert!(h.trim_start().starts_with("<!--"));
         assert!(h.trim_end().ends_with("-->"));
+    }
+
+    /// Smoke test for the orrch_webedit re-export wiring (PLAN item 37).
+    /// Doesn't construct a full `App` (which would scan the projects dir on
+    /// disk and is slow/flaky in CI). Instead it exercises the re-exported
+    /// `launch_webedit_server` to confirm:
+    ///   1. the symbol is reachable through `crate::launch_webedit_server`,
+    ///   2. the returned handle exposes a `127.0.0.1:` URL,
+    ///   3. dropping the handle cleanly stops the server thread.
+    #[test]
+    fn launch_webedit_server_reexport_starts_server() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let handle =
+            crate::launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
+        let url = handle.url();
+        assert!(
+            url.starts_with("http://127.0.0.1:"),
+            "expected localhost URL, got {url}"
+        );
+        // Drop happens at end of scope; the server thread will join cleanly.
     }
 }

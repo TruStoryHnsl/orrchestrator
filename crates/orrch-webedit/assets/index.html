@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>orrchestrator — workforce node editor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>orrchestrator</h1>
+      <span class="sub">workforce node editor</span>
+    </div>
+    <div id="toolbar">
+      <label for="workforce-select">Workforce:</label>
+      <select id="workforce-select"></select>
+      <button id="reload-btn" title="Reload from disk">Reload</button>
+      <button id="save-btn" title="Save the current workforce to disk">Save</button>
+      <button id="add-node-btn" title="Add a new agent node">+ Node</button>
+      <span id="status" aria-live="polite"></span>
+    </div>
+  </header>
+  <main>
+    <aside id="inspector">
+      <h2>Inspector</h2>
+      <div id="inspector-body">
+        <p class="muted">Click a node to edit it.</p>
+      </div>
+    </aside>
+    <canvas id="editor" width="1400" height="800"></canvas>
+  </main>
+  <footer>
+    <span class="muted">
+      Drag nodes to reposition. Shift+click a node then click another to draw a connection.
+      Right-click a node to delete it.
+    </span>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>

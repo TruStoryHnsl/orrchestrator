@@ -38,21 +38,30 @@ async fn main() -> Result<()> {
 
     // --- CLI arg handling ---
     //
-    // Minimal hand-rolled arg parser (no clap) — we only have one flag today.
-    // `--egui` launches the native egui window scaffold (PLAN items 38/39)
-    // INSTEAD of the TUI. When the `egui-window` feature is disabled this
-    // returns a clear error.
+    // Minimal hand-rolled arg parser (no clap).
+    //
+    // Non-TUI entry points (PLAN items 37 / 39):
+    //   --egui     — launch the native egui window scaffold (feature-gated)
+    //   --webedit  — launch the local HTTP web node editor (PLAN item 37)
+    //
+    // Both modes are alternatives to the default TUI and deliberately avoid
+    // the terminal-capability check below so terminal-averse users can run
+    // orrchestrator as a windowed / browser-based app.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--egui") {
         return orrch_tui::launch_egui_window();
+    }
+    if args.iter().any(|a| a == "--webedit") {
+        return run_webedit().await;
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("orrchestrator — AI development pipeline hypervisor");
         println!();
         println!("USAGE:");
-        println!("  orrchestrator          Launch the TUI (default)");
-        println!("  orrchestrator --egui   Launch the native egui window (feature-gated)");
-        println!("  orrchestrator --help   Show this help");
+        println!("  orrchestrator            Launch the TUI (default)");
+        println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
+        println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
+        println!("  orrchestrator --help     Show this help");
         return Ok(());
     }
 
@@ -106,6 +115,49 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     }
     result
+}
+
+/// Resolve the workforces directory for the web editor.
+///
+/// Mirrors the heuristic used by the egui window: prefer
+/// `$ORRCH_WORKFORCES_DIR` if set, else `./workforces` relative to the
+/// current working directory. The directory does not need to exist —
+/// `orrch_webedit` will surface an empty list gracefully.
+fn webedit_workforces_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("ORRCH_WORKFORCES_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    std::env::current_dir()
+        .map(|p| p.join("workforces"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("workforces"))
+}
+
+/// `--webedit` entry point (PLAN item 37).
+///
+/// Launches the `orrch_webedit` HTTP server on an ephemeral port, prints
+/// the URL to stdout, and blocks on Ctrl-C. Dropping the `ServerHandle`
+/// at the end of the function signals the worker thread to stop and
+/// joins it, giving a clean shutdown on the way out.
+///
+/// Unlike the TUI entry point, this function does NOT require a real
+/// terminal — it is designed for headless / browser-only usage.
+async fn run_webedit() -> Result<()> {
+    let dir = webedit_workforces_dir();
+    let handle = orrch_webedit::launch_webedit_server(dir.clone(), 0)
+        .with_context(|| format!("launching webedit server on {}", dir.display()))?;
+
+    println!("orrchestrator web editor");
+    println!("  workforces dir: {}", dir.display());
+    println!("  open {}", handle.url());
+    println!("  press Ctrl-C to stop");
+
+    // Park until Ctrl-C. `tokio::signal::ctrl_c` resolves once the signal
+    // handler fires; the ServerHandle is dropped on return which stops the
+    // worker thread.
+    let _ = tokio::signal::ctrl_c().await;
+    println!("shutting down web editor…");
+    handle.shutdown();
+    Ok(())
 }
 
 async fn run_loop(

@@ -1,0 +1,16 @@
+[package]
+name = "orrch-webedit"
+description = "Local HTTP server serving a drag-and-drop workforce node editor (PLAN item 37)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orrch-workforce = { path = "../orrch-workforce" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tiny_http = "0.12"
+
+[dev-dependencies]
+tempfile = "3"

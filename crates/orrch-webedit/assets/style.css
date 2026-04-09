@@ -1,0 +1,156 @@
+/* orrchestrator web node editor — dark minimalist theme. */
+
+:root {
+  --bg: #0f0f0f;
+  --bg-panel: #1a1a1a;
+  --bg-input: #242424;
+  --fg: #e0e0e0;
+  --fg-muted: #888;
+  --accent: #7fb3d5;
+  --accent-strong: #a8d0e6;
+  --border: #2d2d2d;
+  --node: #2a3f55;
+  --node-selected: #3c5a7e;
+  --node-user-facing: #5a7f3f;
+  --edge: #7fb3d5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.brand h1 {
+  font-size: 15px;
+  margin: 0;
+  color: var(--accent-strong);
+  letter-spacing: 0.5px;
+}
+
+.brand .sub {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-left: 8px;
+}
+
+#toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+}
+
+#toolbar label {
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+button, select, input[type="text"] {
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover, select:hover {
+  border-color: var(--accent);
+}
+
+button:active {
+  background: var(--border);
+}
+
+#status {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 11px;
+  padding-right: 8px;
+}
+
+main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+#inspector {
+  width: 280px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+#inspector h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  letter-spacing: 1px;
+  margin: 0 0 12px;
+}
+
+#inspector .field {
+  margin-bottom: 10px;
+}
+
+#inspector .field label {
+  display: block;
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-bottom: 3px;
+}
+
+#inspector .field input,
+#inspector .field select {
+  width: 100%;
+}
+
+#inspector .muted {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+canvas {
+  flex: 1;
+  background: #0a0a0a;
+  cursor: default;
+  display: block;
+}
+
+footer {
+  padding: 6px 16px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
