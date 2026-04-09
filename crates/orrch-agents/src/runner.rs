@@ -342,6 +342,26 @@ fn strip_thinking_blocks(text: &str) -> String {
     out
 }
 
+/// Task AP: load a project's core context file by filename, relative to the
+/// project root. Accepts any profile filename — typically `CLAUDE.md`,
+/// `GEMINI.md`, or a custom per-project profile — and reads its contents.
+///
+/// Returns `None` when the file is missing or unreadable. Callers that need a
+/// hard default should pair this with `Project::agent_profile_filename()` in
+/// orrch-core, which returns `"CLAUDE.md"` when the project has no explicit
+/// profile set.
+///
+/// This helper deliberately takes a plain `&str` filename instead of importing
+/// `orrch_core::Project`, so `orrch-agents` does not need to depend on
+/// `orrch-core`.
+pub fn load_project_core_context(
+    project_root: &Path,
+    profile_filename: &str,
+) -> Option<String> {
+    let path = project_root.join(profile_filename);
+    std::fs::read_to_string(path).ok()
+}
+
 /// Determines if an agent role requires context isolation (verification agents).
 pub fn is_verification_role(role_name: &str) -> bool {
     let lower = role_name.to_lowercase();
