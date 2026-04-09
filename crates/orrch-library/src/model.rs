@@ -155,6 +155,12 @@ pub struct ModelEntry {
     pub max_context: Option<u64>,
     pub api_key_env: Option<String>,
     pub notes: String,
+    /// ISO 8601 date/time of the last Mentor-triggered refresh of this entry.
+    /// Populated from the YAML frontmatter field `last_checked`; `None` means
+    /// the entry has never been verified (the Syntax Translation / Resource
+    /// Update loop — PLAN item 58 — uses this to decide freshness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked: Option<String>,
     #[serde(skip)]
     pub path: PathBuf,
 }
@@ -553,6 +559,7 @@ fn parse_model_file(path: &Path) -> Option<ModelEntry> {
         max_context: extract(&fm, "max_context").and_then(|s| s.replace(['k', 'K'], "000").parse().ok()),
         api_key_env: extract(&fm, "api_key_env"),
         notes: body.trim().to_string(),
+        last_checked: extract(&fm, "last_checked"),
         path: path.to_path_buf(),
     })
 }
