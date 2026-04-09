@@ -1,5 +1,40 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-08 — Item 36 (Workforce import/export)
+
+### Completed
+- **36. Workforce import/export** — Added the serializer side of the workforce markdown format so workforce designs can round-trip to disk and back. Three-cluster sequential implementation:
+  - **Cluster 1** (`crates/orrch-workforce/src/parser.rs`, `lib.rs`): `pub fn serialize_workforce_markdown(&Workforce) -> String` emits frontmatter (name/description/operations) + `## Agents` and `## Connections` pipe tables structurally identical to what `parse_workforce_markdown` consumes. Helper `data_flow_token(&DataFlow) -> &'static str` mirrors `parse_data_flow` across all 5 variants (Instructions/Deliverable/Report/Research/Message). Empty `operations` vec emits `operations: []` to avoid an unterminated list in frontmatter. Uses `std::fmt::Write`. Re-exported from `lib.rs`.
+  - **Cluster 2** (`crates/orrch-workforce/src/engine.rs`): `pub fn export_workforce_to_path(&Workforce, &Path) -> io::Result<()>` and `pub fn import_workforce_from_path(&Path) -> io::Result<Workforce>`. Signatures use `std::io::Result` (no `anyhow` dep in this crate). Export overwrites via `fs::write`. Import maps parser `None` → `io::Error::new(InvalidData, ...)` with path context; file-not-found and permission errors also wrapped with path.
+  - **Cluster 3** (`crates/orrch-tui/src/app.rs`, `ui.rs`): `x` key in Design > Workforce > Workflows tab exports the selected workforce to `~/Downloads/<sanitized_name>.md` (sanitizer: spaces → `_`, filter to ASCII alnum/`-`/`_`, fallback "workforce"). Uses existing `self.notify()` toast for success/failure. Creates `~/Downloads` if missing via `create_dir_all`. `i` key reads `~/Downloads/import.md` (Option B — hardcoded path, no file picker, private-scope-appropriate), parses, and pushes into both `workforce_files` (sorted) and `loaded_workforces` so it renders immediately. Full `orrch_workforce::engine::` path used (functions not re-exported from workforce `lib.rs`). Help line in `ui.rs` updated with `x=export i=import` on the Workflows tab title. HOME via `std::env::var("HOME")` with `/home/corr` fallback, no new deps.
+
+### Verification
+- **Tester A** (workforce crate, independent): PASS. `cargo build -p orrch-workforce` zero warnings. `cargo test -p orrch-workforce` 17/17 (3 new round-trip tests + 2 error-path tests). Inspected parser.rs:186-194 (all 5 DataFlow variants covered), parser.rs:201-244 (serializer emits correct structure), engine.rs:178-189 (export), engine.rs:197-215 (import). Tests use `env::temp_dir + pid + nanos` → parallel-safe. Spot-checked `workforces/personal_tech_support.md`: layout matches serializer output.
+- **Tester B** (TUI integration, independent): PASS. `cargo build` (full workspace, debug) exits 0. 11 pre-existing warnings, zero new. Key handlers gated on `workforce_tab == WorkforceTab::Workflows` at app.rs:1787 and 1818. No `x`/`i` conflicts — other bindings are in `key_ideas`/`key_projects`/`key_inside_project`/`key_detail_sessions`/`key_sessions_tab`, all separate panels. Help line at ui.rs:398 conditional on Workflows tab.
+- **PM verdict** (hypervisor inline): PASS. Both testers unanimous. Issues flagged are minor, non-blocking under private scope: (a) serializer doesn't escape `|`/newlines inside fields (not exercised by current workforce files), (b) pre-existing parser fragility at parser.rs:130 (substring match on "ID"/"From" — not introduced by this diff), (c) import path hardcoded (documented as Option B), (d) `wf_selected` may drift after import+sort (non-panic), (e) `create_dir_all` errors silently ignored but subsequent `export_workforce_to_path` surfaces the real failure. None block ship.
+
+### Known follow-ups (non-blocking)
+- Import path is a hardcoded `~/Downloads/import.md` (no file picker). Upgrade to a text-input SubView later when a richer flow is needed.
+- `.md` extension is not forced by engine-layer export; the TUI sanitizer appends `.md`, so in practice every file lands correctly.
+- Serializer field escaping (`|`, newlines) unneeded today but worth adding when a workforce name/description legitimately contains those characters.
+- Minor cursor drift on `wf_selected` after import+sort — cosmetic only.
+
+### Files Changed
+- `crates/orrch-workforce/src/parser.rs` — `serialize_workforce_markdown`, `data_flow_token`, 2 round-trip tests
+- `crates/orrch-workforce/src/lib.rs` — re-export of serializer
+- `crates/orrch-workforce/src/engine.rs` — `export_workforce_to_path`, `import_workforce_from_path`, 3 tests (round-trip + 2 error paths)
+- `crates/orrch-tui/src/app.rs` — `x`/`i` key handlers at key_design_workforce:1787-1833, sanitizer, create_dir_all, notify integration
+- `crates/orrch-tui/src/ui.rs` — Workflows tab help line at 398
+- `PLAN.md` — item #36 flipped to `[x]` with implementation note
+
+### Workflow
+- Executed `develop_feature` MCP dispatch loop end-to-end
+- 1 PM planning agent (chose item #36 from 21 unchecked) → 3 clusters in sequential waves (T1 serializer → T2 file I/O → T3 TUI keybinds, dependency chain) → 2 independent verifier subagents in parallel (both PASS) → inline PM evaluation → SHIP
+- Zero rework cycles (cap is 3)
+- Token efficiency: each cluster was a self-contained subagent spawn, main context never loaded the full 4921-line `app.rs` or the workforce crate source
+
+---
+
 ## Dev Session: 2026-04-09 — Instruction Inbox Migration (fb2p.md → instructions_inbox.md)
 
 ### Completed

@@ -1783,6 +1783,54 @@ impl App {
                     });
                 }
             }
+            // Task 3: export currently selected workforce to ~/Downloads/<name>.md
+            KeyCode::Char('x') if self.workforce_tab == WorkforceTab::Workflows => {
+                let items = self.wf_items_for_tab();
+                let Some((name, path)) = items.get(self.wf_selected).cloned() else {
+                    self.notify("No workforce selected".into());
+                    return Ok(());
+                };
+                // Parse the selected file into a Workforce (round-trip for clean serialization)
+                match orrch_workforce::engine::import_workforce_from_path(&path) {
+                    Ok(wf) => {
+                        // Sanitize name: spaces -> _, keep alnum/dash/underscore
+                        let sanitized: String = name
+                            .chars()
+                            .map(|c| if c == ' ' { '_' } else { c })
+                            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                            .collect();
+                        let filename = if sanitized.is_empty() { "workforce".to_string() } else { sanitized };
+                        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
+                        let out_path = PathBuf::from(home).join("Downloads").join(format!("{filename}.md"));
+                        // Ensure parent dir exists
+                        if let Some(parent) = out_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        match orrch_workforce::engine::export_workforce_to_path(&wf, &out_path) {
+                            Ok(()) => self.notify(format!("Exported to {}", out_path.display())),
+                            Err(e) => self.notify(format!("Export failed: {e}")),
+                        }
+                    }
+                    Err(e) => self.notify(format!("Export failed: {e}")),
+                }
+            }
+            // Task 3: import workforce from ~/Downloads/import.md into the in-memory list
+            KeyCode::Char('i') if self.workforce_tab == WorkforceTab::Workflows => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
+                let in_path = PathBuf::from(home).join("Downloads").join("import.md");
+                match orrch_workforce::engine::import_workforce_from_path(&in_path) {
+                    Ok(wf) => {
+                        let wf_name = wf.name.clone();
+                        // Add to in-memory lists so it renders in the Workflows tab.
+                        // workforce_files drives the tab list; loaded_workforces is the parsed cache.
+                        self.workforce_files.push((wf_name.clone(), in_path.clone()));
+                        self.workforce_files.sort_by(|a, b| a.0.cmp(&b.0));
+                        self.loaded_workforces.push(wf);
+                        self.notify(format!("Imported {wf_name}"));
+                    }
+                    Err(e) => self.notify(format!("Import failed: {e}")),
+                }
+            }
             _ => {}
         }
         Ok(())
