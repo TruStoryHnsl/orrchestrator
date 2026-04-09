@@ -144,11 +144,22 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
                     let id = parts[0].to_string();
                     let agent_profile = parts[1].to_string();
                     let user_facing = parts[2].to_lowercase() == "yes";
+                    let nested_workforce = if parts.len() >= 4 {
+                        let v = parts[3].trim();
+                        if v.is_empty() || v == "-" {
+                            None
+                        } else {
+                            Some(v.to_string())
+                        }
+                    } else {
+                        None
+                    };
                     if !id.is_empty() {
                         agents.push(AgentNode {
                             id,
                             agent_profile,
                             user_facing,
+                            nested_workforce,
                         });
                     }
                 }
@@ -218,11 +229,16 @@ pub fn serialize_workforce_markdown(wf: &Workforce) -> String {
 
     // Agents table
     out.push_str("## Agents\n\n");
-    out.push_str("| ID | Agent Profile | User-Facing |\n");
-    out.push_str("|----|---------------|-------------|\n");
+    out.push_str("| ID | Agent Profile | User-Facing | Nested Workforce |\n");
+    out.push_str("|---|---|---|---|\n");
     for agent in &wf.agents {
         let uf = if agent.user_facing { "yes" } else { "no" };
-        let _ = writeln!(out, "| {} | {} | {} |", agent.id, agent.agent_profile, uf);
+        let nested = agent.nested_workforce.as_deref().unwrap_or("-");
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            agent.id, agent.agent_profile, uf, nested
+        );
     }
     out.push('\n');
 
@@ -578,5 +594,74 @@ operations:
         assert!(parsed.agents.is_empty());
         assert!(parsed.connections.is_empty());
         assert!(parsed.operations.is_empty());
+    }
+
+    #[test]
+    fn test_nested_workforce_roundtrip() {
+        let wf = Workforce {
+            name: "Nested Test".into(),
+            description: "Tests nested workforce field".into(),
+            agents: vec![
+                AgentNode {
+                    id: "pm".into(),
+                    agent_profile: "Project Manager".into(),
+                    user_facing: true,
+                    nested_workforce: Some("inner_team".into()),
+                },
+                AgentNode {
+                    id: "dev".into(),
+                    agent_profile: "Developer".into(),
+                    user_facing: false,
+                    nested_workforce: None,
+                },
+            ],
+            connections: vec![],
+            operations: vec![],
+        };
+        let serialized = serialize_workforce_markdown(&wf);
+        let parsed = parse_workforce_markdown(&serialized).expect("parse nested");
+        assert_eq!(parsed.agents.len(), 2);
+        assert_eq!(parsed.agents[0].id, "pm");
+        assert_eq!(
+            parsed.agents[0].nested_workforce.as_deref(),
+            Some("inner_team")
+        );
+        assert_eq!(parsed.agents[1].id, "dev");
+        assert!(parsed.agents[1].nested_workforce.is_none());
+    }
+
+    #[test]
+    fn test_legacy_three_column_agents_table_parses() {
+        let md = r#"---
+name: Legacy Workforce
+description: Legacy 3-column agents table
+operations: []
+---
+
+## Agents
+
+| ID | Agent Profile | User-Facing |
+|----|---------------|-------------|
+| pm | Project Manager | yes |
+| dev | Developer | no |
+| res | Researcher | no |
+
+## Connections
+
+| From | To | Data Type |
+|------|----|-----------|
+| pm | dev | instructions |
+"#;
+        let wf = parse_workforce_markdown(md).expect("legacy parse");
+        assert_eq!(wf.name, "Legacy Workforce");
+        assert_eq!(wf.agents.len(), 3);
+        for agent in &wf.agents {
+            assert!(
+                agent.nested_workforce.is_none(),
+                "legacy agent {} should have nested_workforce = None",
+                agent.id
+            );
+        }
+        assert_eq!(wf.connections.len(), 1);
     }
 }

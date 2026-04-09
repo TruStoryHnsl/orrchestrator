@@ -1,5 +1,29 @@
 # Orrchestrator Development Log
 
+## Dev Session: 2026-04-08 — Items 27b + 35 (Inbox lifecycle primitives + Nested-workforce data model)
+
+### Completed
+- **27b. Inbox lifecycle primitives** (`crates/orrch-core/src/feedback.rs`, `lib.rs`): Two new public functions for COO inbox maintenance.
+  - `truncate_inbox_if_large(project_dir: &Path, max_bytes: usize) -> anyhow::Result<bool>` — splits `instructions_inbox.md` on `## Entry:` boundaries (no half-entry truncation), keeps the most recent entries that fit under `max_bytes`, prepends a project header and a `<!-- truncated YYYY-MM-DD HH:MM, kept N of M entries -->` marker via `chrono_lite_timestamp()`. Always retains at least one entry. Returns `Ok(false)` when the file is missing or already under the limit.
+  - `trim_completed_entries(project_dir: &Path) -> anyhow::Result<usize>` — drops entries whose `### Status` section contains `Executed: complete` or `Executed: done`. Returns the count removed. `Ok(0)` when missing.
+  - Both re-exported from `crates/orrch-core/src/lib.rs`. 3 unit tests cover oldest-pruning truncation, completion-status filtering, and missing-file handling. **COO wiring (when to call these) deferred to a follow-up.**
+- **35. Nested-workforce data model** (`crates/orrch-workforce/src/template.rs`, `parser.rs`, plus `crates/orrch-agents/src/runner.rs` literal updates): Added the structural plumbing for workforces that contain other workforces.
+  - `AgentNode.nested_workforce: Option<String>` with `#[serde(default, skip_serializing_if = "Option::is_none")]` — names another workforce template the node expands into.
+  - `parse_workforce_markdown` accepts an optional 4th column `Nested Workforce` in the `## Agents` table. `parts.len() >= 4` with non-empty, non-`-` value sets `Some(...)`; otherwise `None`. Legacy 3-column tables still parse cleanly.
+  - `serialize_workforce_markdown` always emits the 4-column header/separator and writes `-` when the field is None.
+  - 2 new tests: `test_nested_workforce_roundtrip` (Some + None survive serialize→parse) and `test_legacy_three_column_agents_table_parses` (backward-compat). `runner.rs` AgentNode literals updated additively. **Engine-side expansion (running an inner workforce as a unit) deferred.**
+
+### Verification
+- **Tester A** (orrch-core, independent): PASS. `cargo build -p orrch-core` clean. `cargo test -p orrch-core feedback` 12/12. Confirmed entry-block parsing (not blind byte truncation), both `complete`/`done` status matching, and explicit `!inbox_path.exists()` checks. Functions at feedback.rs:633 and feedback.rs:697; new tests at feedback.rs:911/945/967; `pub use` at lib.rs:27.
+- **Tester B** (orrch-workforce + workspace, independent): PASS. `cargo build` (full workspace) clean. `cargo test -p orrch-workforce` 19/19. Field declared at template.rs:29-30; parser legacy + 4col logic at parser.rs:143-165 (separator row skipped via the existing `contains("---")` guard at parser.rs:130); serializer at parser.rs:232-242. Real-world spot-check: `workforces/general_software_development.md` is a legacy 3-column file and is handled by the new compat test.
+- **PM verdict** (hypervisor inline): SHIP. Both testers PASS, no blocking issues, no rework cycles needed.
+
+### Workflow Notes
+- Workflow: `develop_feature` MCP dispatch → `workflow_init` → PM (1 spawn) → `workflow_cluster` (2 clusters, 1 wave) → 2 Developers in series (cluster 2 spawned after cluster 1 finished — sequential rather than parallel; minor inefficiency, no correctness impact) → 2 Testers in parallel → PM evaluation inline → finalize.
+- Both selected items are *partial* completions of larger roadmap entries. PLAN.md items 27 and 35 stay `[ ]` with bolded "primitives done" / "data model done" notes pointing at the new symbols. Engine/COO wiring is now smaller follow-up work.
+
+---
+
 ## Dev Session: 2026-04-08 — Item 36 (Workforce import/export)
 
 ### Completed
