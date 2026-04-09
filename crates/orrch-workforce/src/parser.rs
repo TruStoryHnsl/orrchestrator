@@ -324,7 +324,20 @@ pub fn parse_operation_markdown(content: &str) -> Option<Operation> {
                 } else {
                     Some(parts[2].to_string())
                 };
-                let operation = parts[3..].join(" | ").to_string();
+                // Operation is column 4 only when a 5th "Model" column is present;
+                // otherwise it greedily joins any trailing `|` segments (legacy behavior).
+                let (operation, model_override) = if parts.len() >= 5 {
+                    let op = parts[3].to_string();
+                    let model_raw = parts[4].trim();
+                    let model = if model_raw.is_empty() || model_raw == "-" {
+                        None
+                    } else {
+                        Some(model_raw.to_string())
+                    };
+                    (op, model)
+                } else {
+                    (parts[3..].join(" | ").to_string(), None)
+                };
 
                 if !index.is_empty() && !agent.is_empty() {
                     steps.push(Step {
@@ -333,6 +346,7 @@ pub fn parse_operation_markdown(content: &str) -> Option<Operation> {
                         tool_or_skill: tool,
                         operation,
                         parallel_group: None, // TODO: detect from duplicate indices
+                        model_override,
                     });
                 }
             }
@@ -628,6 +642,60 @@ operations:
         );
         assert_eq!(parsed.agents[1].id, "dev");
         assert!(parsed.agents[1].nested_workforce.is_none());
+    }
+
+    #[test]
+    fn test_parse_step_with_model_override() {
+        let md = r#"
+## TEST OP
+
+Trigger: manual
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation> | <model>
+
+1 | Developer | * | implement feature | claude_opus
+2 | Feature Tester | * | run tests | -
+3 | Project Manager | * | review |
+
+Interrupts: none
+"#;
+        let op = parse_operation_markdown(md).expect("must parse");
+        assert_eq!(op.steps.len(), 3);
+        assert_eq!(op.steps[0].model_override.as_deref(), Some("claude_opus"));
+        assert_eq!(op.steps[1].model_override, None);
+        assert_eq!(op.steps[2].model_override, None);
+    }
+
+    #[test]
+    fn test_parse_legacy_four_column_step_table() {
+        // Legacy operations without a Model column must still parse and
+        // leave `model_override` as None on every step.
+        let md = r#"
+## LEGACY OP
+
+Trigger: manual
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation>
+
+1 | Project Manager | skill:plan | plan the work
+2 | Developer | * | implement the feature
+3 | Feature Tester | skill:test | verify
+
+Interrupts: none
+"#;
+        let op = parse_operation_markdown(md).expect("must parse");
+        assert_eq!(op.steps.len(), 3);
+        for step in &op.steps {
+            assert!(
+                step.model_override.is_none(),
+                "legacy step {} should have model_override = None",
+                step.index
+            );
+        }
+        assert_eq!(op.steps[0].operation, "plan the work");
+        assert_eq!(op.steps[1].tool_or_skill, None);
     }
 
     #[test]
