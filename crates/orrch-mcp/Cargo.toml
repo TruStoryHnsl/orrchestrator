@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 orrch-agents = { path = "../orrch-agents" }
 orrch-workforce = { path = "../orrch-workforce" }
+orrch-core = { path = "../orrch-core" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

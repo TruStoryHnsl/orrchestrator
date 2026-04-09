@@ -13,6 +13,15 @@
 
 set -e
 
+# Prepend well-known binary locations to PATH so Homebrew-installed
+# tools (tmux, screen, claude, gemini) are discoverable regardless of
+# whether SSH gave us a login shell. The remote host's `bash -s`
+# invocation does NOT source ~/.bash_profile on macOS, so Homebrew
+# paths are otherwise invisible — which used to make `detect_mux`
+# silently fall back to `screen` on Macs that had tmux installed.
+PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$HOME/.local/bin:$PATH"
+export PATH
+
 ORRCH_PREFIX="orrch-"
 PROJECTS_DIR="$HOME/projects"
 
@@ -122,6 +131,21 @@ cmd_spawn() {
             tmux send-keys -t "$session_name" "$backend $flags '$goal'" Enter
             ;;
         screen)
+            # Refuse to create a duplicate session. `screen -dmS <name>`
+            # SILENTLY creates a second session with a PID-prefix name
+            # if one already exists, which is how three concurrent
+            # `orrch-concord` screens once ended up running in
+            # parallel, each burning API quota and editing the same
+            # working tree. The `screen -ls` check short-circuits
+            # this: if a session matching the requested name already
+            # exists (screen lists them as `<pid>.<name>`), bail with
+            # a distinct exit code so the calling orchestrator can
+            # report the collision to the user rather than silently
+            # creating another shadow session.
+            if screen -ls 2>/dev/null | awk '{print $1}' | grep -Eq "\.${session_name}\$"; then
+                echo "ERROR: session '${session_name}' already exists on this host — refusing to create duplicate" >&2
+                exit 2
+            fi
             screen -dmS "$session_name" sh -c "$full_cmd; exec sh"
             ;;
         nohup)

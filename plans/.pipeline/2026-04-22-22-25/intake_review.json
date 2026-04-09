@@ -1,0 +1,6 @@
+{
+  "raw": "CONCORD - New Priority Feature\n\n- Sandoxed Discord integration\n- An explore menu where federated matrix servers are available\n",
+  "optimized": "### OPT-001: Sandboxed Discord integration\nAdd a Discord integration to Concord that runs in an isolated sandbox (process/container boundary) separate from the core Matrix stack. Bridge Discord guilds/channels into Concord's Matrix rooms with bidirectional message relay. Ensure the sandbox contains any Discord API credentials, rate-limit failures, and dependency surface so they cannot impact the main Matrix homeserver or other Concord services. Document the sandbox boundary and the bridge protocol used.\n\nSource: \"Sandoxed Discord integration\"\n\n### OPT-002: Explore menu for federated Matrix servers\nAdd an \"Explore\" menu to the Concord UI that lists discoverable federated Matrix servers. Populate the list from Concord's existing server discovery mechanism (or extend it if needed). For each server, show identifying metadata (name, domain, description if available) and provide an action to browse/join public rooms on that server. Ensure the menu is reachable from the main navigation.\n\nSource: \"An explore menu where federated matrix servers are available\"\n",
+  "status": "confirmed",
+  "source_idea": "2026-04-22-22-25.md"
+}

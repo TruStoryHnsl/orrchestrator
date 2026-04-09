@@ -9,7 +9,9 @@ pub struct OrrchMcpServer {
     pub library_dir: PathBuf,
     /// Top-level projects directory (e.g. ~/projects/)
     pub projects_dir: PathBuf,
-    /// Workflow skill files (e.g. ~/projects/.claude/commands/)
+    /// Workflow skill files. Points at orrchestrator's canonical skill
+    /// library (`<library_dir>/skills/`) so every `.md` under that tree
+    /// is reachable via `list_skills` and `skill_invoke`.
     pub skills_dir: PathBuf,
 }
 
@@ -19,12 +21,13 @@ impl OrrchMcpServer {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/home/corr".into());
         let projects_dir = PathBuf::from(&home).join("projects");
         let orrch_dir = projects_dir.join("orrchestrator");
+        let library_dir = orrch_dir.join("library");
 
         Self {
             agents_dir: orrch_dir.join("agents"),
-            library_dir: orrch_dir.join("library"),
+            skills_dir: library_dir.join("skills"),
+            library_dir,
             projects_dir,
-            skills_dir: PathBuf::from(&home).join("projects/.claude/commands"),
         }
     }
 }

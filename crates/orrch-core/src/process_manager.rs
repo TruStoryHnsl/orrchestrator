@@ -108,7 +108,10 @@ impl ProcessManager {
             unsafe {
                 libc::close(master_fd);
                 libc::setsid();
-                libc::ioctl(slave_fd, libc::TIOCSCTTY, 0);
+                // TIOCSCTTY is u32 on macOS/BSD and c_ulong on Linux;
+                // ioctl's request parameter is c_ulong on both. Cast
+                // explicitly so this builds on Linux AND macOS.
+                libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_ulong, 0);
                 libc::dup2(slave_fd, 0);
                 libc::dup2(slave_fd, 1);
                 libc::dup2(slave_fd, 2);
