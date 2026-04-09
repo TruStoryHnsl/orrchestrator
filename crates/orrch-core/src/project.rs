@@ -844,10 +844,90 @@ fn count_queued_prompts(path: &Path) -> usize {
     let Ok(contents) = std::fs::read_to_string(inbox_path) else {
         return 0;
     };
+    // Two formats coexist:
+    //   - New COO format: `### INS-NNN:` headers (one per instruction).
+    //     Strikethrough (`### ~~INS-NNN:`) marks completed and is excluded.
+    //   - Legacy format: `Executed: pending` line per entry.
+    // Count whichever appears.
+    let ins_count = contents
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("### INS-") || l.starts_with("### OPT-"))
+        .count();
+    if ins_count > 0 {
+        return ins_count;
+    }
     contents
         .lines()
         .filter(|l| l.trim().starts_with("Executed: pending"))
         .count()
+}
+
+#[cfg(test)]
+mod count_queued_tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp_project(name: &str, body: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "orrch_count_queued_{}_{}",
+            std::process::id(),
+            name
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("instructions_inbox.md"), body).unwrap();
+        dir
+    }
+
+    #[test]
+    fn counts_ins_headers() {
+        let dir = tmp_project(
+            "ins",
+            "## Instruction\n### INS-001: foo\nbody\n### INS-002: bar\nbody\n",
+        );
+        assert_eq!(count_queued_prompts(&dir), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn counts_opt_headers() {
+        let dir = tmp_project("opt", "### OPT-001: foo\n### INS-001: bar\n");
+        assert_eq!(count_queued_prompts(&dir), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn excludes_strikethrough_completed() {
+        let dir = tmp_project(
+            "strike",
+            "### INS-001: open\n### ~~INS-002: done~~\n### INS-003: open\n",
+        );
+        assert_eq!(count_queued_prompts(&dir), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn falls_back_to_legacy_executed_format() {
+        let dir = tmp_project(
+            "legacy",
+            "## Old entry\nExecuted: pending\n## Old entry\nExecuted: pending\n",
+        );
+        assert_eq!(count_queued_prompts(&dir), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_inbox_returns_zero() {
+        let dir = std::env::temp_dir().join(format!(
+            "orrch_count_queued_missing_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(count_queued_prompts(&dir), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
