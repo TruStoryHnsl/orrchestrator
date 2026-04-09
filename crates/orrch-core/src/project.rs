@@ -208,6 +208,11 @@ pub struct Project {
     pub temperature: Temperature,
     pub is_hyperfolder: bool,
     pub sub_projects: Vec<Project>,
+    /// Task AP: per-project swappable agent profile filename, e.g. `CLAUDE.md`,
+    /// `GEMINI.md`, or a custom profile. Persisted as the `.agent_profile`
+    /// dotfile at the project root. When `None`, the runner falls back to
+    /// `CLAUDE.md`.
+    pub agent_profile: Option<String>,
 }
 
 impl Project {
@@ -241,6 +246,7 @@ impl Project {
         let queued_prompts = count_queued_prompts(path);
 
         let temperature = load_temperature(path);
+        let agent_profile = load_agent_profile(path);
         let is_hyperfolder = name == "admin";
 
         let sub_projects = if is_hyperfolder {
@@ -264,6 +270,38 @@ impl Project {
             temperature,
             is_hyperfolder,
             sub_projects,
+            agent_profile,
+        }
+    }
+
+    /// Task AP: filename of the agent profile that should be loaded as the
+    /// project context when spawning agents. Defaults to `CLAUDE.md` when the
+    /// project has not set an explicit profile.
+    pub fn agent_profile_filename(&self) -> &str {
+        self.agent_profile
+            .as_deref()
+            .unwrap_or("CLAUDE.md")
+    }
+
+    /// Task AP: absolute path to the project's configured agent profile file.
+    /// Does NOT check that the file exists — callers should fall back to
+    /// their default when it's missing.
+    pub fn agent_profile_path(&self) -> PathBuf {
+        self.path.join(self.agent_profile_filename())
+    }
+
+    /// Persist the current `agent_profile` value to `.agent_profile` at the
+    /// project root. Writing `None` removes the file so the project reverts
+    /// to the default profile on next load.
+    pub fn save_agent_profile(&self) {
+        let path = self.path.join(".agent_profile");
+        match self.agent_profile.as_deref() {
+            None => {
+                let _ = std::fs::remove_file(path);
+            }
+            Some(name) => {
+                let _ = std::fs::write(path, name.trim());
+            }
         }
     }
 
@@ -535,6 +573,22 @@ fn load_temperature(path: &Path) -> Temperature {
         Temperature::from_str(&contents)
     } else {
         Temperature::Cold // default
+    }
+}
+
+/// Task AP: Load the configured agent profile filename for a project.
+/// Reads `.agent_profile` at the project root. Returns `None` when the file
+/// is absent or empty; callers fall back to `CLAUDE.md`. The trimmed value
+/// is returned verbatim, so either `CLAUDE.md`, `GEMINI.md`, or a custom
+/// profile filename is accepted.
+fn load_agent_profile(path: &Path) -> Option<String> {
+    let file = path.join(".agent_profile");
+    let contents = std::fs::read_to_string(file).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
@@ -1031,6 +1085,7 @@ mod tests {
             temperature: Temperature::Cold,
             is_hyperfolder: false,
             sub_projects: Vec::new(),
+            agent_profile: None,
         }
     }
 
