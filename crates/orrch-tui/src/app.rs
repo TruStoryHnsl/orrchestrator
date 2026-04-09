@@ -298,7 +298,7 @@ pub enum ListEntry {
 
 // ─── Commit Review ──────────────────────────────────────────────────
 
-/// An instruction package that Claude wrote to a project's fb2p.md.
+/// An instruction package that Claude wrote to a project's instructions_inbox.md.
 #[derive(Debug, Clone)]
 pub struct CommitPackage {
     pub project_name: String,
@@ -3982,7 +3982,7 @@ impl App {
 
     // ─── Commit Review ──────────────────────────────────────────
 
-    /// Open the commit review overlay — scan fb2p.md files for pending entries.
+    /// Open the commit review overlay — scan instructions_inbox.md files for pending entries.
     pub fn open_commit_review(&mut self, feedback_idx: usize) {
         let item = match self.feedback_items.get(feedback_idx) {
             Some(i) => i,
@@ -3992,11 +3992,11 @@ impl App {
             return;
         }
 
-        // Scan all project fb2p.md files for entries with "Executed: pending"
+        // Scan all project instructions_inbox.md files for entries with "Executed: pending"
         let mut packages = Vec::new();
         for proj in &self.projects {
-            let fb2p_path = proj.path.join("fb2p.md");
-            if let Ok(content) = std::fs::read_to_string(&fb2p_path) {
+            let inbox_path = proj.path.join("instructions_inbox.md");
+            if let Ok(content) = std::fs::read_to_string(&inbox_path) {
                 // Find all pending entries (split on "---" and look for "Executed: pending")
                 for entry in content.split("\n---\n") {
                     if entry.contains("Executed: pending") {
@@ -4016,9 +4016,9 @@ impl App {
             }
         }
 
-        // Also check workspace-level fb2p.md
-        let ws_fb2p = self.projects_dir.join("fb2p.md");
-        if let Ok(content) = std::fs::read_to_string(&ws_fb2p) {
+        // Also check workspace-level instructions_inbox.md
+        let ws_ib = self.projects_dir.join("instructions_inbox.md");
+        if let Ok(content) = std::fs::read_to_string(&ws_ib) {
             for entry in content.split("\n---\n") {
                 if entry.contains("Executed: pending") {
                     let preview: String = entry.lines()
@@ -4104,7 +4104,7 @@ impl App {
                 self.commit_correction_text.clear();
             }
             KeyCode::Char('d') => {
-                // Deny — remove all pending entries from project fb2p.md files, return to draft
+                // Deny — remove all pending entries from project instructions_inbox.md files, return to draft
                 let removed = self.deny_commit(feedback_idx);
                 self.notify(format!("Denied — removed {removed} entries, returned to draft"));
                 self.sub = SubView::List;
@@ -4161,14 +4161,14 @@ impl App {
             .map(|pkg| pkg.entry_full.trim().to_string())
             .collect();
 
-        // For each project that had packages, scan its fb2p.md and remove only matching entries
+        // For each project that had packages, scan its instructions_inbox.md and remove only matching entries
         let mut seen_dirs = std::collections::HashSet::new();
         for pkg in &self.commit_packages {
             if !seen_dirs.insert(pkg.project_dir.clone()) {
                 continue; // already processed this project
             }
-            let fb2p_path = pkg.project_dir.join("fb2p.md");
-            let Ok(content) = std::fs::read_to_string(&fb2p_path) else { continue };
+            let inbox_path = pkg.project_dir.join("instructions_inbox.md");
+            let Ok(content) = std::fs::read_to_string(&inbox_path) else { continue };
 
             let mut kept = Vec::new();
             let mut current_entry = String::new();
@@ -4198,9 +4198,9 @@ impl App {
 
             let new_content = kept.join("\n---\n");
             if new_content.trim().is_empty() {
-                let _ = std::fs::remove_file(&fb2p_path);
+                let _ = std::fs::remove_file(&inbox_path);
             } else {
-                let _ = std::fs::write(&fb2p_path, new_content);
+                let _ = std::fs::write(&inbox_path, new_content);
             }
         }
 
@@ -4402,7 +4402,7 @@ impl App {
                     let name = proj.name.clone();
                     let path = proj.path.clone();
                     let ts = orrch_core::feedback::chrono_lite_timestamp();
-                    let _ = orrch_core::feedback::append_to_fb2p_direct(&text, &path, &ts);
+                    let _ = orrch_core::feedback::append_to_inbox_direct(&text, &path, &ts);
                     self.reload_projects();
                     self.notify(format!("Feedback → {name}"));
                 }
@@ -4421,7 +4421,7 @@ impl App {
                     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&mp_path) {
                         let _ = f.write_all(appendix.as_bytes());
                     }
-                    let _ = orrch_core::feedback::append_to_fb2p_direct(
+                    let _ = orrch_core::feedback::append_to_inbox_direct(
                         &format!("[Master Plan]\n{}", text.trim()), &path, &ts);
                     self.reload_projects();
                     self.notify(format!("Appended to {name} master plan"));
@@ -4557,8 +4557,8 @@ impl App {
                         let mut removed = 0;
                         for route_name in &routes {
                             if let Some(proj) = self.projects.iter().find(|p| p.name == *route_name) {
-                                let fb2p_path = proj.path.join("fb2p.md");
-                                if let Ok(content) = std::fs::read_to_string(&fb2p_path) {
+                                let inbox_path = proj.path.join("instructions_inbox.md");
+                                if let Ok(content) = std::fs::read_to_string(&inbox_path) {
                                     let mut kept = Vec::new();
                                     for entry in content.split("\n---\n") {
                                         if entry.contains("Executed: pending") {
@@ -4569,9 +4569,9 @@ impl App {
                                     }
                                     let new_content = kept.join("\n---\n");
                                     if new_content.trim().is_empty() {
-                                        let _ = std::fs::remove_file(&fb2p_path);
+                                        let _ = std::fs::remove_file(&inbox_path);
                                     } else {
-                                        let _ = std::fs::write(&fb2p_path, new_content);
+                                        let _ = std::fs::write(&inbox_path, new_content);
                                     }
                                 }
                             }
@@ -4796,7 +4796,7 @@ fn spawn_correction_processor(
     let prompt_path = feedback_dir.join(".correction-prompt.md");
     std::fs::write(&prompt_path, format!(
         "Correct feedback routing. Current pending entries:\n{context}\n\nUser correction: {correction}\n\n\
-         Find 'Executed: pending' entries in project fb2p.md files, apply corrections. \
+         Find 'Executed: pending' entries in project instructions_inbox.md files, apply corrections. \
          Do NOT touch entries without 'Executed: pending'. Do NOT create new project directories.",
     ))?;
 
@@ -4875,7 +4875,7 @@ fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
 /// Spawn a hidden tmux session that runs Claude to process feedback.
 ///
 /// Claude reads the raw feedback text and runs the /interpret-user-instructions
-/// pipeline: analyze → generate optimized prompts → route to project fb2p.md files.
+/// pipeline: analyze → generate optimized prompts → route to project instructions_inbox.md files.
 /// The prompt is written to a temp file to avoid shell escaping issues.
 /// Spawn a Claude Code session to process a feedback file.
 ///

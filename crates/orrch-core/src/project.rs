@@ -830,8 +830,8 @@ pub fn update_feature_status_in_plan(plan_path: &Path, item_title: &str, new_sta
 }
 
 fn count_queued_prompts(path: &Path) -> usize {
-    let fb2p_path = path.join("fb2p.md");
-    let Ok(contents) = std::fs::read_to_string(fb2p_path) else {
+    let inbox_path = path.join("instructions_inbox.md");
+    let Ok(contents) = std::fs::read_to_string(inbox_path) else {
         return 0;
     };
     contents

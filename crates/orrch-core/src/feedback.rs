@@ -31,14 +31,14 @@ pub fn save_and_route_feedback(
     // Route: scan for project name mentions in the text
     let routes = identify_target_projects(feedback_text, projects_dir);
 
-    // Append to each project's fb2p.md
+    // Append to each project's instructions_inbox.md
     for (_, project_path) in &routes {
-        append_to_fb2p(feedback_text, project_path, &timestamp)?;
+        append_to_inbox(feedback_text, project_path, &timestamp)?;
     }
 
-    // If no projects identified, append to workspace-level fb2p.md
+    // If no projects identified, append to workspace-level instructions_inbox.md
     if routes.is_empty() {
-        append_to_fb2p(feedback_text, projects_dir, &timestamp)?;
+        append_to_inbox(feedback_text, projects_dir, &timestamp)?;
     }
 
     Ok(RoutingResult {
@@ -193,27 +193,27 @@ pub fn identify_target_projects_pub(text: &str, projects_dir: &Path) -> Vec<(Str
     identify_target_projects(text, projects_dir)
 }
 
-/// Append a feedback entry to a project's fb2p.md.
-pub fn append_to_fb2p(
+/// Append a feedback entry to a project's instructions_inbox.md.
+pub fn append_to_inbox(
     feedback_text: &str,
     project_dir: &Path,
     timestamp: &str,
 ) -> anyhow::Result<()> {
-    let fb2p_path = project_dir.join("fb2p.md");
+    let inbox_path = project_dir.join("instructions_inbox.md");
 
     // Create if doesn't exist
-    if !fb2p_path.exists() {
+    if !inbox_path.exists() {
         let project_name = project_dir
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
         fs::write(
-            &fb2p_path,
-            format!("# {project_name} — Feedback to Prompt Log\n"),
+            &inbox_path,
+            format!("# {project_name} — Instructions Inbox\n"),
         )?;
     }
 
-    let mut file = OpenOptions::new().append(true).open(&fb2p_path)?;
+    let mut file = OpenOptions::new().append(true).open(&inbox_path)?;
 
     // Truncate for display if very long
     let display_text = if feedback_text.len() > 2000 {
@@ -269,13 +269,33 @@ fn format_system_time(time: std::time::SystemTime) -> String {
 /// The default prompt for "continue development" sessions.
 pub const CONTINUE_DEV_PROMPT: &str = "continue development";
 
-/// Append feedback directly to a specific project's fb2p.md (no routing needed).
+/// Append feedback directly to a specific project's instructions_inbox.md (no routing needed).
+pub fn append_to_inbox_direct(
+    feedback_text: &str,
+    project_dir: &Path,
+    timestamp: &str,
+) -> anyhow::Result<()> {
+    append_to_inbox(feedback_text, project_dir, timestamp)
+}
+
+/// Deprecated alias kept so other crates continue to compile.
+#[deprecated(note = "use append_to_inbox")]
+pub fn append_to_fb2p(
+    feedback_text: &str,
+    project_dir: &Path,
+    timestamp: &str,
+) -> anyhow::Result<()> {
+    append_to_inbox(feedback_text, project_dir, timestamp)
+}
+
+/// Deprecated alias kept so other crates continue to compile.
+#[deprecated(note = "use append_to_inbox_direct")]
 pub fn append_to_fb2p_direct(
     feedback_text: &str,
     project_dir: &Path,
     timestamp: &str,
 ) -> anyhow::Result<()> {
-    append_to_fb2p(feedback_text, project_dir, timestamp)
+    append_to_inbox_direct(feedback_text, project_dir, timestamp)
 }
 
 // ─── Feedback Pipeline ───────────────────────────────────────────────
@@ -450,10 +470,10 @@ pub fn submit_feedback(
     let timestamp = chrono_lite_timestamp();
 
     for (_, project_path) in &routes {
-        append_to_fb2p(&text, project_path, &timestamp)?;
+        append_to_inbox(&text, project_path, &timestamp)?;
     }
     if routes.is_empty() {
-        append_to_fb2p(&text, projects_dir, &timestamp)?;
+        append_to_inbox(&text, projects_dir, &timestamp)?;
     }
 
     // Update status
@@ -726,9 +746,9 @@ mod tests {
         assert_eq!(result.routes[0].0, "testproj");
         assert!(result.saved_path.exists());
 
-        let fb2p = fs::read_to_string(tmp.path().join("testproj").join("fb2p.md")).unwrap();
-        assert!(fb2p.contains("Fix testproj auth"));
-        assert!(fb2p.contains("Executed: pending"));
+        let inbox = fs::read_to_string(tmp.path().join("testproj").join("instructions_inbox.md")).unwrap();
+        assert!(inbox.contains("Fix testproj auth"));
+        assert!(inbox.contains("Executed: pending"));
     }
 
     #[test]
