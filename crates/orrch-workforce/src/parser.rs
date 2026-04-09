@@ -182,6 +182,67 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
     })
 }
 
+/// Convert a DataFlow variant into its lowercase token string used by the parser.
+fn data_flow_token(df: &DataFlow) -> &'static str {
+    match df {
+        DataFlow::Instructions => "instructions",
+        DataFlow::Deliverable => "deliverable",
+        DataFlow::Report => "report",
+        DataFlow::Research => "research",
+        DataFlow::Message => "message",
+    }
+}
+
+/// Serialize a `Workforce` into markdown that `parse_workforce_markdown` can round-trip.
+///
+/// Output format mirrors the parser's expected layout:
+/// YAML frontmatter with `name`, `description`, and `operations` list, followed by
+/// `## Agents` and `## Connections` pipe-delimited tables.
+pub fn serialize_workforce_markdown(wf: &Workforce) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    // Frontmatter
+    out.push_str("---\n");
+    let _ = writeln!(out, "name: {}", wf.name);
+    let _ = writeln!(out, "description: {}", wf.description);
+    if wf.operations.is_empty() {
+        out.push_str("operations: []\n");
+    } else {
+        out.push_str("operations:\n");
+        for op in &wf.operations {
+            let _ = writeln!(out, "  - {}", op);
+        }
+    }
+    out.push_str("---\n\n");
+
+    // Agents table
+    out.push_str("## Agents\n\n");
+    out.push_str("| ID | Agent Profile | User-Facing |\n");
+    out.push_str("|----|---------------|-------------|\n");
+    for agent in &wf.agents {
+        let uf = if agent.user_facing { "yes" } else { "no" };
+        let _ = writeln!(out, "| {} | {} | {} |", agent.id, agent.agent_profile, uf);
+    }
+    out.push('\n');
+
+    // Connections table
+    out.push_str("## Connections\n\n");
+    out.push_str("| From | To | Data Type |\n");
+    out.push_str("|------|----|-----------|\n");
+    for conn in &wf.connections {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} |",
+            conn.from,
+            conn.to,
+            data_flow_token(&conn.data_type)
+        );
+    }
+
+    out
+}
+
 /// Parse a structured markdown workforce operation into an Operation struct.
 ///
 /// Expected format:
@@ -430,5 +491,92 @@ operations:
         assert!(matches!(wf.connections[6].data_type, DataFlow::Deliverable));
         assert!(matches!(wf.connections[9].data_type, DataFlow::Report));
         assert!(matches!(wf.connections[13].data_type, DataFlow::Research));
+    }
+
+    #[test]
+    fn test_serialize_workforce_round_trip() {
+        let md = r#"---
+name: General Software Development
+description: Full dev team with PM, engineers, testers, and DevOps. Suitable for most software projects.
+operations:
+  - INSTRUCTION INTAKE
+  - DEVELOP FEATURE
+---
+
+## Agents
+
+| ID | Agent Profile | User-Facing |
+|----|---------------|-------------|
+| ea | Executive Assistant | yes |
+| coo | Chief Operations Officer | no |
+| pm | Project Manager | yes |
+| dev | Developer | no |
+| res | Researcher | no |
+
+## Connections
+
+| From | To | Data Type |
+|------|----|-----------|
+| ea | coo | instructions |
+| coo | pm | instructions |
+| pm | dev | instructions |
+| pm | res | instructions |
+| res | dev | research |
+| dev | pm | deliverable |
+| pm | ea | report |
+| ea | pm | message |
+"#;
+        let wf1 = parse_workforce_markdown(md).expect("first parse");
+        let serialized = serialize_workforce_markdown(&wf1);
+        let wf2 = parse_workforce_markdown(&serialized).expect("second parse");
+
+        // Every field must match
+        assert_eq!(wf1.name, wf2.name);
+        assert_eq!(wf1.description, wf2.description);
+        assert_eq!(wf1.operations, wf2.operations);
+        assert_eq!(wf1.agents.len(), wf2.agents.len());
+        assert_eq!(wf1.connections.len(), wf2.connections.len());
+
+        for (a, b) in wf1.agents.iter().zip(wf2.agents.iter()) {
+            assert_eq!(a.id, b.id);
+            assert_eq!(a.agent_profile, b.agent_profile);
+            assert_eq!(a.user_facing, b.user_facing);
+        }
+        for (a, b) in wf1.connections.iter().zip(wf2.connections.iter()) {
+            assert_eq!(a.from, b.from);
+            assert_eq!(a.to, b.to);
+            // Compare via the token representation
+            assert_eq!(data_flow_token(&a.data_type), data_flow_token(&b.data_type));
+        }
+
+        // Spot-checks
+        assert_eq!(wf2.name, "General Software Development");
+        assert_eq!(wf2.agents.len(), 5);
+        assert_eq!(wf2.connections.len(), 8);
+        assert_eq!(wf2.operations.len(), 2);
+        assert!(wf2.agents[0].user_facing);
+        assert!(!wf2.agents[3].user_facing);
+        assert!(matches!(wf2.connections[4].data_type, DataFlow::Research));
+        assert!(matches!(wf2.connections[5].data_type, DataFlow::Deliverable));
+        assert!(matches!(wf2.connections[6].data_type, DataFlow::Report));
+        assert!(matches!(wf2.connections[7].data_type, DataFlow::Message));
+    }
+
+    #[test]
+    fn test_serialize_empty_workforce_round_trip() {
+        let wf = Workforce {
+            name: "Empty".into(),
+            description: "No agents or connections".into(),
+            agents: vec![],
+            connections: vec![],
+            operations: vec![],
+        };
+        let serialized = serialize_workforce_markdown(&wf);
+        let parsed = parse_workforce_markdown(&serialized).expect("parse empty");
+        assert_eq!(parsed.name, "Empty");
+        assert_eq!(parsed.description, "No agents or connections");
+        assert!(parsed.agents.is_empty());
+        assert!(parsed.connections.is_empty());
+        assert!(parsed.operations.is_empty());
     }
 }

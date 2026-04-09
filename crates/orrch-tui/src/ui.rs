@@ -394,7 +394,11 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
         list_items.push(ListItem::new(Line::styled("  (empty — press n to create)", Style::default().fg(TEXT_MUTED))));
     }
 
-    let title = format!(" {} ({}) — n=new Enter=edit d=del ", app.workforce_tab.label(), items_data.len());
+    let title = if app.workforce_tab == WorkforceTab::Workflows {
+        format!(" {} ({}) — n=new Enter=edit d=del x=export i=import ", app.workforce_tab.label(), items_data.len())
+    } else {
+        format!(" {} ({}) — n=new Enter=edit d=del ", app.workforce_tab.label(), items_data.len())
+    };
     frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
 
     // Preview: show file contents with markdown rendering

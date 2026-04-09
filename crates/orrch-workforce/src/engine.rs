@@ -171,6 +171,49 @@ pub fn load_workforces(dir: &std::path::Path) -> Vec<crate::template::Workforce>
     workforces
 }
 
+/// Serialize a workforce to markdown and write it to `path`.
+///
+/// Overwrites any existing file at `path` without prompting.
+/// Returns an `io::Error` (with context) on any filesystem failure.
+pub fn export_workforce_to_path(
+    wf: &crate::template::Workforce,
+    path: &std::path::Path,
+) -> std::io::Result<()> {
+    let md = crate::parser::serialize_workforce_markdown(wf);
+    std::fs::write(path, md).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("failed to write workforce to {}: {}", path.display(), e),
+        )
+    })
+}
+
+/// Read a workforce markdown file from `path` and parse it into a `Workforce`.
+///
+/// Returns an `io::Error` with clear context on:
+/// - file not found
+/// - unreadable file (permissions, other IO errors)
+/// - invalid markdown (parser returned `None`) — mapped to `InvalidData`
+pub fn import_workforce_from_path(
+    path: &std::path::Path,
+) -> std::io::Result<crate::template::Workforce> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("failed to read workforce from {}: {}", path.display(), e),
+        )
+    })?;
+    crate::parser::parse_workforce_markdown(&content).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse workforce markdown at {}: invalid format",
+                path.display()
+            ),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +299,100 @@ mod tests {
         exec.start();
         exec.interrupt("API rate limit".into());
         assert!(matches!(exec.state, OperationState::Interrupted(_)));
+    }
+
+    #[test]
+    fn test_export_import_workforce_round_trip() {
+        use crate::parser::parse_workforce_markdown;
+
+        let md = r#"---
+name: Round Trip Test
+description: Export/import file I/O round trip
+operations:
+  - INSTRUCTION INTAKE
+  - DEVELOP FEATURE
+---
+
+## Agents
+
+| ID | Agent Profile | User-Facing |
+|----|---------------|-------------|
+| pm | Project Manager | yes |
+| dev | Developer | no |
+| res | Researcher | no |
+
+## Connections
+
+| From | To | Data Type |
+|------|----|-----------|
+| pm | dev | instructions |
+| pm | res | instructions |
+| res | dev | research |
+| dev | pm | deliverable |
+"#;
+        let wf_in = parse_workforce_markdown(md).expect("fixture parses");
+
+        // Unique tempfile path (env::temp_dir + pid + nanos) — no external crate
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mut path = std::env::temp_dir();
+        path.push(format!("orrch_wf_roundtrip_{}_{}.md", std::process::id(), nanos));
+
+        // Export
+        super::export_workforce_to_path(&wf_in, &path).expect("export succeeds");
+        assert!(path.exists(), "file was not written");
+
+        // Import
+        let wf_out = super::import_workforce_from_path(&path).expect("import succeeds");
+
+        // Field-by-field assertions
+        assert_eq!(wf_in.name, wf_out.name);
+        assert_eq!(wf_in.agents.len(), wf_out.agents.len());
+        assert_eq!(wf_in.connections.len(), wf_out.connections.len());
+        assert_eq!(wf_in.operations.len(), wf_out.operations.len());
+        assert_eq!(wf_out.name, "Round Trip Test");
+        assert_eq!(wf_out.agents.len(), 3);
+        assert_eq!(wf_out.connections.len(), 4);
+        assert_eq!(wf_out.operations.len(), 2);
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_import_workforce_file_not_found() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "orrch_wf_nonexistent_{}_{}.md",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let err = super::import_workforce_from_path(&path).expect_err("should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("failed to read workforce"));
+    }
+
+    #[test]
+    fn test_import_workforce_invalid_markdown() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mut path = std::env::temp_dir();
+        path.push(format!("orrch_wf_invalid_{}_{}.md", std::process::id(), nanos));
+
+        // Write obvious garbage (no frontmatter) to trigger parser None
+        std::fs::write(&path, "this is not a workforce markdown file\n").expect("write garbage");
+
+        let err = super::import_workforce_from_path(&path).expect_err("should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid format"));
+
+        let _ = std::fs::remove_file(&path);
     }
 }
