@@ -853,9 +853,20 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
         Ok(content) => {
             if content.contains("[ ]") {
                 // Checkbox format — extract unchecked lines.
+                // Skip lines explicitly marked DEPRECATED, deferred, MOVED, or
+                // requiring prerequisites that aren't done yet — the PM should
+                // not see them as actionable work.
                 let lines: Vec<&str> = content
                     .lines()
                     .filter(|l| l.contains("[ ]"))
+                    .filter(|l| {
+                        let upper = l.to_uppercase();
+                        !upper.contains("DEPRECATED")
+                            && !upper.contains("MOVED TO CRITICAL PATH")
+                            && !upper.contains("DEFERRED")
+                            && !l.contains("*deferred:")
+                            && !l.contains("_deferred:")
+                    })
                     .collect();
                 let count = lines.len();
                 (lines.join("\n"), count, false)
