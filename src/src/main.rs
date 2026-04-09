@@ -61,6 +61,11 @@ async fn main() -> Result<()> {
     let mut app = App::new();
     let _ = app.pm.discover_external().await;
 
+    // Task 28: initial-clone flow for the library repo.
+    // If a repo URL is configured and the library dir is missing/empty,
+    // clone it now so the Library panel has content on first launch.
+    app.library_clone_if_missing();
+
     let result = run_loop(&mut terminal, &mut app).await;
 
     // Restore terminal FIRST — before any cleanup that might hang
@@ -281,6 +286,22 @@ async fn run_loop(
                 app.ideas = orrch_core::vault::load_ideas(&vault);
             }
             last_pipeline_sync = Instant::now();
+        }
+
+        // Task 27a: Periodic inbox maintenance — every 60s, run
+        // `maintain_all_project_inboxes` on a blocking thread so it never
+        // stalls the render loop. Failures are logged via tracing; successes
+        // are silent. The max_bytes cap (64 KiB) matches the intake walker.
+        if app.last_inbox_maintenance.elapsed() > Duration::from_secs(60) {
+            let projects_dir = app.projects_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) =
+                    orrch_core::feedback::maintain_all_project_inboxes(&projects_dir, 65_536)
+                {
+                    tracing::warn!("maintain_all_project_inboxes failed: {}", e);
+                }
+            });
+            app.last_inbox_maintenance = Instant::now();
         }
 
         // Poll workflow status for the selected session every 2s

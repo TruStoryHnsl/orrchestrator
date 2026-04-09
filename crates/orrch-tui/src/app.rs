@@ -495,6 +495,18 @@ pub struct App {
     pub last_notification: Option<(String, std::time::Instant)>,
     pub last_signals: HashMap<String, OutputSignal>,
 
+    /// Last time the inbox maintenance tick ran (Task 27a).
+    pub last_inbox_maintenance: std::time::Instant,
+
+    /// Cached library root from `Config::library_dir` (Task 28).
+    /// Distinct from `projects_dir/orrchestrator/library` which is used for
+    /// project-local library content loaded at startup.
+    pub library_dir: PathBuf,
+    /// Configured git remote URL for the library repo (Task 28).
+    /// When `None`, library sync key bindings are still visible but operations
+    /// will no-op with a "no library_repo_url configured" status.
+    pub library_repo_url: Option<String>,
+
     /// Target KWin output for orrchestrator-managed windows (e.g. "DP-2").
     /// Detected at startup from the current window's output, or set manually.
     pub target_output: Option<String>,
@@ -608,6 +620,11 @@ impl App {
         let mut usage_tracker = orrch_core::UsageTracker::new();
         usage_tracker.set_defaults();
 
+        // Load Config once for library sync settings (Task 28).
+        let config = orrch_core::Config::load();
+        let cfg_library_dir = config.library_dir.clone();
+        let cfg_library_repo_url = config.library_repo_url.clone();
+
         let mut app = Self {
             pm: ProcessManager::new(tx),
             panel: Panel::Oversee,
@@ -701,6 +718,9 @@ impl App {
             error_count: 0,
             last_notification: None,
             last_signals: HashMap::new(),
+            last_inbox_maintenance: std::time::Instant::now(),
+            library_dir: cfg_library_dir,
+            library_repo_url: cfg_library_repo_url,
             // Auto-detect: orrchestrator-managed windows go to whichever output is currently active
             target_output: detect_current_output(),
             new_project_name: String::new(),
@@ -1925,6 +1945,36 @@ impl App {
                     self.notify(format!("{} {}", name, status));
                 }
             }
+            // Task 28: Pull library repo from git remote.
+            KeyCode::Char('P') => {
+                let dir = self.library_dir.clone();
+                if !dir.join(".git").exists() {
+                    self.notify(format!(
+                        "Library pull: not a git repo ({})",
+                        dir.display()
+                    ));
+                } else {
+                    match orrch_library::sync_pull(&dir) {
+                        Ok(()) => self.notify("Library pulled".into()),
+                        Err(e) => self.notify(format!("Library pull failed: {}", e)),
+                    }
+                }
+            }
+            // Task 28: Push library repo to git remote.
+            KeyCode::Char('U') => {
+                let dir = self.library_dir.clone();
+                if !dir.join(".git").exists() {
+                    self.notify(format!(
+                        "Library push: not a git repo ({})",
+                        dir.display()
+                    ));
+                } else {
+                    match orrch_library::sync_push(&dir, "chore(library): sync") {
+                        Ok(()) => self.notify("Library pushed".into()),
+                        Err(e) => self.notify(format!("Library push failed: {}", e)),
+                    }
+                }
+            }
             // Task 62: Register new external MCP server
             KeyCode::Char('n') if self.library_sub == LibrarySub::McpServers => {
                 self.add_mcp_name.clear();
@@ -1939,6 +1989,21 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Task 28: clone the configured library repo into `library_dir` if it's
+    /// not already a git repo. No-op when `library_repo_url` is `None`.
+    /// Failures are logged via `tracing::warn!` and do not abort startup.
+    pub fn library_clone_if_missing(&self) {
+        let Some(url) = self.library_repo_url.as_ref() else {
+            return;
+        };
+        if self.library_dir.join(".git").exists() {
+            return;
+        }
+        if let Err(e) = orrch_library::clone_if_missing(&self.library_dir, url) {
+            tracing::warn!("library clone_if_missing failed: {}", e);
+        }
     }
 
     /// Reload all library data from disk (after create/delete/edit).
