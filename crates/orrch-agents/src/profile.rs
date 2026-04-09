@@ -37,6 +37,23 @@ impl AgentProfile {
         )
     }
 
+    /// Format the agent profile as a prompt preamble, with a Mentor-generated
+    /// references block (library skills + tools) inserted between the profile
+    /// body and the task.
+    ///
+    /// `references_block` is expected to be the string produced by
+    /// [`crate::runner::mentor_review_profile`]. If it's empty, the output is
+    /// identical to [`AgentProfile::as_preamble`].
+    pub fn as_preamble_with_library(&self, task: &str, references_block: &str) -> String {
+        if references_block.trim().is_empty() {
+            return self.as_preamble(task);
+        }
+        format!(
+            "{}\n\n---\n\n{}\n\n---\n\n## Your Task\n\n{}",
+            self.prompt, references_block, task,
+        )
+    }
+
     /// Short display label: "Name (role)"
     pub fn label(&self) -> String {
         if self.role.is_empty() {

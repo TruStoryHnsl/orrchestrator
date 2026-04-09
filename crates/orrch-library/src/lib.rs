@@ -12,3 +12,9 @@ pub use model::{ModelEntry, ModelTier, PricingModel, Valve, ValveStore, load_mod
 pub use harness::{HarnessEntry, load_harnesses};
 pub use mcp::{McpServerEntry, McpTransport, load_mcp_servers, save_mcp_server};
 pub use sync::{clone_if_missing, sync_pull, sync_push};
+
+/// Canonical path (relative to the project root) where per-harness / per-model
+/// translated context files and syntax catalogs live. Downstream tooling (the
+/// Syntax Translation Engine, PLAN.md item 63) should use this constant so the
+/// location stays in one place.
+pub const TRANSLATIONS_DIR: &str = "library/translations";
