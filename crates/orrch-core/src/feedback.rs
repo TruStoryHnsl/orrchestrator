@@ -232,9 +232,28 @@ pub fn append_to_inbox(
          Generated: {timestamp}\n\
          Executed: pending\n"
     )?;
+    // Flush the append before the truncation check so the byte size reflects
+    // the new entry.
+    drop(file);
+
+    // Task 27b (Layer a): COO intake compression hook. Every inbox write —
+    // including instructions distributed from intake review confirmation —
+    // triggers a one-time truncation check. `truncate_inbox_if_large` is a
+    // no-op when the file is under the threshold, so this is cheap.
+    if let Err(err) = truncate_inbox_if_large(project_dir, INBOX_WRITE_SOFT_CAP) {
+        tracing::warn!(
+            "append_to_inbox: post-write truncate failed for {}: {err}",
+            project_dir.display()
+        );
+    }
 
     Ok(())
 }
+
+/// Soft cap (bytes) used by `append_to_inbox` to trigger post-write
+/// compression. Keep this aligned with the walker tick cap in the TUI main
+/// loop so both entry points converge on the same steady-state size.
+const INBOX_WRITE_SOFT_CAP: usize = 65_536;
 
 pub fn chrono_lite_timestamp() -> String {
     // Simple timestamp without chrono dependency

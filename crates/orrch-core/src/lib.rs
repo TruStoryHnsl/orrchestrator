@@ -32,5 +32,5 @@ pub use diff_log::{DiffEntry, diff_log_path, append_diff, load_diffs, load_all_d
 pub use project::{list_directory, load_deprecated, load_projects, package_as_v1, update_feature_status_in_plan, ColorTag, DirEntry, Project, ProjectMeta, RoadmapItem, Scope, Temperature};
 pub use session::{ExternalSession, Session, SessionState};
 pub use usage::{RateLimitConfig, UsageTracker};
-pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision};
+pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};

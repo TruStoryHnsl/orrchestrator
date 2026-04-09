@@ -176,6 +176,29 @@ pub fn load_review_at(workspace: &Path) -> Option<IntakeReview> {
     })
 }
 
+/// Task 27b: distribute a COO-optimized instruction block from an intake
+/// review into a target project's inbox, then run `truncate_inbox_if_large`
+/// on that project's inbox so the one-time compression sweep fires at write
+/// time rather than waiting for the periodic walker tick.
+///
+/// `append_to_inbox` already invokes the truncation hook internally, but this
+/// helper lets the intake_review distribution path call a single function and
+/// makes the compression contract explicit at the call site.
+pub fn distribute_to_inbox_from_intake(
+    optimized_text: &str,
+    project_dir: &Path,
+    timestamp: &str,
+    max_bytes: usize,
+) -> anyhow::Result<()> {
+    crate::feedback::append_to_inbox(optimized_text, project_dir, timestamp)?;
+    // Redundant with the hook inside append_to_inbox but explicit per the
+    // Task 27b acceptance criterion. `truncate_inbox_if_large` is idempotent
+    // and a no-op when the file is already under the cap, so running it
+    // twice is harmless and keeps the contract visible in both entry points.
+    let _ = crate::feedback::truncate_inbox_if_large(project_dir, max_bytes);
+    Ok(())
+}
+
 /// Write the user's decision back to the review file. Preserves source_idea
 /// so subsequent loads can still trace the file back to its origin idea.
 pub fn write_intake_decision(
