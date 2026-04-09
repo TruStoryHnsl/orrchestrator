@@ -737,8 +737,18 @@ fn read_description_from_claude_md(path: &Path) -> String {
 }
 
 fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
+    // Strip numeric prefix "N." if present (e.g. "12. [x] **Title**")
     let rest = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
     let rest = rest.trim_start();
+    // Strip markdown bullet prefix if present (e.g. "- [x] **Title**", "* [ ] foo").
+    // Without this, any project using bulleted checklists (concord, orrapus,
+    // orradash, most of orrbeam) has zero items counted in its progress display.
+    let rest = rest
+        .strip_prefix("- ")
+        .or_else(|| rest.strip_prefix("* "))
+        .or_else(|| rest.strip_prefix("+ "))
+        .map(str::trim_start)
+        .unwrap_or(rest);
 
     // Check for strikethrough → Deprecated
     let (status, rest) = if rest.starts_with("~~") && rest.ends_with("~~") {
@@ -878,6 +888,31 @@ mod tests {
         let item = parse_roadmap_line("6. [v] **Feature Z** — verified").unwrap();
         assert_eq!(item.status, FeatureStatus::Verified);
         assert!(item.done()); // verified counts as done
+    }
+
+    #[test]
+    fn test_parse_roadmap_bulleted_done() {
+        // Concord and other projects use "- [x] **Title**" format.
+        let item = parse_roadmap_line("- [x] **iOS build pipeline** — Tauri v2 compiles").unwrap();
+        assert!(item.done());
+        assert_eq!(item.status, FeatureStatus::Done);
+        assert_eq!(item.title, "iOS build pipeline");
+        assert_eq!(item.number, 0); // unnumbered
+    }
+
+    #[test]
+    fn test_parse_roadmap_bulleted_open() {
+        let item = parse_roadmap_line("- [ ] Sideload test builds to physical iOS devices").unwrap();
+        assert!(!item.done());
+        assert_eq!(item.status, FeatureStatus::Planned);
+        assert_eq!(item.title, "Sideload test builds to physical iOS devices");
+    }
+
+    #[test]
+    fn test_parse_roadmap_bulleted_star() {
+        let item = parse_roadmap_line("* [x] **Something** — done").unwrap();
+        assert!(item.done());
+        assert_eq!(item.title, "Something");
     }
 
     #[test]
