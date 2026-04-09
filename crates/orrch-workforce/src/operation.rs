@@ -28,6 +28,11 @@ pub struct Step {
     pub operation: String,
     /// Steps with the same parallel group run concurrently.
     pub parallel_group: Option<u32>,
+    /// Optional per-step model override (e.g., "claude_opus", "gpt4o").
+    /// When `Some`, this step runs on the named model regardless of the
+    /// workflow's default. `None` means use the default model selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 /// What triggers an operation to start.
@@ -116,6 +121,7 @@ mod tests {
                     tool_or_skill: None,
                     operation: "separate dev instructions from other input".into(),
                     parallel_group: None,
+                    model_override: None,
                 },
                 Step {
                     index: "2".into(),
@@ -123,6 +129,7 @@ mod tests {
                     tool_or_skill: Some("skill:clarify".into()),
                     operation: "process raw instructions into optimized instructions".into(),
                     parallel_group: None,
+                    model_override: None,
                 },
                 Step {
                     index: "3".into(),
@@ -130,6 +137,7 @@ mod tests {
                     tool_or_skill: Some("skill:parse".into()),
                     operation: "determine which project each instruction goes to".into(),
                     parallel_group: None,
+                    model_override: None,
                 },
             ],
             interrupts: vec![],
@@ -145,10 +153,10 @@ mod tests {
             trigger: TriggerCondition::InboxNotEmpty { project: "*".into() },
             blocker: Some(BlockCondition::ApiRateLimited { provider: "any".into() }),
             steps: vec![
-                Step { index: "1".into(), agent: "Project Manager".into(), tool_or_skill: None, operation: "synthesize instructions".into(), parallel_group: None },
-                Step { index: "2".into(), agent: "Developer".into(), tool_or_skill: None, operation: "execute coding tasks".into(), parallel_group: Some(1) },
-                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "conduct research".into(), parallel_group: Some(1) },
-                Step { index: "2".into(), agent: "Feature Tester".into(), tool_or_skill: None, operation: "design tests".into(), parallel_group: Some(1) },
+                Step { index: "1".into(), agent: "Project Manager".into(), tool_or_skill: None, operation: "synthesize instructions".into(), parallel_group: None, model_override: None },
+                Step { index: "2".into(), agent: "Developer".into(), tool_or_skill: None, operation: "execute coding tasks".into(), parallel_group: Some(1), model_override: None },
+                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "conduct research".into(), parallel_group: Some(1), model_override: None },
+                Step { index: "2".into(), agent: "Feature Tester".into(), tool_or_skill: None, operation: "design tests".into(), parallel_group: Some(1), model_override: None },
             ],
             interrupts: vec![InterruptCondition::UserCancel],
         };

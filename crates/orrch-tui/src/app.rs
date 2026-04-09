@@ -2691,6 +2691,17 @@ impl App {
                 self.request_vim(VimKind::MasterPlanAppend(proj_idx));
                 return Ok(());
             }
+            KeyCode::Char('P') => {
+                // Direct PM interaction: spawn a Claude session invoking the
+                // pm-plan-edit skill so the user can edit PLAN.md via natural
+                // language. Item #51.
+                if let Some(proj) = self.projects.get(proj_idx) {
+                    let path = proj.path.clone();
+                    let goal = "/agent:project_manager use the pm-plan-edit skill to continue editing PLAN.md per user instructions";
+                    let _ = self.spawn_session(&path, BackendKind::Claude, Some(goal));
+                }
+                return Ok(());
+            }
             KeyCode::Char('n') => {
                 self.spawn_project_idx = proj_idx;
                 self.spawn_goal_text.clear();

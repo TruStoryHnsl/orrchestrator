@@ -180,16 +180,114 @@ impl AgentRunner {
             }
         }
 
-        // Handoff from previous agent
+        // Handoff from previous agent (compressed to drop reasoning/preamble)
+        let compressed = compress_handoff(handoff_content);
         parts.push(format!(
             "## Handoff from {}\n\n{}",
-            handoff_from, handoff_content
+            handoff_from, compressed
         ));
 
         parts.push(format!("## Your Task\n\n{}", task));
 
         parts.join("\n\n---\n\n")
     }
+}
+
+/// Compress an agent's output for handoff to the next agent.
+/// Strips reasoning blocks (<thinking>...</thinking>), drops common preamble
+/// lines that don't carry decision content, and collapses excessive blank lines.
+/// Preserves substantive output: code blocks, file paths, conclusions.
+pub fn compress_handoff(text: &str) -> String {
+    // --- Step 1: Strip <thinking>...</thinking> blocks (multiline-safe) ---
+    let stripped = strip_thinking_blocks(text);
+
+    // --- Step 2: Drop preamble lines (unless inside a fenced code block) ---
+    const PREAMBLE_PREFIXES: &[&str] = &[
+        "let me ",
+        "i'll start by",
+        "i'll begin",
+        "first, i need to",
+        "first, let me",
+        "looking at this",
+        "looking at the",
+        "i'm going to",
+        "let's ",
+        "okay, ",
+        "ok, ",
+        "alright",
+    ];
+
+    let mut kept: Vec<String> = Vec::new();
+    let mut in_code_block = false;
+    for line in stripped.lines() {
+        let trimmed = line.trim_start();
+        // Toggle code-block state on fence lines
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            kept.push(line.to_string());
+            continue;
+        }
+        if in_code_block {
+            kept.push(line.to_string());
+            continue;
+        }
+        // Outside code block: check for preamble match
+        let lower = trimmed.to_lowercase();
+        let is_preamble = PREAMBLE_PREFIXES.iter().any(|p| lower.starts_with(p));
+        if is_preamble {
+            continue;
+        }
+        kept.push(line.to_string());
+    }
+
+    // --- Step 3: Collapse 3+ consecutive blank lines into a single blank line ---
+    let mut result: Vec<String> = Vec::with_capacity(kept.len());
+    let mut blank_run = 0usize;
+    for line in kept {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run <= 1 {
+                result.push(line);
+            }
+            // drop additional blanks
+        } else {
+            blank_run = 0;
+            result.push(line);
+        }
+    }
+
+    result.join("\n")
+}
+
+/// Strip `<thinking>...</thinking>` blocks from text via a simple state machine.
+/// Non-greedy, multiline-safe. Unclosed opening tags drop everything after them.
+fn strip_thinking_blocks(text: &str) -> String {
+    const OPEN: &str = "<thinking>";
+    const CLOSE: &str = "</thinking>";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        match rest.find(OPEN) {
+            None => {
+                out.push_str(rest);
+                break;
+            }
+            Some(open_idx) => {
+                out.push_str(&rest[..open_idx]);
+                let after_open = &rest[open_idx + OPEN.len()..];
+                match after_open.find(CLOSE) {
+                    None => {
+                        // Unclosed: drop the rest
+                        break;
+                    }
+                    Some(close_idx) => {
+                        rest = &after_open[close_idx + CLOSE.len()..];
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Determines if an agent role requires context isolation (verification agents).
@@ -276,6 +374,50 @@ mod tests {
     }
 
     #[test]
+    fn test_compress_handoff_strips_thinking() {
+        let input = "<thinking>internal reasoning here</thinking>\nFinal answer.";
+        let out = compress_handoff(input);
+        assert!(!out.contains("internal reasoning"), "thinking block not stripped: {:?}", out);
+        assert!(out.contains("Final answer."), "final answer missing: {:?}", out);
+    }
+
+    #[test]
+    fn test_compress_handoff_strips_preamble() {
+        let input = "Let me check the code.\nLooking at this file, I see the issue.\nThe fix is in foo.rs:42.";
+        let out = compress_handoff(input);
+        assert!(!out.contains("Let me check"), "preamble 'Let me' not stripped: {:?}", out);
+        assert!(!out.contains("Looking at this"), "preamble 'Looking at this' not stripped: {:?}", out);
+        assert!(out.contains("The fix is in foo.rs:42."), "substantive line missing: {:?}", out);
+    }
+
+    #[test]
+    fn test_compress_handoff_preserves_code_blocks() {
+        let input = "Summary:\n```rust\nlet me reassign x = 5;\n```\nDone.";
+        let out = compress_handoff(input);
+        // The "let me reassign" line is inside a fenced code block, so it must be kept.
+        assert!(out.contains("let me reassign x = 5;"), "code-block line was stripped: {:?}", out);
+        assert!(out.contains("```"), "code fence missing: {:?}", out);
+        assert!(out.contains("Summary:"));
+        assert!(out.contains("Done."));
+    }
+
+    #[test]
+    fn test_compress_handoff_collapses_blank_lines() {
+        let input = "line one\n\n\n\n\n\nline two";
+        let out = compress_handoff(input);
+        // Should collapse the run of blank lines to a single blank line:
+        // "line one\n\nline two"
+        assert_eq!(out, "line one\n\nline two", "blank lines not collapsed: {:?}", out);
+    }
+
+    #[test]
+    fn test_compress_handoff_multiple_thinking_blocks() {
+        let input = "A<thinking>one</thinking>B<thinking>two</thinking>C";
+        let out = compress_handoff(input);
+        assert_eq!(out, "ABC");
+    }
+
+    #[test]
     fn test_is_verification_role() {
         assert!(is_verification_role("Feature Tester"));
         assert!(is_verification_role("Beta Tester"));
@@ -326,6 +468,7 @@ mod tests {
                         tool_or_skill: None,
                         operation: "plan the work".into(),
                         parallel_group: None,
+                        model_override: None,
                     },
                     Step {
                         index: "2".into(),
@@ -333,6 +476,7 @@ mod tests {
                         tool_or_skill: Some("skill:code".into()),
                         operation: "implement the feature".into(),
                         parallel_group: None,
+                        model_override: None,
                     },
                 ],
                 interrupts: vec![],

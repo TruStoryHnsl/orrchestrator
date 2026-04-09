@@ -24,7 +24,7 @@ pub use audit::{AuditEntry, ChunkCoordinate, compute_source_hash, write_audit_en
 pub use backend::{BackendKind, BackendsConfig, is_provider_available};
 pub use provider::{ProviderConfig, ProviderKind};
 pub use config::Config;
-pub use feedback::{save_and_route_feedback, CONTINUE_DEV_PROMPT, FeedbackItem, FeedbackStatus, FeedbackType, load_feedback_items, submit_feedback, delete_feedback, create_draft, create_append_draft, mark_as_processing, mark_as_processed, mark_as_routed, check_processing_complete, write_feedback_metadata, set_feedback_type, tmux_session_status, truncate_inbox_if_large, trim_completed_entries};
+pub use feedback::{save_and_route_feedback, CONTINUE_DEV_PROMPT, FeedbackItem, FeedbackStatus, FeedbackType, load_feedback_items, submit_feedback, delete_feedback, create_draft, create_append_draft, mark_as_processing, mark_as_processed, mark_as_routed, check_processing_complete, write_feedback_metadata, set_feedback_type, tmux_session_status, truncate_inbox_if_large, trim_completed_entries, maintain_all_project_inboxes, InboxMaintenanceReport};
 pub use output_parser::{analyze_output, infer_state, OutputSignal};
 pub use process_manager::ProcessManager;
 pub use plan_parser::{parse_plan, parse_status_marker, PlanPhase, PlanFeature, FeatureStatus, RemovalContext, MoveDirection, move_feature_in_plan, append_feature_to_plan, mark_verified_in_plan};

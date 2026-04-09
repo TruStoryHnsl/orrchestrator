@@ -728,6 +728,94 @@ pub fn trim_completed_entries(project_dir: &Path) -> anyhow::Result<usize> {
     Ok(removed)
 }
 
+/// Report from [`maintain_all_project_inboxes`].
+#[derive(Debug, Default)]
+pub struct InboxMaintenanceReport {
+    /// Project dirs whose inbox was truncated.
+    pub truncated: Vec<PathBuf>,
+    /// (Project dir, count of entries removed) pairs from [`trim_completed_entries`].
+    pub trimmed: Vec<(PathBuf, usize)>,
+}
+
+/// Walk every direct subdirectory of `projects_dir` containing
+/// `instructions_inbox.md`, then run [`truncate_inbox_if_large`] and
+/// [`trim_completed_entries`] on each. Returns a report of what changed.
+///
+/// Errors on individual projects are logged via `tracing::warn!` and the walk
+/// continues. Dotfile dirs and non-directory entries are skipped. Returns an
+/// error only if `projects_dir` cannot be read at all.
+pub fn maintain_all_project_inboxes(
+    projects_dir: &Path,
+    max_bytes: usize,
+) -> anyhow::Result<InboxMaintenanceReport> {
+    let mut report = InboxMaintenanceReport::default();
+
+    let read_dir = fs::read_dir(projects_dir)?;
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => {
+                tracing::warn!(
+                    "maintain_all_project_inboxes: failed to read entry in {}: {err}",
+                    projects_dir.display()
+                );
+                continue;
+            }
+        };
+
+        // Skip dotfile entries (by name).
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with('.') {
+            continue;
+        }
+
+        // Skip non-directories.
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(err) => {
+                tracing::warn!(
+                    "maintain_all_project_inboxes: failed file_type for {}: {err}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let project_path = entry.path();
+        if !project_path.join("instructions_inbox.md").exists() {
+            continue;
+        }
+
+        match truncate_inbox_if_large(&project_path, max_bytes) {
+            Ok(true) => report.truncated.push(project_path.clone()),
+            Ok(false) => {}
+            Err(err) => {
+                tracing::warn!(
+                    "maintain_all_project_inboxes: truncate failed for {}: {err}",
+                    project_path.display()
+                );
+            }
+        }
+
+        match trim_completed_entries(&project_path) {
+            Ok(0) => {}
+            Ok(n) => report.trimmed.push((project_path.clone(), n)),
+            Err(err) => {
+                tracing::warn!(
+                    "maintain_all_project_inboxes: trim failed for {}: {err}",
+                    project_path.display()
+                );
+            }
+        }
+    }
+
+    Ok(report)
+}
+
 /// Split an inbox file into `## Entry:` blocks. Each returned entry starts with
 /// `## Entry:` and ends just before the next one (or EOF).
 fn split_entries(contents: &str) -> Vec<String> {
@@ -975,6 +1063,74 @@ mod tests {
 
         let trimmed = trim_completed_entries(project).unwrap();
         assert_eq!(trimmed, 0, "missing file should yield Ok(0)");
+    }
+
+    #[test]
+    fn test_maintain_all_project_inboxes() {
+        let tmp = TempDir::new().unwrap();
+        let projects_dir = tmp.path();
+
+        // projA: 5 entries, oversized (each body ~1KB, total well over 5KB)
+        let proj_a = projects_dir.join("projA");
+        fs::create_dir(&proj_a).unwrap();
+        let mut a_contents = String::from("# projA — Instructions Inbox\n");
+        for i in 1..=5 {
+            let body = format!("a-entry-{i}-").repeat(100);
+            write_entry(&mut a_contents, &format!("2026-04-08 11:0{i}"), &body, "pending");
+        }
+        fs::write(proj_a.join("instructions_inbox.md"), &a_contents).unwrap();
+        assert!(a_contents.len() > 4096, "setup: projA must exceed limit");
+
+        // projB: 3 entries, one marked Executed: complete
+        let proj_b = projects_dir.join("projB");
+        fs::create_dir(&proj_b).unwrap();
+        let mut b_contents = String::from("# projB — Instructions Inbox\n");
+        write_entry(&mut b_contents, "2026-04-08 12:01", "b-pending body", "pending");
+        write_entry(&mut b_contents, "2026-04-08 12:02", "b-done body", "complete");
+        write_entry(&mut b_contents, "2026-04-08 12:03", "b-more body", "pending");
+        fs::write(proj_b.join("instructions_inbox.md"), &b_contents).unwrap();
+
+        // projC: no inbox file at all
+        let proj_c = projects_dir.join("projC");
+        fs::create_dir(&proj_c).unwrap();
+
+        // Dotfile dir with an inbox — should be skipped entirely
+        let dot_dir = projects_dir.join(".feedback");
+        fs::create_dir(&dot_dir).unwrap();
+        fs::write(dot_dir.join("instructions_inbox.md"), "# should be ignored\n").unwrap();
+
+        let report = maintain_all_project_inboxes(projects_dir, 4096).unwrap();
+
+        assert!(
+            report.truncated.iter().any(|p| p == &proj_a),
+            "projA should have been truncated, got: {:?}",
+            report.truncated
+        );
+        assert!(
+            !report.truncated.iter().any(|p| p == &proj_b),
+            "projB was under the limit, should not be truncated"
+        );
+        assert!(
+            !report.truncated.iter().any(|p| p == &proj_c),
+            "projC has no inbox, should not appear"
+        );
+
+        let b_trim = report.trimmed.iter().find(|(p, _)| p == &proj_b);
+        assert!(b_trim.is_some(), "projB should appear in trimmed: {:?}", report.trimmed);
+        assert_eq!(b_trim.unwrap().1, 1, "projB should have 1 completed entry removed");
+
+        assert!(
+            !report.trimmed.iter().any(|(p, _)| p == &proj_c),
+            "projC has no inbox, should not appear in trimmed"
+        );
+        assert!(
+            !report.truncated.iter().any(|p| p == &dot_dir),
+            "dotfile dirs must be skipped"
+        );
+        assert!(
+            !report.trimmed.iter().any(|(p, _)| p == &dot_dir),
+            "dotfile dirs must be skipped"
+        );
     }
 
     #[test]

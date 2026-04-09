@@ -135,6 +135,54 @@ impl OperationExecution {
     }
 }
 
+/// Result of resolving a nested workforce reference on an agent node.
+#[derive(Debug, Clone)]
+pub struct NestedExpansion {
+    /// The inner workforce that the parent node expands into.
+    pub inner_workforce: crate::template::Workforce,
+    /// The id of the agent in the inner workforce whose output is the unit's result.
+    pub output_agent_id: String,
+    /// The agent profile name of that output agent.
+    pub output_agent_profile: String,
+}
+
+/// Resolve a nested workforce reference on a parent workforce node.
+///
+/// Lookup logic:
+/// 1. Find the node in `parent.agents` matching `node_id`.
+/// 2. If `node.nested_workforce` is `None`, return `None`.
+/// 3. Find a workforce in `all_workforces` whose `name` matches the nested reference.
+///    If not found, return `None`.
+/// 4. Identify the inner workforce's "output" agent: the agent with `user_facing == true`.
+///    If none has `user_facing`, fall back to the FIRST agent in `inner.agents`.
+///    If `inner.agents` is empty, return `None`.
+/// 5. Return `Some(NestedExpansion { inner_workforce, output_agent_id, output_agent_profile })`.
+pub fn expand_nested_workforce(
+    parent: &crate::template::Workforce,
+    all_workforces: &[crate::template::Workforce],
+    node_id: &str,
+) -> Option<NestedExpansion> {
+    let node = parent.agents.iter().find(|a| a.id == node_id)?;
+    let nested_ref = node.nested_workforce.as_ref()?;
+    let inner = all_workforces.iter().find(|w| &w.name == nested_ref)?;
+
+    if inner.agents.is_empty() {
+        return None;
+    }
+
+    let output_agent = inner
+        .agents
+        .iter()
+        .find(|a| a.user_facing)
+        .unwrap_or(&inner.agents[0]);
+
+    Some(NestedExpansion {
+        inner_workforce: inner.clone(),
+        output_agent_id: output_agent.id.clone(),
+        output_agent_profile: output_agent.agent_profile.clone(),
+    })
+}
+
 /// Load operation modules from markdown files in a directory.
 pub fn load_operations(dir: &std::path::Path) -> Vec<Operation> {
     let mut ops = Vec::new();
@@ -225,10 +273,10 @@ mod tests {
             trigger: TriggerCondition::Manual,
             blocker: None,
             steps: vec![
-                Step { index: "1".into(), agent: "PM".into(), tool_or_skill: None, operation: "plan".into(), parallel_group: None },
-                Step { index: "2".into(), agent: "Dev".into(), tool_or_skill: None, operation: "code".into(), parallel_group: Some(1) },
-                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "research".into(), parallel_group: Some(1) },
-                Step { index: "3".into(), agent: "Tester".into(), tool_or_skill: None, operation: "test".into(), parallel_group: None },
+                Step { index: "1".into(), agent: "PM".into(), tool_or_skill: None, operation: "plan".into(), parallel_group: None, model_override: None },
+                Step { index: "2".into(), agent: "Dev".into(), tool_or_skill: None, operation: "code".into(), parallel_group: Some(1), model_override: None },
+                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "research".into(), parallel_group: Some(1), model_override: None },
+                Step { index: "3".into(), agent: "Tester".into(), tool_or_skill: None, operation: "test".into(), parallel_group: None, model_override: None },
             ],
             interrupts: vec![],
         }
@@ -375,6 +423,90 @@ operations:
         let err = super::import_workforce_from_path(&path).expect_err("should fail");
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
         assert!(err.to_string().contains("failed to read workforce"));
+    }
+
+    fn make_agent(id: &str, profile: &str, user_facing: bool, nested: Option<&str>) -> crate::template::AgentNode {
+        crate::template::AgentNode {
+            id: id.into(),
+            agent_profile: profile.into(),
+            user_facing,
+            nested_workforce: nested.map(|s| s.into()),
+        }
+    }
+
+    fn make_workforce(name: &str, agents: Vec<crate::template::AgentNode>) -> crate::template::Workforce {
+        crate::template::Workforce {
+            name: name.into(),
+            description: "test".into(),
+            agents,
+            connections: vec![],
+            operations: vec![],
+        }
+    }
+
+    #[test]
+    fn test_expand_nested_valid_ref() {
+        let parent = make_workforce(
+            "parent",
+            vec![make_agent("node_a", "Project Manager", false, Some("inner_team"))],
+        );
+        let inner = make_workforce(
+            "inner_team",
+            vec![
+                make_agent("dev1", "Developer", false, None),
+                make_agent("lead", "Software Engineer", true, None),
+            ],
+        );
+        let all = vec![inner];
+        let expansion = super::expand_nested_workforce(&parent, &all, "node_a")
+            .expect("should resolve");
+        assert_eq!(expansion.output_agent_id, "lead");
+        assert_eq!(expansion.output_agent_profile, "Software Engineer");
+        assert_eq!(expansion.inner_workforce.name, "inner_team");
+    }
+
+    #[test]
+    fn test_expand_nested_none_ref() {
+        let parent = make_workforce(
+            "parent",
+            vec![make_agent("node_a", "Project Manager", true, None)],
+        );
+        let all = vec![];
+        assert!(super::expand_nested_workforce(&parent, &all, "node_a").is_none());
+    }
+
+    #[test]
+    fn test_expand_nested_missing_inner() {
+        let parent = make_workforce(
+            "parent",
+            vec![make_agent("node_a", "Project Manager", false, Some("missing_team"))],
+        );
+        let other = make_workforce(
+            "other_team",
+            vec![make_agent("x", "Developer", true, None)],
+        );
+        let all = vec![other];
+        assert!(super::expand_nested_workforce(&parent, &all, "node_a").is_none());
+    }
+
+    #[test]
+    fn test_expand_nested_fallback_first_agent() {
+        let parent = make_workforce(
+            "parent",
+            vec![make_agent("node_a", "Project Manager", false, Some("inner_team"))],
+        );
+        let inner = make_workforce(
+            "inner_team",
+            vec![
+                make_agent("first", "Researcher", false, None),
+                make_agent("second", "Developer", false, None),
+            ],
+        );
+        let all = vec![inner];
+        let expansion = super::expand_nested_workforce(&parent, &all, "node_a")
+            .expect("should resolve");
+        assert_eq!(expansion.output_agent_id, "first");
+        assert_eq!(expansion.output_agent_profile, "Researcher");
     }
 
     #[test]

@@ -14,6 +14,10 @@ pub struct Config {
     /// Root directory of the library (git-backed repo).
     #[serde(default = "default_library_dir")]
     pub library_dir: PathBuf,
+    /// Git remote URL used when cloning the library into `library_dir`.
+    /// When `None`, library sync features are disabled.
+    #[serde(default)]
+    pub library_repo_url: Option<String>,
     /// Root directory for projects.
     #[serde(default = "default_projects_dir")]
     pub projects_dir: PathBuf,
@@ -25,6 +29,7 @@ impl Default for Config {
             backends: BackendsConfig::default(),
             agents_dir: default_agents_dir(),
             library_dir: default_library_dir(),
+            library_repo_url: None,
             projects_dir: default_projects_dir(),
         }
     }
