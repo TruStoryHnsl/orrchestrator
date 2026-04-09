@@ -36,6 +36,26 @@ async fn main() -> Result<()> {
         })
         .init();
 
+    // --- CLI arg handling ---
+    //
+    // Minimal hand-rolled arg parser (no clap) — we only have one flag today.
+    // `--egui` launches the native egui window scaffold (PLAN items 38/39)
+    // INSTEAD of the TUI. When the `egui-window` feature is disabled this
+    // returns a clear error.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--egui") {
+        return orrch_tui::launch_egui_window();
+    }
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("orrchestrator — AI development pipeline hypervisor");
+        println!();
+        println!("USAGE:");
+        println!("  orrchestrator          Launch the TUI (default)");
+        println!("  orrchestrator --egui   Launch the native egui window (feature-gated)");
+        println!("  orrchestrator --help   Show this help");
+        return Ok(());
+    }
+
     if !io::stdout().is_terminal() {
         bail!(
             "orrchestrator requires a real terminal.\n\
