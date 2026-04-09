@@ -71,6 +71,30 @@ impl OperationExecution {
         }
     }
 
+    /// Runtime dispatch entry point (Tasks 35 + 57).
+    ///
+    /// Walks the current step batch from `next_steps()` and maps each step
+    /// through [`resolve_step_for_dispatch`] against the supplied workforce
+    /// and workforces catalog. Returns the fully-resolved batch that a
+    /// dispatcher should spawn: each `ResolvedStep` carries the effective
+    /// agent profile (post nested workforce expansion) and any per-step
+    /// model override.
+    ///
+    /// This is the single point where a Rust-side dispatch loop should
+    /// turn operation state into dispatchable work — it avoids ad-hoc
+    /// callers reaching into `Step` fields and forgetting to honor
+    /// nested workforces or model overrides.
+    pub fn next_resolved_steps(
+        &self,
+        workforce: &Workforce,
+        all_workforces: &[Workforce],
+    ) -> Vec<ResolvedStep> {
+        self.next_steps()
+            .into_iter()
+            .map(|step| resolve_step_for_dispatch(step, workforce, all_workforces))
+            .collect()
+    }
+
     /// Advance past the current step(s) after they complete.
     pub fn advance(&mut self, results: Vec<StepResult>) {
         let batch_size = self.next_steps().len();

@@ -9,6 +9,8 @@ name = "orrch-mcp-server"
 path = "src/main.rs"
 
 [dependencies]
+orrch-agents = { path = "../orrch-agents" }
+orrch-workforce = { path = "../orrch-workforce" }
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
