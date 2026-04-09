@@ -13,6 +13,11 @@ pub struct HarnessEntry {
     pub flags: Vec<String>,
     pub available: bool,
     pub notes: String,
+    /// ISO 8601 date/time of the last Mentor-triggered refresh of this entry.
+    /// Populated from the YAML frontmatter field `last_checked`; `None` means
+    /// the entry has never been verified (PLAN item 58).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked: Option<String>,
     #[serde(skip)]
     pub path: PathBuf,
 }
@@ -67,6 +72,7 @@ fn parse_harness_file(path: &Path) -> Option<HarnessEntry> {
         flags: extract_list(&fm, "flags"),
         available: false, // set by load_harnesses
         notes: body.trim().to_string(),
+        last_checked: extract(&fm, "last_checked"),
         path: path.to_path_buf(),
     })
 }
@@ -95,9 +101,36 @@ mod tests {
             flags: vec!["--dangerously-skip-permissions".into()],
             available: true,
             notes: String::new(),
+            last_checked: None,
             path: PathBuf::new(),
         };
         assert!(h.summary_line().contains("●"));
         assert!(h.summary_line().contains("Claude Code"));
+    }
+
+    #[test]
+    fn test_harness_last_checked_defaults_none() {
+        // parse_harness_file should return None for last_checked when the
+        // frontmatter has no such field (the real claude_code.md doesn't).
+        let tmp = std::env::temp_dir().join("orrch_last_checked_test.md");
+        std::fs::write(
+            &tmp,
+            "---\nname: LCtest\ncommand: lctest\n---\n\nBody.\n",
+        ).unwrap();
+        let parsed = parse_harness_file(&tmp).unwrap();
+        assert_eq!(parsed.last_checked, None);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_harness_last_checked_parses_when_present() {
+        let tmp = std::env::temp_dir().join("orrch_last_checked_test2.md");
+        std::fs::write(
+            &tmp,
+            "---\nname: LCtest\ncommand: lctest\nlast_checked: 2026-04-08\n---\n\nBody.\n",
+        ).unwrap();
+        let parsed = parse_harness_file(&tmp).unwrap();
+        assert_eq!(parsed.last_checked.as_deref(), Some("2026-04-08"));
+        let _ = std::fs::remove_file(&tmp);
     }
 }
