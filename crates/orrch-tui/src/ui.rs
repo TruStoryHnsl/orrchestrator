@@ -395,9 +395,15 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.workforce_tab == WorkforceTab::Workflows {
-        format!(" {} ({}) — n=new Enter=edit d=del x=export i=import ", app.workforce_tab.label(), items_data.len())
+        format!(
+            " {} ({}) — n=new N=AI-assisted Enter=edit d=del x=export i=import ",
+            app.workforce_tab.label(), items_data.len(),
+        )
     } else {
-        format!(" {} ({}) — n=new Enter=edit d=del ", app.workforce_tab.label(), items_data.len())
+        format!(
+            " {} ({}) — n=new N=AI-assisted Enter=edit d=del ",
+            app.workforce_tab.label(), items_data.len(),
+        )
     };
     frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
 
@@ -568,7 +574,7 @@ fn draw_library_agents(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
             Span::styled(format!(" [{}]", profile.department), Style::default().fg(TEXT_MUTED)),
         ])));
     }
-    let title = format!(" Agents ({}) — n=new Enter=edit d=del ", app.agent_profiles.len());
+    let title = format!(" Agents ({}) — n=new N=AI-assisted Enter=edit d=del ", app.agent_profiles.len());
     frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
 
     let preview = if let Some(p) = app.agent_profiles.get(app.library_selected) {

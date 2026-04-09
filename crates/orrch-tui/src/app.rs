@@ -1772,6 +1772,65 @@ impl App {
                     Err(e) => self.notify(format!("Failed: {e}")),
                 }
             }
+            KeyCode::Char('N') => {
+                // Task 31: AI-assisted creation.
+                //
+                // Same template path as `n`, but we prepend a prominent
+                // "AI assistance" header comment to the freshly-created file
+                // so the user can immediately describe what they want and
+                // hand the file to a Claude session. This is the first slice
+                // — a real "spawn Claude session with a creation-assistant
+                // prompt" hook will replace the vim_request route in a
+                // follow-up slice (the session harness dispatch lives
+                // elsewhere and isn't wired yet).
+                if self.workforce_tab == WorkforceTab::Harnesses {
+                    self.notify("AI-assisted creation not available for Harnesses yet".into());
+                    return Ok(());
+                }
+                use orrch_library::templates::{TemplateCategory, create_from_template};
+                let category = match self.workforce_tab {
+                    WorkforceTab::Harnesses => unreachable!(),
+                    WorkforceTab::Workflows => TemplateCategory::Workforce,
+                    WorkforceTab::Teams => TemplateCategory::Operation,
+                    WorkforceTab::Agents => TemplateCategory::Agent,
+                    WorkforceTab::Skills => TemplateCategory::Skill,
+                    WorkforceTab::Tools => TemplateCategory::Tool,
+                    WorkforceTab::McpServers => TemplateCategory::McpServer,
+                    WorkforceTab::Profiles => TemplateCategory::Agent,
+                    WorkforceTab::TrainingData | WorkforceTab::Models => {
+                        self.notify("AI-assisted creation not available for this tab yet".into());
+                        return Ok(());
+                    }
+                };
+                let kind_label = self.workforce_tab.label();
+                let orrch_dir = self.projects_dir.join("orrchestrator");
+                match create_from_template(category, &orrch_dir) {
+                    Ok(path) => {
+                        // Prepend an AI-assistance header to the template
+                        // body so the user sees it on open. We preserve the
+                        // rest of the template file verbatim.
+                        let ai_header = ai_assistance_header(kind_label);
+                        if let Ok(existing) = std::fs::read_to_string(&path) {
+                            let merged = format!("{ai_header}\n\n{existing}");
+                            if let Err(e) = std::fs::write(&path, merged) {
+                                self.notify(format!("Failed to seed AI header: {e}"));
+                            }
+                        }
+                        let title = format!("[AI-assisted new {}]", kind_label);
+                        self.vim_request = Some(VimRequest {
+                            file: path,
+                            kind: VimKind::NewIdea,
+                            title,
+                        });
+                        self.notify(
+                            "AI-assisted draft created. Edit the intent block at the top \
+                             and submit the file to a Claude session to expand it."
+                                .into(),
+                        );
+                    }
+                    Err(e) => self.notify(format!("Failed: {e}")),
+                }
+            }
             KeyCode::Char('d') => {
                 if self.workforce_tab == WorkforceTab::Harnesses {
                     self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
@@ -4967,6 +5026,34 @@ fn default_projects_dir() -> PathBuf {
     PathBuf::from(home).join("projects")
 }
 
+/// Task 31: build a prominent header block that's prepended to new library
+/// items created via the "AI-assisted" flow (Shift+N in Design > Workforce).
+/// This block is what the user sees on open in vim — they fill in the intent,
+/// save, and then a follow-up slice will hand the file to a Claude session.
+fn ai_assistance_header(kind_label: &str) -> String {
+    format!(
+        "<!--\n\
+         ═══════════════════════════════════════════════════════════════════\n\
+         AI-ASSISTED CREATION (new {kind_label})\n\
+         ═══════════════════════════════════════════════════════════════════\n\n\
+         This file was created via Shift+N in Design > Workforce. Claude\n\
+         will help you expand this into a complete {kind_label} definition.\n\n\
+         STEP 1 — Describe your intent below (replace the placeholder):\n\n\
+         WHAT IT DOES:\n    <one-line summary>\n\n\
+         WHO USES IT:\n    <which agent role(s) invoke this>\n\n\
+         INPUTS:\n    <what the agent passes in>\n\n\
+         OUTPUTS:\n    <what the agent gets back>\n\n\
+         CONSTRAINTS / NOTES:\n    <anything special — time limits, \n\
+         deterministic vs judgement, tool access, etc.>\n\n\
+         STEP 2 — Save & quit. The file will be routed to a Claude session\n\
+         (in a follow-up slice) that expands your intent into the full\n\
+         structured markdown body below.\n\n\
+         STEP 3 — Review Claude's draft, edit as needed, save again.\n\
+         ═══════════════════════════════════════════════════════════════════\n\
+         -->",
+    )
+}
+
 /// Scan a directory for .md files and return (title, path) pairs.
 /// Title is extracted from the first `## ` heading or the filename.
 fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
@@ -5042,4 +5129,28 @@ fn detect_current_output() -> Option<String> {
         .ok()?;
     let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if name.is_empty() { None } else { Some(name) }
+}
+
+#[cfg(test)]
+mod app_tests {
+    use super::*;
+
+    #[test]
+    fn ai_assistance_header_contains_kind_label() {
+        let h = ai_assistance_header("Skill");
+        assert!(h.contains("Skill"), "header should mention the kind label");
+        assert!(h.contains("AI-ASSISTED CREATION"));
+        assert!(h.contains("STEP 1"));
+        assert!(h.contains("STEP 2"));
+        assert!(h.contains("STEP 3"));
+    }
+
+    #[test]
+    fn ai_assistance_header_is_commented_out() {
+        // Header must be a Markdown HTML comment so it doesn't interfere
+        // with parsers that scan for the first "## " heading, frontmatter, etc.
+        let h = ai_assistance_header("Agent");
+        assert!(h.trim_start().starts_with("<!--"));
+        assert!(h.trim_end().ends_with("-->"));
+    }
 }
