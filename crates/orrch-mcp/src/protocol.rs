@@ -214,7 +214,7 @@ mod tests {
         let resp = handle_tools_list(Some(Value::Number(1.into())));
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 21);
         // Verify all tools have required fields.
         for tool in tools {
             assert!(tool.get("name").is_some());

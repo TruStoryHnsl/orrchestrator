@@ -8,6 +8,137 @@ use tracing::debug;
 
 use crate::session::ExternalSession;
 
+// ─── Output sanitization ─────────────────────────────────────────────
+//
+// Remote shells (especially fish with themed prompts) tend to emit ANSI
+// CSI and OSC escape sequences on stdout at startup — even for
+// non-interactive `ssh host 'bash -s -- …'` invocations. Those bytes get
+// prepended to the agent's JSON output on the same line, so naive
+// `line.starts_with('{')` parsing fails silently. We strip escape
+// sequences up front, then scan for balanced JSON objects within each
+// line.
+
+/// Strip ANSI CSI (`ESC [ ... final`) and OSC (`ESC ] ... ST`) escape
+/// sequences from a string. Also strips bare BEL (`\x07`) and stray
+/// DCS/APC/PM/SOS sequences. Non-escape bytes pass through unchanged.
+pub(crate) fn strip_ansi(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x1B && i + 1 < bytes.len() {
+            // ESC — look at the introducer byte.
+            let next = bytes[i + 1];
+            match next {
+                b'[' => {
+                    // CSI: parameters/intermediate bytes, then a final byte
+                    // in 0x40–0x7E. Skip until we hit the final byte.
+                    i += 2;
+                    while i < bytes.len() && !(0x40..=0x7E).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                }
+                b']' | b'P' | b'X' | b'^' | b'_' => {
+                    // OSC/DCS/SOS/PM/APC: terminated by ST (ESC \) or BEL.
+                    i += 2;
+                    while i < bytes.len() {
+                        if bytes[i] == 0x07 {
+                            i += 1;
+                            break;
+                        }
+                        if bytes[i] == 0x1B && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                            i += 2;
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {
+                    // Two-byte ESC sequence (e.g. ESC M, ESC 7, ESC (B).
+                    i += 2;
+                    // Some sequences have an additional charset byte.
+                    if next == b'(' || next == b')' || next == b'*' || next == b'+' {
+                        if i < bytes.len() {
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        // Strip bare BEL too — some shells emit it from OSC terminators
+        // when the ESC got eaten elsewhere.
+        if b == 0x07 {
+            i += 1;
+            continue;
+        }
+        out.push(b);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Find the first balanced JSON object (`{…}`) inside a string and
+/// return it as a slice. Quoted strings and escape characters inside
+/// JSON values are handled correctly. Returns None if no complete
+/// object is found.
+pub(crate) fn find_json_object(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let start = s.find('{')?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut i = start;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+        } else {
+            match b {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&s[start..=i]);
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Iterate JSON objects inside `text`, handling shell noise (escape
+/// sequences, prompt bytes) and mixed output. Each `{…}` object found
+/// via balanced-brace scanning is yielded.
+pub(crate) fn iter_json_objects(text: &str) -> Vec<String> {
+    let clean = strip_ansi(text);
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = clean.as_str();
+    while let Some(obj) = find_json_object(rest) {
+        out.push(obj.to_string());
+        let obj_end_offset = (obj.as_ptr() as usize + obj.len()) - rest.as_ptr() as usize;
+        if obj_end_offset >= rest.len() {
+            break;
+        }
+        rest = &rest[obj_end_offset..];
+    }
+    out
+}
+
 /// Embedded agent script — sent to remote hosts via SSH stdin each invocation.
 /// This ensures remotes always run the latest version without manual deployment.
 const AGENT_SCRIPT: &str = include_str!("../../../agent/orrch-agent.sh");
@@ -153,12 +284,8 @@ pub async fn discover_remote_sessions(host: &RemoteHost) -> Vec<ExternalSession>
     };
 
     let mut sessions = Vec::new();
-    for line in stdout.lines() {
-        let line = line.trim();
-        if line.is_empty() || !line.starts_with('{') {
-            continue;
-        }
-        match serde_json::from_str::<AgentDiscovery>(line) {
+    for obj in iter_json_objects(&stdout) {
+        match serde_json::from_str::<AgentDiscovery>(&obj) {
             Ok(disc) => {
                 sessions.push(ExternalSession {
                     pid: disc.pid,
@@ -169,7 +296,7 @@ pub async fn discover_remote_sessions(host: &RemoteHost) -> Vec<ExternalSession>
                 });
             }
             Err(e) => {
-                debug!("Failed to parse agent discovery line from {}: {e}", host.name);
+                debug!("Failed to parse agent discovery object from {}: {e}", host.name);
             }
         }
     }
@@ -189,16 +316,17 @@ pub async fn check_host_reachable(host: &mut RemoteHost) {
     match run_agent(host, "check").await {
         Some(stdout) => {
             host.reachable = true;
-            // Parse capabilities from the check output
-            for line in stdout.lines() {
-                let line = line.trim();
-                if line.starts_with('{') {
-                    if let Ok(caps) = serde_json::from_str::<HostCapabilities>(line) {
-                        debug!("Host {} capabilities: os={}, mux={}, claude={}, gemini={}",
-                            host.name, caps.os, caps.mux, caps.claude, caps.gemini);
-                        host.capabilities = Some(caps);
-                        break;
-                    }
+            // Parse capabilities tolerantly — remote shells (fish with
+            // themed prompts, in particular) emit terminal escape codes
+            // on the first line of output, so naive startswith('{')
+            // scanning silently fails. `iter_json_objects` strips
+            // ANSI/OSC noise and scans for balanced JSON objects.
+            for obj in iter_json_objects(&stdout) {
+                if let Ok(caps) = serde_json::from_str::<HostCapabilities>(&obj) {
+                    debug!("Host {} capabilities: os={}, mux={}, claude={}, gemini={}",
+                        host.name, caps.os, caps.mux, caps.claude, caps.gemini);
+                    host.capabilities = Some(caps);
+                    break;
                 }
             }
         }
@@ -263,11 +391,17 @@ pub async fn kill_remote_session(host: &RemoteHost, session_name: &str) -> bool 
 /// List orrchestrator-managed sessions on a remote host.
 pub async fn list_remote_managed_sessions(host: &RemoteHost) -> Vec<String> {
     match run_agent(host, "list").await {
-        Some(stdout) => stdout
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l.starts_with("orrch-"))
-            .collect(),
+        Some(stdout) => {
+            // Same shell-noise problem as check/discover — the first line
+            // can be preceded by OSC color codes from a themed prompt.
+            // Strip escapes before scanning for session names.
+            let clean = strip_ansi(&stdout);
+            clean
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty() && l.starts_with("orrch-"))
+                .collect()
+        }
         None => Vec::new(),
     }
 }
@@ -290,4 +424,93 @@ fn get_hostname() -> String {
         .unwrap_or_default()
         .trim()
         .to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_ansi_leaves_plain_text() {
+        assert_eq!(strip_ansi("hello world"), "hello world");
+        assert_eq!(strip_ansi(""), "");
+    }
+
+    #[test]
+    fn strip_ansi_removes_csi_sequences() {
+        // Red-colored "err" followed by reset + plain text.
+        let raw = "\x1b[31merr\x1b[0m ok";
+        assert_eq!(strip_ansi(raw), "err ok");
+    }
+
+    #[test]
+    fn strip_ansi_removes_osc_color_setup() {
+        // Classic Catppuccin OSC 10/11/12 prompt startup noise.
+        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\"}";
+        assert_eq!(strip_ansi(raw), "{\"os\":\"macos\"}");
+    }
+
+    #[test]
+    fn strip_ansi_handles_st_terminated_osc() {
+        // OSC terminated by ST (ESC \\) instead of BEL.
+        let raw = "\x1b]4;15;#a6adc8\x1b\\after";
+        assert_eq!(strip_ansi(raw), "after");
+    }
+
+    #[test]
+    fn find_json_object_simple() {
+        let s = "prefix {\"a\":1,\"b\":2} suffix";
+        assert_eq!(find_json_object(s), Some("{\"a\":1,\"b\":2}"));
+    }
+
+    #[test]
+    fn find_json_object_nested() {
+        let s = "{\"outer\":{\"inner\":[1,2,3]},\"end\":true}";
+        assert_eq!(find_json_object(s), Some(s));
+    }
+
+    #[test]
+    fn find_json_object_string_with_braces() {
+        // Braces inside a JSON string should NOT close the outer object.
+        let s = "{\"msg\":\"not a } close\",\"ok\":true}";
+        assert_eq!(find_json_object(s), Some(s));
+    }
+
+    #[test]
+    fn find_json_object_escaped_quote() {
+        let s = "{\"msg\":\"a \\\"quoted\\\" word\",\"ok\":true}";
+        assert_eq!(find_json_object(s), Some(s));
+    }
+
+    #[test]
+    fn find_json_object_none() {
+        assert_eq!(find_json_object("no object here"), None);
+        assert_eq!(find_json_object("{incomplete"), None);
+    }
+
+    #[test]
+    fn iter_json_objects_strips_shell_noise() {
+        // This is the actual failure mode that broke orrpheus:
+        // fish prompt OSC escapes prepended to the JSON line from the
+        // agent's `check` command.
+        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\",\"mux\":\"screen\",\"claude\":true,\"gemini\":false,\"projects_dir\":\"/Users/x/projects\",\"hostname\":\"orrpheus\"}\n\x1b]4;15;#a6adc8\x07";
+        let objects = iter_json_objects(raw);
+        assert_eq!(objects.len(), 1, "objects: {objects:?}");
+        let parsed: HostCapabilities = serde_json::from_str(&objects[0]).expect("JSON parses");
+        assert_eq!(parsed.os, "macos");
+        assert_eq!(parsed.mux, "screen");
+        assert!(parsed.claude);
+        assert!(!parsed.gemini);
+        assert_eq!(parsed.hostname, "orrpheus");
+    }
+
+    #[test]
+    fn iter_json_objects_multiple_lines() {
+        // `discover` emits one JSON object per line.
+        let raw = "\x1b]10;#cdd6f4\x07{\"pid\":42,\"cmdline\":\"claude\",\"cwd\":\"/a\"}\n{\"pid\":43,\"cmdline\":\"claude\",\"cwd\":\"/b\"}\n";
+        let objects = iter_json_objects(raw);
+        assert_eq!(objects.len(), 2);
+        assert!(objects[0].contains("\"pid\":42"));
+        assert!(objects[1].contains("\"pid\":43"));
+    }
 }

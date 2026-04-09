@@ -267,6 +267,108 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["output"]
             }
         }),
+        serde_json::json!({
+            "name": "skill_invoke",
+            "description": "Load any skill from the orrchestrator library (`library/skills/<name>.md`) and return its content with arguments substituted. Supports every skill listed by `list_skills` — workflow skills (develop-feature, instruction-intake, pm-plan-edit), agent role skills (agent-pm, agent-developer, agent-tester, …), and meta-skills (bugfix-record, release, feature-branch, repo-init, scope, versioning-init, interpret-user-instructions, commercial-audit). The skill's `$ARGUMENTS` placeholder (Claude Code slash command convention) is replaced with the provided `args` string; when no placeholder exists the args are prepended as an `## Arguments` preamble.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill filename without .md extension (e.g. 'develop-feature', 'bugfix-record', 'agent-pm')"
+                    },
+                    "args": {
+                        "type": "string",
+                        "description": "Arguments or goal text passed to the skill. Substituted into any `$ARGUMENTS` placeholder; otherwise prepended as a preamble."
+                    }
+                },
+                "required": ["name"]
+            }
+        }),
+        serde_json::json!({
+            "name": "remote_list_hosts",
+            "description": "List all known remote hosts (orrion, orrgate, orrpheus, …) with SSH target, reachability status, and probed capabilities (OS, session multiplexer, claude CLI presence, gemini CLI presence, projects_dir, hostname). Runs the orrch-agent `check` subcommand over SSH for every non-local host. Robust to shell color noise — tolerates themed fish/zsh prompts that emit ANSI/OSC escape sequences on the first line.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        serde_json::json!({
+            "name": "remote_discover_sessions",
+            "description": "Discover active Claude CLI sessions running on a remote host. Returns one JSON-like line per detected claude process with PID, command line, and current working directory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Host name from `remote_list_hosts` (e.g. 'orrpheus', 'orrgate', 'orrion')"
+                    }
+                },
+                "required": ["host"]
+            }
+        }),
+        serde_json::json!({
+            "name": "remote_list_sessions",
+            "description": "List orrchestrator-managed sessions (those starting with the `orrch-` prefix) on a remote host. Returns one session name per line.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Host name from `remote_list_hosts`"
+                    }
+                },
+                "required": ["host"]
+            }
+        }),
+        serde_json::json!({
+            "name": "remote_spawn_session",
+            "description": "Spawn an orrchestrator-managed Claude CLI session on a remote host. The remote agent auto-detects the best session multiplexer (tmux > screen > nohup) and runs the requested backend with the given goal inside `~/projects/<project>/`. Returns the session name on success.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Host name from `remote_list_hosts`"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project directory name under `~/projects/` on the remote host"
+                    },
+                    "backend": {
+                        "type": "string",
+                        "description": "Backend command to run (e.g. 'claude', 'gemini')"
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Initial goal string passed to the backend as its first prompt"
+                    },
+                    "flags": {
+                        "type": "string",
+                        "description": "Optional space-separated CLI flags to pass to the backend (e.g. '--dangerously-skip-permissions')"
+                    }
+                },
+                "required": ["host", "project", "backend", "goal"]
+            }
+        }),
+        serde_json::json!({
+            "name": "remote_kill_session",
+            "description": "Kill an orrchestrator-managed session on a remote host by name. Uses the remote agent's auto-detected multiplexer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Host name from `remote_list_hosts`"
+                    },
+                    "session_name": {
+                        "type": "string",
+                        "description": "Session name to kill (e.g. 'orrch-concord')"
+                    }
+                },
+                "required": ["host", "session_name"]
+            }
+        }),
     ]
 }
 
@@ -289,6 +391,12 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "workflow_init" => workflow_init(server, args),
         "workflow_cluster" => workflow_cluster(server, args),
         "workflow_compress" => workflow_compress(server, args),
+        "skill_invoke" => skill_invoke(server, args),
+        "remote_list_hosts" => remote_list_hosts().await,
+        "remote_discover_sessions" => remote_discover_sessions(args).await,
+        "remote_list_sessions" => remote_list_sessions(args).await,
+        "remote_spawn_session" => remote_spawn_session(args).await,
+        "remote_kill_session" => remote_kill_session(args).await,
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -1173,6 +1281,225 @@ fn workflow_compress(_server: &OrrchMcpServer, args: &Value) -> String {
     compress_agent_output(output)
 }
 
+// ─── Generic skill invocation ───────────────────────────────────────────────
+
+/// Load any skill from `<library>/skills/<name>.md` and return its content
+/// with caller-provided arguments substituted.
+///
+/// Substitution model:
+///   - Replace `$ARGUMENTS` placeholder (Claude Code slash-command convention)
+///     with the caller's `args` string.
+///   - If the skill has no `$ARGUMENTS` placeholder, prepend an
+///     `## Arguments` preamble so the agent still sees the input.
+fn skill_invoke(server: &OrrchMcpServer, args: &Value) -> String {
+    let name = match args.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n.trim(),
+        None => return "Error: 'name' parameter is required".into(),
+    };
+
+    if name.is_empty() {
+        return "Error: 'name' must be a non-empty string".into();
+    }
+
+    // Sanitize: reject anything that would escape the skills dir.
+    if name.contains('/') || name.contains("..") || name.contains('\\') {
+        return format!("Error: invalid skill name '{name}' — must be a plain filename stem");
+    }
+
+    let skill_args = args.get("args").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Allow callers to pass either `"develop-feature"` or `"develop-feature.md"`.
+    let filename = if name.ends_with(".md") {
+        name.to_string()
+    } else {
+        format!("{name}.md")
+    };
+    let path = server.skills_dir.join(&filename);
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            return format!(
+                "Error: cannot read skill '{filename}' from {}: {e}",
+                server.skills_dir.display()
+            );
+        }
+    };
+
+    if content.contains("$ARGUMENTS") {
+        content.replace("$ARGUMENTS", skill_args)
+    } else if skill_args.is_empty() {
+        content
+    } else {
+        format!("## Arguments\n\n{skill_args}\n\n---\n\n{content}")
+    }
+}
+
+// ─── Remote host tools ──────────────────────────────────────────────────────
+//
+// Thin wrappers over `orrch_core::remote`. Each tool probes or acts on
+// a known host via SSH + the embedded `orrch-agent.sh` script. Host
+// names are resolved through `known_hosts()`; callers pass the short
+// name (`orrpheus`, `orrgate`, `orrion`) rather than an SSH target.
+
+fn resolve_host(name: &str) -> Result<orrch_core::remote::RemoteHost, String> {
+    orrch_core::remote::known_hosts()
+        .into_iter()
+        .find(|h| h.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| {
+            let available: Vec<String> = orrch_core::remote::known_hosts()
+                .into_iter()
+                .map(|h| h.name)
+                .collect();
+            format!(
+                "Error: unknown host '{name}'. Available: {}",
+                available.join(", ")
+            )
+        })
+}
+
+async fn remote_list_hosts() -> String {
+    let mut hosts = orrch_core::remote::known_hosts();
+    for host in hosts.iter_mut() {
+        orrch_core::remote::check_host_reachable(host).await;
+    }
+
+    let mut out = String::from("## Remote Hosts\n\n");
+    for host in &hosts {
+        out.push_str(&format!(
+            "- **{}** ({}) — ssh: `{}`\n",
+            host.name,
+            if host.is_local {
+                "local"
+            } else if host.reachable {
+                "reachable"
+            } else {
+                "unreachable"
+            },
+            host.ssh_target
+        ));
+        if let Some(caps) = &host.capabilities {
+            out.push_str(&format!(
+                "    - os: {} | mux: {} | claude: {} | gemini: {} | hostname: {} | projects_dir: {}\n",
+                caps.os, caps.mux, caps.claude, caps.gemini, caps.hostname, caps.projects_dir
+            ));
+        } else if !host.is_local && host.reachable {
+            out.push_str("    - (reachable but no capability data — agent check parse failed)\n");
+        }
+    }
+    out
+}
+
+async fn remote_discover_sessions(args: &Value) -> String {
+    let host_name = match args.get("host").and_then(|v| v.as_str()) {
+        Some(h) => h,
+        None => return "Error: 'host' parameter is required".into(),
+    };
+    let host = match resolve_host(host_name) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+
+    let sessions = orrch_core::remote::discover_remote_sessions(&host).await;
+    if sessions.is_empty() {
+        return format!("No Claude sessions found on {}.", host.name);
+    }
+
+    let mut out = format!("## Claude sessions on {}\n\n", host.name);
+    for s in &sessions {
+        out.push_str(&format!(
+            "- pid {} — `{}` @ {}\n",
+            s.pid, s.cmdline, s.project_dir
+        ));
+    }
+    out
+}
+
+async fn remote_list_sessions(args: &Value) -> String {
+    let host_name = match args.get("host").and_then(|v| v.as_str()) {
+        Some(h) => h,
+        None => return "Error: 'host' parameter is required".into(),
+    };
+    let host = match resolve_host(host_name) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+
+    let sessions = orrch_core::remote::list_remote_managed_sessions(&host).await;
+    if sessions.is_empty() {
+        return format!("No orrch-managed sessions on {}.", host.name);
+    }
+    format!(
+        "## Managed sessions on {}\n\n{}",
+        host.name,
+        sessions
+            .iter()
+            .map(|s| format!("- {s}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
+async fn remote_spawn_session(args: &Value) -> String {
+    let host_name = match args.get("host").and_then(|v| v.as_str()) {
+        Some(h) => h,
+        None => return "Error: 'host' parameter is required".into(),
+    };
+    let project = match args.get("project").and_then(|v| v.as_str()) {
+        Some(p) => p,
+        None => return "Error: 'project' parameter is required".into(),
+    };
+    let backend = match args.get("backend").and_then(|v| v.as_str()) {
+        Some(b) => b,
+        None => return "Error: 'backend' parameter is required".into(),
+    };
+    let goal = match args.get("goal").and_then(|v| v.as_str()) {
+        Some(g) => g,
+        None => return "Error: 'goal' parameter is required".into(),
+    };
+    let flags: Vec<String> = args
+        .get("flags")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+
+    let host = match resolve_host(host_name) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+
+    match orrch_core::remote::spawn_remote_session(&host, project, backend, goal, &flags).await {
+        Ok(session_name) => format!(
+            "Spawned `{session_name}` on {} (backend: {backend}, project: {project}).",
+            host.name
+        ),
+        Err(e) => format!("Error: spawn failed on {}: {e}", host.name),
+    }
+}
+
+async fn remote_kill_session(args: &Value) -> String {
+    let host_name = match args.get("host").and_then(|v| v.as_str()) {
+        Some(h) => h,
+        None => return "Error: 'host' parameter is required".into(),
+    };
+    let session_name = match args.get("session_name").and_then(|v| v.as_str()) {
+        Some(s) => s,
+        None => return "Error: 'session_name' parameter is required".into(),
+    };
+    let host = match resolve_host(host_name) {
+        Ok(h) => h,
+        Err(e) => return e,
+    };
+
+    if orrch_core::remote::kill_remote_session(&host, session_name).await {
+        format!("Killed `{session_name}` on {}.", host.name)
+    } else {
+        format!("Error: kill failed for `{session_name}` on {}.", host.name)
+    }
+}
+
 /// Strip markdown formatting: **bold**, `backticks`, leading #, bullet markers.
 fn strip_md(s: &str) -> String {
     s.replace("**", "")
@@ -1818,7 +2145,81 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        assert_eq!(tool_definitions().len(), 15);
+        // 15 base tools + skill_invoke + 5 remote_* tools = 21.
+        assert_eq!(tool_definitions().len(), 21);
+    }
+
+    #[test]
+    fn test_tool_definitions_include_new_tools() {
+        let names: Vec<String> = tool_definitions()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
+            .collect();
+        for expected in [
+            "skill_invoke",
+            "remote_list_hosts",
+            "remote_discover_sessions",
+            "remote_list_sessions",
+            "remote_spawn_session",
+            "remote_kill_session",
+        ] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "missing tool '{expected}' in {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_skill_invoke_missing_name() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({});
+        let result = skill_invoke(&server, &args);
+        assert!(result.starts_with("Error:"));
+    }
+
+    #[test]
+    fn test_skill_invoke_path_traversal_rejected() {
+        let server = OrrchMcpServer::from_defaults();
+        let args = serde_json::json!({"name": "../../../etc/passwd"});
+        let result = skill_invoke(&server, &args);
+        assert!(result.starts_with("Error:"), "should reject traversal: {result}");
+    }
+
+    #[test]
+    fn test_skill_invoke_loads_real_skill() {
+        // Exercises the live library/skills dir. If orrchestrator is
+        // checked out at the expected location we should find
+        // develop-feature.md and see its content.
+        let server = OrrchMcpServer::from_defaults();
+        if !server.skills_dir.join("develop-feature.md").exists() {
+            // Skip in environments where the library tree isn't present.
+            return;
+        }
+        let args = serde_json::json!({"name": "develop-feature", "args": "build the thing"});
+        let result = skill_invoke(&server, &args);
+        assert!(
+            !result.starts_with("Error:"),
+            "skill_invoke should succeed: {result}"
+        );
+        // Either $ARGUMENTS was substituted, or the preamble was added.
+        assert!(
+            result.contains("build the thing"),
+            "args not propagated: {result}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_host_unknown() {
+        let result = resolve_host("not_a_real_host_xyz").unwrap_err();
+        assert!(result.contains("unknown host"));
+    }
+
+    #[test]
+    fn test_resolve_host_known() {
+        // Should find orrpheus (defined in orrch_core::remote::known_hosts).
+        let host = resolve_host("orrpheus").expect("orrpheus in known_hosts");
+        assert_eq!(host.name, "orrpheus");
     }
 
     #[test]
