@@ -174,12 +174,20 @@ cluster_and_output() {
             }
         }
 
-        # ── Wave assignment ───────────────────────────────────────────────
+        # ── Wave assignment (fixed-point, bounded) ───────────────────────
+        # For a DAG on n_clusters nodes the longest path is ≤ n_clusters-1,
+        # so the loop converges in ≤ n_clusters-1 iterations. Any additional
+        # iterations imply a cross-cluster dependency cycle (e.g. task A deps
+        # B and task B deps A, with A and B in different clusters). Cap at
+        # n_clusters + 2 as a safety margin and abort with a diagnostic.
         for (ci = 1; ci <= n_clusters; ci++) cluster_wave[cluster_order[ci]] = 1
 
-        changed = 1
-        while (changed) {
+        max_iter = n_clusters + 2
+        iter     = 0
+        changed  = 1
+        while (changed && iter < max_iter) {
             changed = 0
+            iter++
             for (i = 1; i <= n; i++) {
                 tid = task_order[i]
                 if (task_deps[tid] == "none" || task_deps[tid] == "") continue
@@ -198,6 +206,20 @@ cluster_and_output() {
                     }
                 }
             }
+        }
+
+        if (changed) {
+            # Did not converge within the safe bound → cross-cluster cycle.
+            print "ERROR: cluster_tasks.sh: wave assignment did not converge after " iter " iterations (n_clusters=" n_clusters ")." > "/dev/stderr"
+            print "ERROR: This indicates a cross-cluster dependency cycle in the task plan." > "/dev/stderr"
+            print "ERROR: Check TASK Depends: fields — a task cannot depend on another task that (transitively) depends on it" > "/dev/stderr"
+            print "ERROR: when the two end up in different clusters (clusters = sets of tasks that share files)." > "/dev/stderr"
+            print "ERROR: Cluster state at abort:" > "/dev/stderr"
+            for (ci = 1; ci <= n_clusters; ci++) {
+                croot = cluster_order[ci]
+                print "ERROR:   cluster[" ci "] wave=" cluster_wave[croot] " tasks=" cluster_tasks[croot] > "/dev/stderr"
+            }
+            exit 2
         }
 
         # ── Build per-cluster metadata: files & majority agent ────────────
