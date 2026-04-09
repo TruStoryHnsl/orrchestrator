@@ -154,7 +154,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "agent_invoke",
-            "description": "Load an agent profile and combine it with a task to produce a structured prompt. Returns the agent's full profile body with the task appended.",
+            "description": "Load an agent profile and combine it with a task to produce a structured prompt via the orrch-agents prompt builder. Supports optional runtime dispatch context: when project_dir is set, the project's core context (CLAUDE.md or the filename named in .agent_profile) is appended; when workforce + operation + step_index are set, the step is resolved via resolve_step_for_dispatch so nested workforce expansion and per-step model overrides are baked into the returned prompt; a bare model_override shortcut is also accepted.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -165,6 +165,30 @@ pub fn tool_definitions() -> Vec<Value> {
                     "task": {
                         "type": "string",
                         "description": "The task to assign to the agent"
+                    },
+                    "project_dir": {
+                        "type": "string",
+                        "description": "Optional: absolute path to the target project. When set, the project's core context file is loaded and appended to the prompt."
+                    },
+                    "profile_filename": {
+                        "type": "string",
+                        "description": "Optional: explicit core-context filename (e.g. 'CLAUDE.md', 'GEMINI.md'). When omitted, the project's .agent_profile dotfile is read, falling back to CLAUDE.md."
+                    },
+                    "workforce": {
+                        "type": "string",
+                        "description": "Optional: workforce name to resolve the step against (for nested workforce expansion)."
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Optional: operation name containing the step. Required together with workforce and step_index."
+                    },
+                    "step_index": {
+                        "type": "string",
+                        "description": "Optional: step index within the operation (e.g. '1', '2B'). Required together with workforce and operation."
+                    },
+                    "model_override": {
+                        "type": "string",
+                        "description": "Optional shortcut: directly inject a model override directive into the prompt without a full workforce lookup. Ignored if workforce+operation+step_index already produced a resolved step."
                     }
                 },
                 "required": ["agent", "task"]
@@ -617,6 +641,9 @@ fn inbox_append(server: &OrrchMcpServer, args: &Value) -> String {
 }
 
 fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
+    use orrch_agents::{AgentProfile, AgentRunner, load_project_core_context};
+    use orrch_workforce::{ResolvedStep, load_operations, load_workforces, resolve_step_for_dispatch};
+
     let agent_name = match args.get("agent").and_then(|v| v.as_str()) {
         Some(a) => a,
         None => return "Error: 'agent' parameter is required".into(),
@@ -627,28 +654,107 @@ fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
     };
 
     // Normalize: lowercase, spaces → underscores, ensure .md suffix.
-    let normalized = agent_name
-        .to_lowercase()
-        .replace(' ', "_");
+    let normalized = agent_name.to_lowercase().replace(' ', "_");
     let filename = if normalized.ends_with(".md") {
         normalized
     } else {
         format!("{normalized}.md")
     };
-
     let path = server.agents_dir.join(&filename);
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => return format!("Error: cannot read agent profile '{}': {e}", path.display()),
+
+    // Load the profile via the orrch-agents loader so we get proper
+    // frontmatter parsing + a real AgentProfile struct. On failure
+    // (missing frontmatter, etc.) fall back to raw file contents so
+    // custom agents without YAML headers still work.
+    let profile: AgentProfile = match AgentProfile::load(&path) {
+        Some(p) => p,
+        None => {
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    return format!(
+                        "Error: cannot read agent profile '{}': {e}",
+                        path.display()
+                    );
+                }
+            };
+            AgentProfile {
+                name: agent_name.to_string(),
+                department: String::new(),
+                role: agent_name.to_string(),
+                description: String::new(),
+                prompt: content,
+                path: path.clone(),
+            }
+        }
     };
 
-    // Extract body after frontmatter.
-    let body = match extract_body(&content) {
-        Some(b) => b,
-        None => &content,
-    };
+    // Task AP: load the project's core context if `project_dir` was
+    // supplied. Honors the `.agent_profile` dotfile override (e.g.
+    // GEMINI.md) with a CLAUDE.md fallback. The dotfile read is inlined
+    // to keep orrch-mcp free of an orrch-core dep.
+    let core_context: Option<String> = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .map(std::path::PathBuf::from)
+        .and_then(|project_root| {
+            let explicit = args.get("profile_filename").and_then(|v| v.as_str());
+            let filename = explicit
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| read_project_agent_profile_filename(&project_root));
+            load_project_core_context(&project_root, &filename)
+        });
 
-    format!("{body}\n\n---\n\n## Your Task\n\n{task}")
+    // Tasks 35 + 57: this is the runtime dispatch wiring point. When the
+    // caller supplies workforce + operation + step_index, we look up the
+    // step, run it through `resolve_step_for_dispatch` (which handles
+    // nested workforce expansion + model overrides), and feed the result
+    // into `build_prompt_for_resolved_step`. Callers that only need a
+    // model override can pass `model_override` directly as a shortcut.
+    let orrch_root = server.library_dir.parent();
+    let resolved: Option<ResolvedStep> = (|| {
+        let wf_name = args.get("workforce").and_then(|v| v.as_str())?;
+        let op_name = args.get("operation").and_then(|v| v.as_str())?;
+        let step_index = args.get("step_index").and_then(|v| v.as_str())?;
+        let root = orrch_root?;
+        let all_workforces = load_workforces(&root.join("workforces"));
+        let workforce = all_workforces.iter().find(|w| w.name == wf_name).cloned()?;
+        let operations = load_operations(&root.join("operations"));
+        let operation = operations.iter().find(|o| o.name == op_name)?;
+        let step = operation.steps.iter().find(|s| s.index == step_index)?;
+        Some(resolve_step_for_dispatch(step, &workforce, &all_workforces))
+    })()
+    .or_else(|| {
+        args.get("model_override")
+            .and_then(|v| v.as_str())
+            .map(|m| ResolvedStep {
+                step_index: String::new(),
+                agent_profile: profile.name.clone(),
+                nested_workforce: None,
+                model_override: Some(m.to_string()),
+            })
+    });
+
+    match resolved {
+        Some(r) => AgentRunner::build_prompt_for_resolved_step(
+            &profile,
+            task,
+            core_context.as_deref(),
+            &r,
+        ),
+        None => AgentRunner::build_prompt(&profile, task, core_context.as_deref()),
+    }
+}
+
+/// Read a project's agent profile filename. Checks the `.agent_profile`
+/// dotfile in the project root; falls back to `CLAUDE.md` when missing or
+/// empty. Inlined in orrch-mcp to avoid depending on orrch-core.
+fn read_project_agent_profile_filename(project_root: &std::path::Path) -> String {
+    std::fs::read_to_string(project_root.join(".agent_profile"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "CLAUDE.md".to_string())
 }
 
 fn module_api(server: &OrrchMcpServer, args: &Value) -> String {
@@ -1606,18 +1712,6 @@ fn extract_frontmatter_field(content: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Extract the body content after YAML frontmatter.
-fn extract_body(content: &str) -> Option<&str> {
-    let trimmed = content.trim_start();
-    if !trimmed.starts_with("---") {
-        return None;
-    }
-    let after_first = &trimmed[3..];
-    let end = after_first.find("\n---")?;
-    let body = &after_first[end + 4..];
-    Some(body.trim_start_matches(['\r', '\n']))
-}
-
 /// Simple ISO 8601 timestamp without external deps.
 fn now_iso8601() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1698,20 +1792,6 @@ mod tests {
             extract_frontmatter_field(content, "description"),
             Some("This is a long description text".into())
         );
-    }
-
-    #[test]
-    fn test_extract_body() {
-        let content = "---\nname: Test\n---\n\n# Heading\n\nBody content.";
-        let body = extract_body(content).unwrap();
-        assert!(body.starts_with("# Heading"));
-        assert!(body.contains("Body content."));
-    }
-
-    #[test]
-    fn test_extract_body_no_frontmatter() {
-        let content = "# Just a heading\n\nSome text.";
-        assert!(extract_body(content).is_none());
     }
 
     #[test]
