@@ -252,9 +252,9 @@ pub enum DesignSub {
 impl DesignSub {
     pub const ALL: [DesignSub; 4] = [
         DesignSub::Intentions,
+        DesignSub::Plans,
         DesignSub::Workforce,
         DesignSub::Library,
-        DesignSub::Plans,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -1941,9 +1941,13 @@ impl App {
             match key {
                 KeyCode::Char('q') => self.should_quit = true,
                 KeyCode::Up => {
-                    self.plans_project_selected = self.plans_project_selected.saturating_sub(1);
-                    self.plans_phase_expanded = usize::MAX;
-                    self.plans_tree_selected = 0;
+                    if self.plans_project_selected == 0 {
+                        self.focus_depth = self.content_depth() - 1;
+                    } else {
+                        self.plans_project_selected -= 1;
+                        self.plans_phase_expanded = usize::MAX;
+                        self.plans_tree_selected = 0;
+                    }
                 }
                 KeyCode::Down => {
                     if count > 0 {
@@ -1982,7 +1986,11 @@ impl App {
                     }
                 }
                 KeyCode::Up => {
-                    self.plans_tree_selected = self.plans_tree_selected.saturating_sub(1);
+                    if self.plans_tree_selected == 0 {
+                        self.focus_depth = self.content_depth() - 1;
+                    } else {
+                        self.plans_tree_selected -= 1;
+                    }
                 }
                 KeyCode::Down => {
                     if total > 0 {
