@@ -325,7 +325,145 @@ fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
         DesignSub::Intentions => draw_ideas(frame, app, chunks[1]),
         DesignSub::Workforce => draw_workforce_editor(frame, app, chunks[1]),
         DesignSub::Library => draw_library(frame, app, chunks[1]),
+        DesignSub::Plans => draw_plans(frame, app, chunks[1]),
     }
+}
+
+// ─── Design > Plans (INS-001) ────────────────────────────────────────
+
+fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
+    use orrch_core::FeatureStatus;
+
+    // Lazily populate on first render
+    if app.plans_project_indices.is_empty() {
+        app.plans_refresh_project_list();
+    }
+
+    // Two-column layout: project list (left, 30%) | phase/feature tree (right, 70%)
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(area);
+
+    // ── Left pane: project list ──
+    let left_focused = !app.plans_focus_right && app.focus_depth >= app.content_depth();
+    let left_border = if left_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+
+    let proj_items: Vec<ListItem> = app.plans_project_indices.iter().enumerate().map(|(i, &pidx)| {
+        let proj = &app.projects[pidx];
+        let done: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
+        let total: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
+        let color = if done == total && total > 0 { GREEN } else if done > 0 { TEXT_DIM } else { TEXT };
+        let sel = i == app.plans_project_selected;
+        let style = if sel && left_focused {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!(" {} ", proj.name), style),
+            Span::styled(format!("({done}/{total})"), Style::default().fg(TEXT_MUTED)),
+        ]))
+    }).collect();
+
+    let proj_list = List::new(proj_items)
+        .scroll_padding(SCROLL_PAD)
+        .block(Block::default().title(" Projects ").borders(Borders::ALL).style(left_border))
+        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▶ ");
+
+    let left_sel = if left_focused { Some(app.plans_project_selected) } else { None };
+    let mut left_state = ListState::default().with_selected(left_sel);
+    frame.render_stateful_widget(proj_list, hsplit[0], &mut left_state);
+
+    // ── Right pane: phase/feature tree ──
+    let right_focused = app.plans_focus_right && app.focus_depth >= app.content_depth();
+    let right_border = if right_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+
+    let proj_idx = app.plans_current_project_idx();
+    let Some(pidx) = proj_idx else {
+        let empty = Paragraph::new("No projects with PLAN.md found")
+            .style(Style::default().fg(TEXT_MUTED))
+            .block(Block::default().title(" Plan ").borders(Borders::ALL).style(right_border));
+        frame.render_widget(empty, hsplit[1]);
+        return;
+    };
+    let Some(proj) = app.projects.get(pidx) else { return; };
+
+    let mut items: Vec<ListItem> = Vec::new();
+    for (pi, phase) in proj.plan_phases.iter().enumerate() {
+        let expanded = app.plans_phase_expanded == pi;
+        let arrow = if expanded { "▾" } else { "▸" };
+        let done = phase.done_count();
+        let total = phase.total_count();
+        let progress = if total > 0 { format!(" ({done}/{total})") } else { String::new() };
+
+        let phase_color = if done == total && total > 0 {
+            GREEN
+        } else if done > 0 {
+            TEXT_DIM
+        } else {
+            TEXT
+        };
+
+        let phase_name = if let Some(num) = phase.number {
+            format!("{arrow} Phase {num}: {}{progress}", phase.name)
+        } else {
+            format!("{arrow} {}{progress}", phase.name)
+        };
+
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(phase_name, Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
+        ])));
+
+        if expanded {
+            for feat in &phase.features {
+                let icon = feat.status.display_icon();
+                let style = feature_status_style(feat.status);
+                let color = style.fg.unwrap_or(TEXT);
+                let id_str = feat.id.map(|n| format!("{n}. ")).unwrap_or_default();
+                let title = format!("  {icon} {id_str}{}", feat.title);
+
+                let mut spans: Vec<Span> = vec![Span::styled(title, Style::default().fg(color))];
+
+                if feat.user_verified || feat.status == FeatureStatus::Verified {
+                    spans.push(Span::styled(" ✓", Style::default().fg(GREEN)));
+                }
+
+                // Status label for non-trivial statuses
+                if !matches!(feat.status, FeatureStatus::Planned | FeatureStatus::Pending | FeatureStatus::Done) {
+                    spans.push(Span::styled(
+                        format!(" [{}]", feat.status.label()),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                }
+
+                items.push(ListItem::new(Line::from(spans)));
+            }
+        }
+    }
+
+    let total_done: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
+    let total_all: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
+    let block_title = format!(" {} — Plan ({total_done}/{total_all}) ", proj.name);
+
+    // Footer hint
+    let footer = " Enter=expand v=verify s/S=cycle d=deprecate k/j=move e=edit r=refresh ";
+    let right_block = Block::default()
+        .title(block_title)
+        .title_bottom(Line::from(Span::styled(footer, Style::default().fg(TEXT_MUTED))))
+        .borders(Borders::ALL)
+        .style(right_border);
+
+    let list = List::new(items)
+        .scroll_padding(SCROLL_PAD)
+        .block(right_block)
+        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .highlight_symbol("▶ ");
+
+    let right_sel = if right_focused { Some(app.plans_tree_selected) } else { None };
+    let mut right_state = ListState::default().with_selected(right_sel);
+    frame.render_stateful_widget(list, hsplit[1], &mut right_state);
 }
 
 fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
@@ -2559,6 +2697,11 @@ fn build_hint_line(app: &App) -> Line<'static> {
                     ("v", "valve"), ("e", "toggle"), ("r", "refresh"),
                     ("|", ""),
                     ("←→", "tabs"), ("PgUp/Dn", "scroll"), ("Home/End", "jump"),
+                ]),
+                crate::app::DesignSub::Plans => hint_line(&[
+                    ("Enter", "expand"), ("v", "verify"), ("s/S", "cycle status"), ("d", "deprecate"),
+                    ("|", ""),
+                    ("k/j", "move"), ("e", "edit"), ("r", "refresh"),
                 ]),
             }
         },

@@ -73,6 +73,8 @@ pub enum VimKind {
     NewIdea,
     /// Intake review — editing optimized instructions before distribution.
     IntakeReview,
+    /// Edit a PLAN.md file from the Design > Plans panel.
+    PlanFile,
 }
 
 /// A request from App to the main loop to spawn vim.

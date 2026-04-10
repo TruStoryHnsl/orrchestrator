@@ -246,13 +246,15 @@ pub enum DesignSub {
     Intentions, // feedback intake + ideas (was ProjectDesign)
     Workforce,  // full-stack .md editor for workflows, teams, agents, skills, tools, etc.
     Library,    // read-only browser (right-justified in tab bar)
+    Plans,      // interactive PLAN.md browser across all projects
 }
 
 impl DesignSub {
-    pub const ALL: [DesignSub; 3] = [
+    pub const ALL: [DesignSub; 4] = [
         DesignSub::Intentions,
         DesignSub::Workforce,
         DesignSub::Library,
+        DesignSub::Plans,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -260,6 +262,7 @@ impl DesignSub {
             Self::Intentions => "Intentions",
             Self::Workforce => "Workforce",
             Self::Library => "Library",
+            Self::Plans => "Plans",
         }
     }
 
@@ -268,6 +271,7 @@ impl DesignSub {
             Self::Intentions => 0,
             Self::Workforce => 1,
             Self::Library => 2,
+            Self::Plans => 3,
         }
     }
 
@@ -564,6 +568,18 @@ pub struct App {
     pub dep_root: PathBuf,
     pub dep_preview: String,
 
+    // Design > Plans panel (INS-001)
+    /// Projects that have PLAN.md files (indices into self.projects).
+    pub plans_project_indices: Vec<usize>,
+    /// Selected project in the left column of Plans panel.
+    pub plans_project_selected: usize,
+    /// Expanded phase index for the selected project (usize::MAX = none).
+    pub plans_phase_expanded: usize,
+    /// Flat selection index in the right-side phase/feature tree.
+    pub plans_tree_selected: usize,
+    /// True when focus is on the right (tree) pane; false = left (project list).
+    pub plans_focus_right: bool,
+
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
     pub idea_selected: usize,
@@ -812,6 +828,11 @@ impl App {
             dep_path: deprecated_path.clone(),
             dep_root: deprecated_path,
             dep_preview: String::new(),
+            plans_project_indices: Vec::new(),
+            plans_project_selected: 0,
+            plans_phase_expanded: usize::MAX,
+            plans_tree_selected: 0,
+            plans_focus_right: false,
             ideas,
             idea_selected: 0,
             production_versions,
@@ -905,6 +926,7 @@ impl App {
                 DesignSub::Intentions => 2,  // panel(0) → sub(1) → content(2)
                 DesignSub::Workforce => 3,   // panel(0) → sub(1) → wf tabs(2) → content(3)
                 DesignSub::Library => 3,     // panel(0) → sub(1) → lib tabs(2) → content(3)
+                DesignSub::Plans => 2,       // panel(0) → sub(1) → content(2)
             },
             _ => 1,                          // panel(0) → content(1)
         }
@@ -1572,6 +1594,24 @@ impl App {
                                 self.idea_selected = (self.idea_selected + delta as usize).min(self.ideas.len().saturating_sub(1));
                             }
                         }
+                        DesignSub::Plans => {
+                            if self.plans_focus_right {
+                                let proj_idx = self.plans_current_project_idx();
+                                let total = self.plans_flat_count(proj_idx);
+                                if delta < 0 {
+                                    self.plans_tree_selected = self.plans_tree_selected.saturating_sub((-delta) as usize);
+                                } else if total > 0 {
+                                    self.plans_tree_selected = (self.plans_tree_selected + delta as usize).min(total.saturating_sub(1));
+                                }
+                            } else {
+                                let count = self.plans_project_indices.len();
+                                if delta < 0 {
+                                    self.plans_project_selected = self.plans_project_selected.saturating_sub((-delta) as usize);
+                                } else if count > 0 {
+                                    self.plans_project_selected = (self.plans_project_selected + delta as usize).min(count.saturating_sub(1));
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -1877,6 +1917,7 @@ impl App {
             DesignSub::Intentions => self.key_design_project(key),
             DesignSub::Workforce => self.key_design_workforce(key),
             DesignSub::Library => self.key_library(key),
+            DesignSub::Plans => self.key_design_plans(key),
         }
     }
 
@@ -1884,6 +1925,269 @@ impl App {
         // Project Design merges Ideas + Feedback functionality.
         // For now, delegate to the ideas view (feedback items are also accessible via 'f').
         self.key_ideas(key)
+    }
+
+    // ─── Design > Plans key handler (INS-001) ───────────────────────────
+
+    fn key_design_plans(&mut self, key: KeyCode) -> Result<()> {
+        // Lazily populate project indices on first entry
+        if self.plans_project_indices.is_empty() {
+            self.plans_refresh_project_list();
+        }
+
+        if !self.plans_focus_right {
+            // Left pane: project list
+            let count = self.plans_project_indices.len();
+            match key {
+                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Up => {
+                    self.plans_project_selected = self.plans_project_selected.saturating_sub(1);
+                    self.plans_phase_expanded = usize::MAX;
+                    self.plans_tree_selected = 0;
+                }
+                KeyCode::Down => {
+                    if count > 0 {
+                        self.plans_project_selected = (self.plans_project_selected + 1).min(count - 1);
+                        self.plans_phase_expanded = usize::MAX;
+                        self.plans_tree_selected = 0;
+                    }
+                }
+                KeyCode::Enter | KeyCode::Right => {
+                    if count > 0 {
+                        self.plans_focus_right = true;
+                        self.plans_tree_selected = 0;
+                    }
+                }
+                KeyCode::Char('r') => self.plans_refresh_project_list(),
+                _ => {}
+            }
+        } else {
+            // Right pane: phase/feature tree
+            let proj_idx = self.plans_current_project_idx();
+            let total = self.plans_flat_count(proj_idx);
+
+            match key {
+                KeyCode::Char('q') => self.should_quit = true,
+                KeyCode::Esc | KeyCode::Left => {
+                    // If on a feature inside an expanded phase, collapse; else go back to project list
+                    if let Some((is_phase, _, _)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
+                        if !is_phase {
+                            // We're on a feature — just go back to left pane
+                            self.plans_focus_right = false;
+                        } else {
+                            self.plans_focus_right = false;
+                        }
+                    } else {
+                        self.plans_focus_right = false;
+                    }
+                }
+                KeyCode::Up => {
+                    self.plans_tree_selected = self.plans_tree_selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if total > 0 {
+                        self.plans_tree_selected = (self.plans_tree_selected + 1).min(total.saturating_sub(1));
+                    }
+                }
+                KeyCode::Enter => {
+                    // Toggle phase expansion / cycle feature status
+                    if let Some((is_phase, phase_idx, _feat_idx)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
+                        if is_phase {
+                            if self.plans_phase_expanded == phase_idx {
+                                self.plans_phase_expanded = usize::MAX;
+                            } else {
+                                self.plans_phase_expanded = phase_idx;
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('v') => {
+                    // Mark feature as verified
+                    self.plans_mark_verified(proj_idx);
+                }
+                KeyCode::Char('s') => {
+                    // Cycle feature status forward
+                    self.plans_cycle_status(proj_idx, true);
+                }
+                KeyCode::Char('S') => {
+                    // Cycle feature status backward
+                    self.plans_cycle_status(proj_idx, false);
+                }
+                KeyCode::Char('k') | KeyCode::Char('K') => {
+                    // Move feature up in plan
+                    self.plans_move_feature(proj_idx, orrch_core::MoveDirection::Up);
+                }
+                KeyCode::Char('j') | KeyCode::Char('J') => {
+                    // Move feature down in plan
+                    self.plans_move_feature(proj_idx, orrch_core::MoveDirection::Down);
+                }
+                KeyCode::Char('d') => {
+                    // Deprecate/defer feature
+                    self.plans_set_status(proj_idx, orrch_core::FeatureStatus::Deprecated);
+                }
+                KeyCode::Char('e') => {
+                    // Edit feature in vim
+                    self.plans_edit_in_vim(proj_idx);
+                }
+                KeyCode::Char('r') => {
+                    // Refresh
+                    self.plans_reload_project(proj_idx);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Rebuild the list of project indices that have PLAN.md files.
+    pub fn plans_refresh_project_list(&mut self) {
+        self.plans_project_indices = self.projects
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.has_plan && !p.plan_phases.is_empty())
+            .map(|(i, _)| i)
+            .collect();
+        if self.plans_project_selected >= self.plans_project_indices.len() {
+            self.plans_project_selected = 0;
+        }
+    }
+
+    /// Get the actual project index for the currently selected plans project.
+    pub fn plans_current_project_idx(&self) -> Option<usize> {
+        self.plans_project_indices.get(self.plans_project_selected).copied()
+    }
+
+    /// Count visible items in the plans tree (phases + expanded features).
+    fn plans_flat_count(&self, proj_idx: Option<usize>) -> usize {
+        let Some(idx) = proj_idx else { return 0; };
+        let Some(proj) = self.projects.get(idx) else { return 0; };
+        let mut count = 0;
+        for (i, phase) in proj.plan_phases.iter().enumerate() {
+            count += 1;
+            if self.plans_phase_expanded == i {
+                count += phase.features.len();
+            }
+        }
+        count
+    }
+
+    /// Map flat index to (is_phase_header, phase_idx, feature_idx).
+    fn plans_item_at(&self, proj_idx: Option<usize>, flat_idx: usize) -> Option<(bool, usize, usize)> {
+        let Some(idx) = proj_idx else { return None; };
+        let Some(proj) = self.projects.get(idx) else { return None; };
+        let mut pos = 0;
+        for (i, phase) in proj.plan_phases.iter().enumerate() {
+            if pos == flat_idx {
+                return Some((true, i, 0));
+            }
+            pos += 1;
+            if self.plans_phase_expanded == i {
+                if flat_idx < pos + phase.features.len() {
+                    return Some((false, i, flat_idx - pos));
+                }
+                pos += phase.features.len();
+            }
+        }
+        None
+    }
+
+    /// Mark the selected feature as verified.
+    fn plans_mark_verified(&mut self, proj_idx: Option<usize>) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+            let resolved = self.projects.get(idx).and_then(|proj| {
+                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
+                Some((plan_path, feat.title.clone()))
+            });
+            if let Some((plan_path, title)) = resolved {
+                let _ = orrch_core::mark_verified_in_plan(&plan_path, &title);
+                self.plans_reload_project(Some(idx));
+            }
+        }
+    }
+
+    /// Cycle the selected feature's status forward or backward.
+    fn plans_cycle_status(&mut self, proj_idx: Option<usize>, forward: bool) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+            let resolved = self.projects.get(idx).and_then(|proj| {
+                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
+                let new_status = if forward { feat.status.cycle_forward() } else { feat.status.cycle_backward() };
+                Some((plan_path, feat.title.clone(), new_status))
+            });
+            if let Some((plan_path, title, new_status)) = resolved {
+                let _ = orrch_core::update_feature_status_in_plan(&plan_path, &title, new_status);
+                self.plans_reload_project(Some(idx));
+            }
+        }
+    }
+
+    /// Set the selected feature to a specific status.
+    fn plans_set_status(&mut self, proj_idx: Option<usize>, status: orrch_core::FeatureStatus) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+            let resolved = self.projects.get(idx).and_then(|proj| {
+                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
+                Some((plan_path, feat.title.clone()))
+            });
+            if let Some((plan_path, title)) = resolved {
+                let _ = orrch_core::update_feature_status_in_plan(&plan_path, &title, status);
+                self.plans_reload_project(Some(idx));
+            }
+        }
+    }
+
+    /// Move the selected feature up or down.
+    fn plans_move_feature(&mut self, proj_idx: Option<usize>, direction: orrch_core::MoveDirection) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+            let plan_path = match self.projects.get(idx) {
+                Some(proj) => proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md")),
+                None => return,
+            };
+            if let Ok(true) = orrch_core::move_feature_in_plan(&plan_path, phase_idx, feat_idx, direction) {
+                // Adjust selection to follow the moved feature
+                match direction {
+                    orrch_core::MoveDirection::Up => {
+                        self.plans_tree_selected = self.plans_tree_selected.saturating_sub(1);
+                    }
+                    orrch_core::MoveDirection::Down => {
+                        self.plans_tree_selected += 1;
+                    }
+                }
+                self.plans_reload_project(Some(idx));
+            }
+        }
+    }
+
+    /// Open the project's PLAN.md in vim.
+    fn plans_edit_in_vim(&mut self, proj_idx: Option<usize>) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some(proj) = self.projects.get(idx) {
+            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+            if plan_path.exists() {
+                let title = format!("[orrchestrator] Plan — {}", proj.name);
+                self.vim_request = Some(VimRequest {
+                    kind: VimKind::PlanFile,
+                    file: plan_path,
+                    title,
+                });
+            }
+        }
+    }
+
+    /// Reload plan_phases for a specific project from disk.
+    fn plans_reload_project(&mut self, proj_idx: Option<usize>) {
+        let Some(idx) = proj_idx else { return; };
+        if let Some(proj) = self.projects.get_mut(idx) {
+            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+            if let Ok(content) = std::fs::read_to_string(&plan_path) {
+                proj.plan_phases = orrch_core::parse_plan(&content);
+            }
+        }
     }
 
     fn key_design_workforce(&mut self, key: KeyCode) -> Result<()> {
@@ -4742,6 +5046,7 @@ impl App {
             }
             VimKind::NewIdea => "[orrchestrator] New Idea".into(),
             VimKind::IntakeReview => "[orrchestrator] Intake Review".into(),
+            VimKind::PlanFile => "[orrchestrator] Plan".into(),
         }
     }
 
@@ -4758,8 +5063,8 @@ impl App {
                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                 orrch_core::vault::save_idea(&vault, "").ok()
             }
-            VimKind::IntakeReview => {
-                // Intake review uses an existing file — handled by caller
+            VimKind::IntakeReview | VimKind::PlanFile => {
+                // These use existing files — handled by caller
                 None
             }
         };
@@ -4833,6 +5138,12 @@ impl App {
                 self.notify("Optimized text updated — y=confirm N=reject".into());
                 // Clean up the temp edit file
                 let _ = std::fs::remove_file(file);
+            }
+            VimKind::PlanFile => {
+                // User edited PLAN.md directly — reload all projects to pick up changes
+                self.reload_projects();
+                self.plans_refresh_project_list();
+                self.notify("Plan updated".into());
             }
         }
         // Always reload library + workforce data after any vim edit
