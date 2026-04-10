@@ -16,6 +16,109 @@ use tokio::sync::mpsc;
 
 use crate::editor::{VimKind, VimRequest, PendingEditor};
 
+// ─── Scroll Infrastructure (INS-005) ─────────────────────────────────
+
+/// Reusable scroll state for any list panel.
+///
+/// Tracks selected index, viewport height, and scroll offset with
+/// auto-clamping. Provides standard keybind methods (up/down/page/home/end)
+/// and a scroll indicator helper.
+#[derive(Debug, Clone, Default)]
+pub struct ScrollState {
+    /// Currently selected item index.
+    pub selected: usize,
+    /// Scroll offset (first visible item index).
+    pub offset: usize,
+    /// Number of visible rows in the viewport (set by the renderer).
+    pub viewport: usize,
+    /// Total number of items in the list.
+    pub total: usize,
+}
+
+impl ScrollState {
+    pub fn new() -> Self { Self::default() }
+
+    /// Update total item count and clamp selected/offset.
+    pub fn set_total(&mut self, total: usize) {
+        self.total = total;
+        if total == 0 {
+            self.selected = 0;
+            self.offset = 0;
+        } else {
+            self.selected = self.selected.min(total - 1);
+            self.clamp_offset();
+        }
+    }
+
+    /// Move selection up by one. Returns true if selection changed.
+    pub fn up(&mut self) -> bool {
+        if self.selected > 0 {
+            self.selected -= 1;
+            self.clamp_offset();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move selection down by one.
+    pub fn down(&mut self) -> bool {
+        if self.total > 0 && self.selected < self.total - 1 {
+            self.selected += 1;
+            self.clamp_offset();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Page up (move selection by viewport height).
+    pub fn page_up(&mut self) {
+        self.selected = self.selected.saturating_sub(self.viewport.max(1));
+        self.clamp_offset();
+    }
+
+    /// Page down.
+    pub fn page_down(&mut self) {
+        if self.total > 0 {
+            self.selected = (self.selected + self.viewport.max(1)).min(self.total - 1);
+            self.clamp_offset();
+        }
+    }
+
+    /// Jump to first item.
+    pub fn home(&mut self) {
+        self.selected = 0;
+        self.offset = 0;
+    }
+
+    /// Jump to last item.
+    pub fn end(&mut self) {
+        if self.total > 0 {
+            self.selected = self.total - 1;
+            self.clamp_offset();
+        }
+    }
+
+    /// Ensure offset keeps selected in view.
+    fn clamp_offset(&mut self) {
+        if self.viewport == 0 { return; }
+        if self.selected < self.offset {
+            self.offset = self.selected;
+        }
+        if self.selected >= self.offset + self.viewport {
+            self.offset = self.selected - self.viewport + 1;
+        }
+    }
+
+    /// Returns (show_up_arrow, show_down_arrow) for scroll indicators.
+    pub fn indicators(&self) -> (bool, bool) {
+        let up = self.offset > 0;
+        let down = self.total > 0 && self.offset + self.viewport < self.total;
+        (up, down)
+    }
+}
+
 // ─── Panel System ─────────────────────────────────────────────────────
 
 /// Top-level panels navigable with left/right arrows.
@@ -618,7 +721,10 @@ impl App {
         let library_root = projects_dir.join("orrchestrator").join("library");
         let library_models = orrch_library::load_models(&library_root.join("models"));
         let library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
-        let library_mcp_servers = orrch_library::load_mcp_servers(&library_root.join("mcp_servers"));
+        let library_mcp_servers = orrch_library::load_all_mcp_servers(
+            &library_root.join("mcp_servers"),
+            Some(&projects_dir.join("orrchestrator")),
+        );
         let library_skills = scan_md_dir(&library_root.join("skills"));
         let library_tools = scan_md_dir(&library_root.join("tools"));
         let library_profiles = scan_md_dir(&library_root.join("profiles"));
@@ -1807,6 +1913,14 @@ impl App {
             }
             KeyCode::PageDown => { self.wf_preview_scroll += 10; }
             KeyCode::PageUp => { self.wf_preview_scroll = self.wf_preview_scroll.saturating_sub(10); }
+            KeyCode::Home => {
+                self.wf_selected = 0;
+                self.wf_preview_scroll = 0;
+            }
+            KeyCode::End => {
+                if count > 0 { self.wf_selected = count - 1; }
+                self.wf_preview_scroll = 0;
+            }
             KeyCode::Char('n') => {
                 // Harnesses: editor stub — edit files directly
                 if self.workforce_tab == WorkforceTab::Harnesses {
@@ -1932,6 +2046,14 @@ impl App {
                     });
                 }
             }
+            // INS-004: force re-scan all library/workforce data from disk
+            KeyCode::Char('r') => {
+                self.reload_all_library_data();
+                self.wf_selected = self.wf_selected.min(
+                    self.wf_items_for_tab().len().saturating_sub(1),
+                );
+                self.notify("Refreshed all workforce/library data from disk".into());
+            }
             // Task 3: export currently selected workforce to ~/Downloads/<name>.md
             KeyCode::Char('x') if self.workforce_tab == WorkforceTab::Workflows => {
                 let items = self.wf_items_for_tab();
@@ -2007,7 +2129,10 @@ impl App {
         self.agent_profiles = load_agents(&agents_dir());
         self.library_models = orrch_library::load_models(&library_root.join("models"));
         self.library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
-        self.library_mcp_servers = orrch_library::load_mcp_servers(&library_root.join("mcp_servers"));
+        self.library_mcp_servers = orrch_library::load_all_mcp_servers(
+            &library_root.join("mcp_servers"),
+            Some(&orrch_dir),
+        );
         self.library_skills = scan_md_dir(&library_root.join("skills"));
         self.library_tools = scan_md_dir(&library_root.join("tools"));
         self.library_profiles = scan_md_dir(&library_root.join("profiles"));
@@ -2043,6 +2168,14 @@ impl App {
             }
             KeyCode::PageDown => { self.library_preview_scroll += 10; }
             KeyCode::PageUp => { self.library_preview_scroll = self.library_preview_scroll.saturating_sub(10); }
+            KeyCode::Home => {
+                self.library_selected = 0;
+                self.library_preview_scroll = 0;
+            }
+            KeyCode::End => {
+                if count > 0 { self.library_selected = count - 1; }
+                self.library_preview_scroll = 0;
+            }
             KeyCode::Char('v') if self.library_sub == LibrarySub::Models => {
                 if let Some(model) = self.library_models.get(self.library_selected) {
                     let provider = model.provider.clone();
@@ -2103,6 +2236,11 @@ impl App {
                         Err(e) => self.notify(format!("Library push failed: {}", e)),
                     }
                 }
+            }
+            // INS-004: force re-scan library data from disk
+            KeyCode::Char('r') => {
+                self.reload_library();
+                self.notify("Refreshed library data from disk".into());
             }
             // Task 62: Register new external MCP server
             KeyCode::Char('n') if self.library_sub == LibrarySub::McpServers => {
@@ -5125,7 +5263,9 @@ fn ai_assistance_header(kind_label: &str) -> String {
 }
 
 /// Scan a directory for .md files and return (title, path) pairs.
-/// Title is extracted from the first `## ` heading or the filename.
+///
+/// Name precedence: (a) YAML frontmatter `name:` field, (b) first `# Heading`,
+/// (c) first `## Heading`, (d) filename stem.
 fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
     let mut items = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -5133,14 +5273,7 @@ fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
                 let name = if let Ok(content) = std::fs::read_to_string(&path) {
-                    // Try to extract name from frontmatter or heading
-                    content.lines()
-                        .find_map(|line| {
-                            let t = line.trim();
-                            if let Some(h) = t.strip_prefix("## ") { Some(h.to_string()) }
-                            else if let Some(n) = t.strip_prefix("name:") { Some(n.trim().to_string()) }
-                            else { None }
-                        })
+                    extract_md_name(&content)
                         .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string())
                 } else {
                     path.file_stem().unwrap_or_default().to_string_lossy().to_string()
@@ -5151,6 +5284,60 @@ fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
     }
     items.sort_by(|a, b| a.0.cmp(&b.0));
     items
+}
+
+/// Extract a display name from markdown content.
+///
+/// Precedence: (a) YAML frontmatter `name:` field, (b) first `# Heading`,
+/// (c) first `## Heading`, (d) None (caller falls back to filename).
+fn extract_md_name(content: &str) -> Option<String> {
+    // Phase 1: check YAML frontmatter for `name:` field
+    let trimmed = content.trim_start();
+    if trimmed.starts_with("---") {
+        let after_first = &trimmed[3..].trim_start_matches(['\r', '\n']);
+        if let Some(end) = after_first.find("\n---") {
+            let frontmatter = &after_first[..end];
+            for line in frontmatter.lines() {
+                let stripped = line.trim();
+                if let Some(rest) = stripped.strip_prefix("name:") {
+                    let val = rest.trim();
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: scan body for headings (# then ##)
+    let mut h1: Option<String> = None;
+    let mut h2: Option<String> = None;
+    for line in content.lines() {
+        let t = line.trim();
+        if h1.is_none() {
+            if let Some(h) = t.strip_prefix("# ") {
+                if !h.starts_with('#') {
+                    let heading = h.trim();
+                    if !heading.is_empty() {
+                        h1 = Some(heading.to_string());
+                    }
+                }
+            }
+        }
+        if h2.is_none() {
+            if let Some(h) = t.strip_prefix("## ") {
+                if !h.starts_with('#') {
+                    let heading = h.trim();
+                    if !heading.is_empty() {
+                        h2 = Some(heading.to_string());
+                    }
+                }
+            }
+        }
+        if h1.is_some() { break; } // h1 is best, stop early
+    }
+
+    h1.or(h2)
 }
 
 /// Spawn a hidden tmux session that runs Claude to process feedback.
