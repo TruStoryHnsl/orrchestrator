@@ -300,7 +300,7 @@ fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
         let number = num_str.parse::<u8>().ok();
 
         // Name is everything after "Phase N: " or "Phase N — "
-        let name_start = rest.find(':').or_else(|| rest.find('—')).map(|i| i + 1);
+        let name_start = rest.find(':').or_else(|| rest.find('—')).map(|i| i + rest[i..].chars().next().unwrap().len_utf8());
         let name = if let Some(start) = name_start {
             rest[start..].trim().to_string()
         } else {
