@@ -259,6 +259,131 @@ pub fn serialize_workforce_markdown(wf: &Workforce) -> String {
     out
 }
 
+/// Serialize an `Operation` into markdown that `parse_operation_markdown` can round-trip.
+///
+/// Output format mirrors the parser's expected layout:
+/// ```markdown
+/// ## OPERATION NAME
+///
+/// Trigger: <trigger description>
+///
+/// ### Order of Operations
+/// #### <index> | <agent> | <tool or skill> | <operation>
+///
+/// 1 | Agent Name | skill:name | description
+/// 2 | Agent Name | * | description
+///
+/// Interrupts: <interrupt descriptions or "none">
+/// ```
+pub fn serialize_operation_markdown(op: &Operation) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    // Operation heading
+    let _ = writeln!(out, "## {}", op.name);
+    out.push('\n');
+
+    // Trigger line
+    let _ = writeln!(out, "Trigger: {}", op.trigger);
+
+    // Blocker line (if present)
+    if let Some(blocker) = &op.blocker {
+        let _ = writeln!(out, "Blocker: {}", blocker);
+    }
+
+    out.push('\n');
+
+    // Step table header
+    // Detect whether any step has a model_override to decide column count
+    let has_model_col = op.steps.iter().any(|s| s.model_override.is_some());
+
+    out.push_str("### Order of Operations\n");
+    if has_model_col {
+        out.push_str("#### <index> | <agent> | <tool or skill> | <operation> | <model>\n");
+    } else {
+        out.push_str("#### <index> | <agent> | <tool or skill> | <operation>\n");
+    }
+    out.push('\n');
+
+    // Step rows
+    for step in &op.steps {
+        let tool = step
+            .tool_or_skill
+            .as_deref()
+            .unwrap_or("*");
+
+        if has_model_col {
+            let model = step
+                .model_override
+                .as_deref()
+                .unwrap_or("-");
+            let _ = writeln!(
+                out,
+                "{} | {} | {} | {} | {}",
+                step.index, step.agent, tool, step.operation, model
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "{} | {} | {} | {}",
+                step.index, step.agent, tool, step.operation
+            );
+        }
+    }
+
+    // Interrupts
+    out.push('\n');
+    if op.interrupts.is_empty() {
+        out.push_str("Interrupts: none\n");
+    } else {
+        let descs: Vec<String> = op.interrupts.iter().map(|i| i.to_string()).collect();
+        let _ = writeln!(out, "Interrupts: {}", descs.join(", "));
+    }
+
+    out
+}
+
+/// Expand a compressed pipe-delimited operation step table into human-readable
+/// markdown with labeled fields per step. This is the "edit mode" expansion
+/// referenced by INS-007.
+pub fn expand_operation_human_readable(op: &Operation) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    let _ = writeln!(out, "## {}", op.name);
+    out.push('\n');
+    let _ = writeln!(out, "**Trigger:** {}", op.trigger);
+    if let Some(blocker) = &op.blocker {
+        let _ = writeln!(out, "**Blocker:** {}", blocker);
+    }
+    out.push('\n');
+    out.push_str("### Steps\n\n");
+
+    for (i, step) in op.steps.iter().enumerate() {
+        let _ = writeln!(out, "#### Step {} (index {})", i + 1, step.index);
+        let _ = writeln!(out, "- **Agent:** {}", step.agent);
+        let tool = step.tool_or_skill.as_deref().unwrap_or("(agent decides)");
+        let _ = writeln!(out, "- **Tool/Skill:** {}", tool);
+        let _ = writeln!(out, "- **Task:** {}", step.operation);
+        if let Some(model) = &step.model_override {
+            let _ = writeln!(out, "- **Model override:** {}", model);
+        }
+        if let Some(group) = step.parallel_group {
+            let _ = writeln!(out, "- **Parallel group:** {}", group);
+        }
+        out.push('\n');
+    }
+
+    if !op.interrupts.is_empty() {
+        out.push_str("### Interrupts\n");
+        for interrupt in &op.interrupts {
+            let _ = writeln!(out, "- {}", interrupt);
+        }
+    }
+
+    out
+}
+
 /// Parse a structured markdown workforce operation into an Operation struct.
 ///
 /// Expected format:
@@ -731,5 +856,125 @@ operations: []
             );
         }
         assert_eq!(wf.connections.len(), 1);
+    }
+
+    #[test]
+    fn test_serialize_operation_roundtrip() {
+        let md = r#"
+## INSTRUCTION INTAKE
+
+Trigger: user submits a prompt
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation>
+
+1 | Executive Assistant | * | separate dev instructions from other input
+1B | Executive Assistant | * | immediately address non-dev input
+2 | Chief Operations Officer | skill:clarify | process raw instructions into optimized instructions
+3 | Chief Operations Officer | skill:parse | determine which project each instruction goes to
+4 | Chief Operations Officer | tool:copy-file | append to appropriate project instruction_inbox.md
+5 | Project Manager | skill:synthesize_instructions | incorporate into project plan
+
+Interrupts: none
+"#;
+        let op1 = parse_operation_markdown(md).expect("first parse");
+        let serialized = serialize_operation_markdown(&op1);
+        let op2 = parse_operation_markdown(&serialized).expect("second parse");
+
+        assert_eq!(op1.name, op2.name);
+        assert_eq!(op1.steps.len(), op2.steps.len());
+        for (a, b) in op1.steps.iter().zip(op2.steps.iter()) {
+            assert_eq!(a.index, b.index, "index mismatch");
+            assert_eq!(a.agent, b.agent, "agent mismatch at step {}", a.index);
+            assert_eq!(a.tool_or_skill, b.tool_or_skill, "tool mismatch at step {}", a.index);
+            assert_eq!(a.operation, b.operation, "operation mismatch at step {}", a.index);
+            assert_eq!(a.parallel_group, b.parallel_group, "parallel_group mismatch at step {}", a.index);
+            assert_eq!(a.model_override, b.model_override, "model_override mismatch at step {}", a.index);
+        }
+    }
+
+    #[test]
+    fn test_serialize_operation_with_model_override_roundtrip() {
+        let md = r#"
+## TEST OP
+
+Trigger: manual
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation> | <model>
+
+1 | Developer | * | implement feature | claude_opus
+2 | Feature Tester | * | run tests | -
+3 | Project Manager | * | review |
+
+Interrupts: none
+"#;
+        let op1 = parse_operation_markdown(md).expect("first parse");
+        let serialized = serialize_operation_markdown(&op1);
+        let op2 = parse_operation_markdown(&serialized).expect("second parse");
+
+        assert_eq!(op1.name, op2.name);
+        assert_eq!(op1.steps.len(), op2.steps.len());
+        assert_eq!(op2.steps[0].model_override.as_deref(), Some("claude_opus"));
+        assert_eq!(op2.steps[1].model_override, None);
+        assert_eq!(op2.steps[2].model_override, None);
+    }
+
+    #[test]
+    fn test_serialize_operation_parallel_roundtrip() {
+        let md = r#"
+## DEVELOP FEATURE
+
+Trigger: unprocessed instructions in project queue
+
+### Order of Operations
+#### <index> | <agent> | <tool or skill> | <operation>
+
+1 | Project Manager | * | synthesize instructions
+2 | Developer | * | execute coding tasks
+2 | Researcher | * | conduct research
+2 | Software Engineer | * | design architecture
+3 | Project Manager | * | review deliverable
+
+Interrupts: none
+"#;
+        let op1 = parse_operation_markdown(md).expect("first parse");
+        let serialized = serialize_operation_markdown(&op1);
+        let op2 = parse_operation_markdown(&serialized).expect("second parse");
+
+        assert_eq!(op1.name, op2.name);
+        assert_eq!(op1.steps.len(), op2.steps.len());
+
+        // Verify parallel groups survived roundtrip
+        for (a, b) in op1.steps.iter().zip(op2.steps.iter()) {
+            assert_eq!(a.parallel_group, b.parallel_group, "parallel_group mismatch at step {}", a.index);
+        }
+        // Steps at index "2" should have the same parallel_group
+        assert!(op2.steps[1].parallel_group.is_some());
+        assert_eq!(op2.steps[1].parallel_group, op2.steps[2].parallel_group);
+        assert_eq!(op2.steps[2].parallel_group, op2.steps[3].parallel_group);
+    }
+
+    #[test]
+    fn test_expand_operation_human_readable() {
+        let op = Operation {
+            name: "TEST OP".into(),
+            trigger: TriggerCondition::Manual,
+            blocker: None,
+            steps: vec![
+                Step { index: "1".into(), agent: "PM".into(), tool_or_skill: Some("skill:plan".into()), operation: "plan the work".into(), parallel_group: None, model_override: None },
+                Step { index: "2".into(), agent: "Dev".into(), tool_or_skill: None, operation: "code".into(), parallel_group: Some(1), model_override: Some("claude_opus".into()) },
+            ],
+            interrupts: vec![],
+        };
+        let expanded = expand_operation_human_readable(&op);
+        assert!(expanded.contains("## TEST OP"));
+        assert!(expanded.contains("**Agent:** PM"));
+        assert!(expanded.contains("**Tool/Skill:** skill:plan"));
+        assert!(expanded.contains("**Task:** plan the work"));
+        assert!(expanded.contains("**Agent:** Dev"));
+        assert!(expanded.contains("(agent decides)"));
+        assert!(expanded.contains("**Model override:** claude_opus"));
+        assert!(expanded.contains("**Parallel group:** 1"));
     }
 }

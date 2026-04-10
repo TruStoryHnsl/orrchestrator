@@ -394,15 +394,25 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
         list_items.push(ListItem::new(Line::styled("  (empty — press n to create)", Style::default().fg(TEXT_MUTED))));
     }
 
+    // Scroll indicators
+    let has_above = scroll_offset > 0;
+    let has_below = items_data.len() > scroll_offset + visible_rows;
+    let scroll_hint = match (has_above, has_below) {
+        (true, true) => " [..v^..]",
+        (true, false) => " [..^]",
+        (false, true) => " [v..]",
+        (false, false) => "",
+    };
+
     let title = if app.workforce_tab == WorkforceTab::Workflows {
         format!(
-            " {} ({}) — n=new N=AI-assisted Enter=edit d=del x=export i=import ",
-            app.workforce_tab.label(), items_data.len(),
+            " {} ({}) — n=new N=AI Enter=edit d=del x=export i=import r=refresh{}",
+            app.workforce_tab.label(), items_data.len(), scroll_hint,
         )
     } else {
         format!(
-            " {} ({}) — n=new N=AI-assisted Enter=edit d=del ",
-            app.workforce_tab.label(), items_data.len(),
+            " {} ({}) — n=new N=AI Enter=edit d=del r=refresh{}",
+            app.workforce_tab.label(), items_data.len(), scroll_hint,
         )
     };
     frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
@@ -795,7 +805,16 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
     if items.is_empty() {
         items.push(ListItem::new(Line::styled(format!("  No {label} — create in Workforce editor"), Style::default().fg(TEXT_MUTED))));
     }
-    let title = format!(" {} ({}) ", label, items_data.len());
+    // Scroll indicators
+    let has_above = scroll_offset > 0;
+    let has_below = items_data.len() > scroll_offset + visible_rows;
+    let scroll_hint = match (has_above, has_below) {
+        (true, true) => " [..v^..]",
+        (true, false) => " [..^]",
+        (false, true) => " [v..]",
+        (false, false) => "",
+    };
+    let title = format!(" {} ({}) r=refresh{} ", label, items_data.len(), scroll_hint);
     frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
 
     let preview = if let Some((_, path)) = items_data.get(app.library_selected) {
@@ -2524,11 +2543,25 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("|", ""),
             ("↑↓", "select"), ("q", "quit"),
         ]),
-        (Panel::Design, SubView::List) => hint_line(&[
-            ("Enter", "open"), ("n", "new"), ("d", "delete"), ("f", "feedback"),
-            ("|", ""),
-            ("Shift+Tab", "sub-panel"), ("←→", "panels"),
-        ]),
+        (Panel::Design, SubView::List) => {
+            match app.design_sub {
+                crate::app::DesignSub::Intentions => hint_line(&[
+                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("d", "delete"),
+                    ("|", ""),
+                    ("↑↓", "select"), ("Tab", "sub-panel"),
+                ]),
+                crate::app::DesignSub::Workforce => hint_line(&[
+                    ("Enter", "edit"), ("n", "new"), ("N", "AI-create"), ("d", "del"), ("r", "refresh"),
+                    ("|", ""),
+                    ("←→", "tabs"), ("Home/End", "jump"),
+                ]),
+                crate::app::DesignSub::Library => hint_line(&[
+                    ("v", "valve"), ("e", "toggle"), ("r", "refresh"),
+                    ("|", ""),
+                    ("←→", "tabs"), ("PgUp/Dn", "scroll"), ("Home/End", "jump"),
+                ]),
+            }
+        },
         (Panel::Analyze, SubView::List) | (Panel::Publish, SubView::List) => hint_line(&[
             ("←→", "panels"), ("Esc", "menu"),
         ]),
