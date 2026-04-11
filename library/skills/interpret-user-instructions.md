@@ -88,9 +88,9 @@ Transform the raw text into a structured prompt with these sections:
 - Emotional emphasis ("THIS IS IMPORTANT", caps, exclamation marks) → Elevate to top of relevant section
 - Code snippets or examples → Preserve verbatim in Technical Decisions
 
-### 5. Update the project feedback record (fb2p.md)
+### 5. Update the project feedback record (PLAN.md)
 
-Append to `fb2p.md` in the target project directory (create if it doesn't exist).
+Append to `PLAN.md` in the target project directory (create if it doesn't exist).
 
 Format:
 ```markdown
@@ -144,12 +144,12 @@ After generating the optimized prompt:
 ### 7. Preserve the original feedback file
 
 After the feedback has been:
-- Committed to `fb2p.md`
+- Committed to `PLAN.md`
 - Incorporated into `PLAN.md`
 
-Do NOT delete the original feedback file. It stays in place as a permanent record alongside the development log. The original text is the user's source of truth — `fb2p.md` contains the optimized version, but the raw input is preserved for auditing and reference.
+Do NOT delete the original feedback file. It stays in place as a permanent record alongside the development log. The original text is the user's source of truth — `PLAN.md` contains the optimized version, but the raw input is preserved for auditing and reference.
 
-Report: "Processed and archived. Original `<filename>` preserved. See fb2p.md and PLAN.md."
+Report: "Processed and archived. Original `<filename>` preserved. See PLAN.md and PLAN.md."
 
 ### 8. Present and confirm
 
@@ -159,9 +159,9 @@ Show the user:
 3. Changes made to PLAN.md
 4. Ask: "Run this prompt now, resolve open questions first, or save for later?"
 
-- If **run now**: Execute the optimized prompt as the next task. Update fb2p.md status to "Executed: <timestamp>".
-- If **resolve first**: Present each open question and ask the user to decide. Update the prompt with their answers, re-save to fb2p.md, then ask again.
-- If **save for later**: Just confirm fb2p.md was written. The prompt stays in the queue.
+- If **run now**: Execute the optimized prompt as the next task. Update PLAN.md status to "Executed: <timestamp>".
+- If **resolve first**: Present each open question and ask the user to decide. Update the prompt with their answers, re-save to PLAN.md, then ask again.
+- If **save for later**: Just confirm PLAN.md was written. The prompt stays in the queue.
 
 ## Automatic feedback intake (background monitoring)
 
@@ -180,7 +180,7 @@ When new feedback files are found:
 When the user says **"continue development"** (or "continue", "what's next", "pick up where we left off"):
 
 1. Read the project's `PLAN.md` for the current state
-2. Read `fb2p.md` for any queued (unexecuted) prompts
+2. Read `PLAN.md` for any queued (unexecuted) prompts
 3. Check for any new raw feedback files that haven't been processed
 4. Present a summary:
    - Recent plan changes from feedback

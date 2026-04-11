@@ -1,0 +1,6 @@
+{
+  "raw": "BORK - Plan addendum\n\n- I said we need to use stripe, but I meant plaid.\n\n- Stripe is also a good idea though. Id like to be able to send and recieve money via stripe in app too.",
+  "optimized": "### OPT-001: Replace Stripe with Plaid for prior integration\nCorrect prior plan: the previously specified Stripe integration was a misstatement. Replace Stripe with Plaid for that original use case. Update PLAN.md and any related design docs to reference Plaid instead of Stripe wherever the earlier requirement appears.\n\nSource: \"I said we need to use stripe, but I meant plaid.\"\n\n### OPT-002: Add Stripe integration for in-app money transfer\nAdd Stripe integration to support sending and receiving money within the app. Scope covers in-app payment flows (user-to-user or user-to-service transfers) using Stripe as the payment processor. This is additive and does not conflict with OPT-001 — Stripe here is a new, separate capability, not a replacement for Plaid.\n\nSource: \"Stripe is also a good idea though. Id like to be able to send and recieve money via stripe in app too.\"\n",
+  "status": "confirmed",
+  "source_idea": "2026-04-24-21-08.md"
+}

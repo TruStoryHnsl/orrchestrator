@@ -1,0 +1,1 @@
+{"workflow": "instruction-intake", "step": 3, "total_steps": 7, "status": "pending_review", "agents": [{"role": "Executive Assistant", "status": "complete"}, {"role": "Chief Operations Officer", "status": "complete"}], "source_idea": "2026-04-25-01-15.md"}

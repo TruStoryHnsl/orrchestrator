@@ -56,10 +56,10 @@ The goal is full agentic coding from Ollama-powered sessions, not just chat.
 **Decision:** Three compression layers:
 
 - **(a) User feedback → optimized instructions** — COO processes raw feedback into optimized instructions once during intake. This is a one-time transformation, not repeated.
-- **(b) Project instruction queue management** — `fb2p.md` is deprecated, replaced by `instructions_inbox.md` per project. The COO manages these inboxes: appends optimized instructions, trims completed/outdated entries on version publish, truncates excessively long files. The intake process is formalized as four workforce modules (instruction-intake, plan-intake, idea-intake, knowledge-intake) per the redesign plan.
+- **(b) Project instruction queue management** — `PLAN.md` is deprecated, replaced by `instructions_inbox.md` per project. The COO manages these inboxes: appends optimized instructions, trims completed/outdated entries on version publish, truncates excessively long files. The intake process is formalized as four workforce modules (instruction-intake, plan-intake, idea-intake, knowledge-intake) per the redesign plan.
 - **(c) Inter-agent handoff compression** — the hypervisor trims verbose reasoning from agent output before injecting into the next subagent's prompt. Keeps only actionable conclusions.
 
-**Deprecated:** `fb2p.md` model, `/interpret-user-instructions` skill. Both replaced by the `workforce:instruction-intake` module (Executive Assistant → COO → PM pipeline).
+**Deprecated:** `PLAN.md` model, `/interpret-user-instructions` skill. Both replaced by the `workforce:instruction-intake` module (Executive Assistant → COO → PM pipeline).
 
 ### Q7 — Library Storage & Distribution ~~(blocks Phase 5)~~ RESOLVED
 **Decision:**
@@ -441,9 +441,106 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 63. [x] **Syntax translation engine** — research session to catalog prompt/tool-call syntax differences across models and harnesses. Generate translated versions of context files (agent profiles, CLAUDE.md equivalents) per model/harness combination. Stored in Library. **Status: DONE (first slice)** — `TRANSLATIONS_DIR` constant exported from `orrch-library`, catalog file at `library/translations/harness_syntax_catalog.md` covering all 5 harnesses across 6 syntax columns with TBDs marking follow-up research.
 64. [x] **Valve integration with Resource Optimizer** — Resource Optimizer checks valve state before recommending a model. Blocked providers are excluded from optimization suggestions. IRM auto-closes valves when rate limits are detected.
 
+### UI Polish, Lifecycle & Capabilities (from Instruction Inbox — 2026-04-24)
+
+_Queued work from `instructions_inbox.md` (OPT-001 through OPT-017 in the 2026-04-24 batch). Source idea file: `plans/2026-04-24-20-16.md`. Formally incorporated 2026-04-10._
+
+**Cross-References & Dependencies:**
+- **OPT-003 → item 78 (INS-005, 2026-04-23):** OPT-003 reports the roadmap widget in project detail missed the automatic scroll wrapper that INS-005 (item 78) was supposed to universalize. This is a regression/gap in item 78's coverage, not a new feature. Fix requires auditing all widgets against the scroll wrapper, same as item 78's acceptance criteria.
+- **OPT-004 ↔ item 66 (INS-002, 2026-04-23):** Item 66 implemented `focus_depth` multi-level vertical navigation. OPT-004 reports navigation traps surviving that implementation — some views don't honor Esc/Left/Up to exit. OPT-004 is an audit-and-fix pass building on item 66's nav model.
+- **OPT-005 ↔ items 29, 30:** OPT-005 says Right arrow opens a deprecated project view instead of project details. The deprecated browser (item 30, `d` key) may be leaking into the Right arrow handler. Fix must verify key handler routing.
+- **OPT-007 → item 27:** OPT-007 extends the smart default actions logic from item 27 with a completion-state conditional. No conflict — additive.
+- **OPT-008 ↔ OPT-015:** The platform porting workflow (OPT-008) is reused by the Publish page plan (OPT-015) for distribution. OPT-008 should land first as a standalone operation module.
+- **OPT-010 → item 10, CP-5:** OPT-010 extends the existing waiting-for-input detection (item 10) and the Hypervise live agent tree (CP-5) with a full session lifecycle system. Large scope — hot/cold tracking, stale cleanup, completion signaling, session briefs, brief navigation.
+- **OPT-011 ↔ items 5, 72 (INS-008):** OPT-011 is a codebase audit replacing `vim` with `nvim`. Item 72 (INS-008) already unified vim/nvim tmux windows — OPT-011 ensures the binary name is consistently `nvim` everywhere.
+- **OPT-012 ↔ item 71 (INS-007):** Item 71 added a custom tmux status bar. OPT-012 extends tmux management further: shorter tab names, window splitting, platform-specific configs. Builds on item 71, no conflict.
+- **OPT-015 (Publish page):** Added as its own phase section below (Phase 9). High priority per user request.
+- **OPT-016 → item 25:** OPT-016 expands the Analyze panel beyond item 25's per-provider usage summary.
+- **OPT-017 → CP-5:** OPT-017 significantly expands the Hypervise panel beyond CP-5's live agent tree. Session detail view, live message stream, prompt input, workflow dashboard.
+
+81. [ ] **OPT-001: Focus new ideation editor window on creation** — When a new file is created from Design > Intentions, the spawned editor window must receive desktop focus immediately. Audit `spawn_vim_window` in `editor.rs` — ensure terminal emulator command includes focus-stealing flags (`wmctrl -a` post-spawn, or emulator-specific `--focus` flags). Test on orrion (CachyOS/KWin). (source: plans/2026-04-24-20-16.md)
+
+82. [ ] **OPT-002: Remove dev map from project detail, show only roadmap** — Project detail pages render both a "dev map" and a "feature roadmap." Remove the dev map display. Show only the roadmap. Audit all project detail rendering paths in `ui.rs` to confirm a single roadmap view. (source: plans/2026-04-24-20-16.md)
+
+83. [ ] **OPT-003: Fix roadmap scrollability in project detail** — Roadmap section in project detail does not scroll when content overflows. Regression against scroll architecture from INS-005 (item 78). Wrap the roadmap widget in the automatic scroll infrastructure. Audit all panels/widgets for others that also missed the scroll wrapper. (source: plans/2026-04-24-20-16.md)
+
+84. [ ] **OPT-004: Fix navigation traps across all pages** — Project menu (and potentially other pages) traps the user — Up/Back/Esc does not exit. Audit every page/panel/sub-view for navigation traps. Every view must be exitable via Left-arrow, Esc, or Up (vertical focus navigation model). Fix all instances. (source: plans/2026-04-24-20-16.md)
+
+85. [ ] **OPT-005: Fix right-arrow project navigation to show project details** — Right arrow on a project in Oversee list opens a deprecated project view instead of project details. Fix: Right arrow → project details, Left arrow → back to list. Verify deprecated browser (`d` key) is not triggered by Right arrow handler. (source: plans/2026-04-24-20-16.md)
+
+86. [ ] **OPT-006: Track all projects including newly created ones** — Projects without tracked tasks (e.g., borrk) don't show dev completion in Oversee. Fix: project discovery must include all projects under `~/projects/` with any trackable state (PLAN.md, active sessions, recent git activity). Projects with no PLAN.md show "no plan" indicator. (source: plans/2026-04-24-20-16.md)
+
+87. [ ] **OPT-007: Dynamic tip line based on project completion state** — When a project has 100% roadmap complete, tip/action line displays "submit feedback" and "construct packages" instead of default actions. Conditional in smart default actions logic (item 27): `project.roadmap_complete() -> bool` overrides tip text. (source: plans/2026-04-24-20-16.md)
+
+88. [ ] **OPT-008: Write platform porting workflow** — Create `operations/platform_port.md` — multi-step workflow for porting to any target platform (PyPI, crates.io, npm, Docker Hub, Flathub, AUR, Homebrew, apt/deb, etc.). Steps: platform research, dependency audit, build adaptation, packaging, CI/CD, test matrix, docs, pre-release validation, publish, post-publish verification. Pipe-delimited step table format. Agents: Researcher, Developer, Repo Manager, Licensing Auditor, Feature Tester, Beta Tester. First draft for user revision. (source: plans/2026-04-24-20-16.md)
+
+89. [ ] **OPT-009: Self-extending agent library via MCP** — Add MCP tools: `create_agent`, `create_skill`, `create_tool`, `create_workflow` for runtime library extension. Behavioral contract: agents encountering problems outside expertise ask for an expert; if none exists, create the expert agent + skills via MCP, save to library, invoke. Add protocol to base agent instructions. (source: plans/2026-04-24-20-16.md)
+
+90. [ ] **OPT-010: Session lifecycle management** — Unified system: (a) hot/cold project tracking in Oversee (active workflow → hot section, idle timer starts on window idle, immediate cold on stale window close); (b) stale session cleanup (auto-close finished+idle sessions, completion key phrase triggers close); (c) session status indicators (waiting-for-input, error reports visible in Oversee+Hypervise); (d) session close protocol (verify committed+pushed, mempalace diary_write, write session brief to `.orrch/session_briefs/`); (e) session brief navigation in project details TUI. Extends items 10 and CP-5. (source: plans/2026-04-24-20-16.md)
+
+91. [ ] **OPT-011: Use nvim instead of vim** — Audit all editor invocations for `vim` vs `nvim`. Check: `vim_request` construction, `spawn_vim_window`, fallback paths, CLAUDE.md references, hardcoded `"vim"` strings. Replace all with `nvim`. Window titles and docs must say `nvim`. (source: plans/2026-04-24-20-16.md)
+
+92. [ ] **OPT-012: Tmux session management overhaul** — (a) Tab naming: reformat to `<project>:<short-goal>`, truncate to fit, project name always visible first. (b) Window splitting: allow splitting orrchestrator tmux tabs into standalone windows for side-by-side viewing. Diagnose current blocker. (c) Custom tmux config: ship `config/tmux.conf`, apply via `tmux -f`, platform-specific configs for Linux (CachyOS) and macOS (orrpheus). Do NOT use system tmux config. (source: plans/2026-04-24-20-16.md)
+
+93. [ ] **OPT-013: Project classification and lifecycle tools** — Move projects between `admin/` and `~/projects/` (bidirectional). Browse `deprecated/` folder, move in/out. Delete from `deprecated/` with confirmation. All ops update project registry and refresh Oversee panel. Context menu or keybind in Oversee. (source: plans/2026-04-24-20-16.md)
+
+94. [ ] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files, projects, intentions, plans, agents, skills, tools, workflows. Update filesystem path, internal references (e.g., renamed agent in workforce), refresh panel. (source: plans/2026-04-24-20-16.md)
+
+95. [ ] **OPT-015: Publish page plan** — Detailed plan added as Phase 9 below. High priority. Covers: release packaging, version tagging, changelog, platform distribution (reuses OPT-008 workflow), license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback. (source: plans/2026-04-24-20-16.md)
+
+96. [ ] **OPT-016: Expand the Analyze page with comprehensive metrics** — Beyond item 25's per-provider usage: token usage per project/session/step/agent, cost breakdown by provider/project/period, session throughput, agent performance (success rate, retries, tokens/task), error frequency/resolution (orrch-retrospect), workflow efficiency (time/step, bottlenecks), project velocity (burndown), resource utilization, historical trends (sparklines/ASCII), tier comparison. Research via Researcher agent. (source: plans/2026-04-24-20-16.md)
+
+97. [ ] **OPT-017: Hypervise panel feature expansion** — Session list: rename inline, expand for 2 most recent messages, show host machine + working directory, clear/restart with editable prompt. Session detail (Enter drill-in): live message stream, prompt input (nvim, send on save), dashboard (workforce/workflow/skills/tools/MCP), invoke workflows/skills from dashboard, interrupt/pause. (source: plans/2026-04-24-20-16.md)
+
+---
+
+### Phase 9: Publish Page (2.1.0)
+_Release packaging, distribution, compliance, and marketing. The final panel completing orrchestrator's full development lifecycle coverage._
+
+98. [ ] **Publish panel skeleton** — Add `Publish` as a top-level panel alongside Design/Oversee/Hypervise/Analyze. Sub-navigation with tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab. Panel hotkey and tab bar integration.
+
+99. [ ] **Release packaging engine** — Build artifacts for the selected project: cargo build (Rust), pip wheel (Python), npm pack (JS), Docker image, platform-specific archives (.tar.gz, .zip, .deb, .rpm). Configurable per-project build matrix in `.orrch/publish.toml`. Progress display in Packaging tab.
+
+100. [ ] **Version tagging and changelog generation** — Integrate with `/release` flow: bump version (SemVer), generate CHANGELOG.md entries from conventional commits since last tag, create annotated git tag. Preview changelog in TUI before confirming. Supports pre-release tags (alpha/beta/rc).
+
+101. [ ] **Platform distribution** — Publish to target platforms: crates.io, PyPI, npm, Docker Hub, GitHub Releases, AUR, Homebrew, Flathub, apt/deb repos. Reuses OPT-008 platform porting workflow for platform-specific prep. Distribution tab shows per-platform publish status (not published / publishing / published / failed). Credential management via environment variables.
+
+102. [ ] **License compliance audit** — Invoke Licensing Auditor agent to scan all dependencies for license compatibility. Report: dependency tree with license per dep, flagged conflicts (e.g., GPL in proprietary), missing licenses, SPDX identifiers. Display in Compliance tab. Block publish if critical conflicts detected.
+
+103. [ ] **Copyright verification** — Invoke Copyright Investigator agent. Verify: all source files have required headers (if commercial scope), no third-party code without attribution, no trademark conflicts in project name/assets. Report in Compliance tab.
+
+104. [ ] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type (features, fixes, breaking changes). Include contributor attribution. Editable in nvim before publishing. Markdown output for GitHub Releases and CHANGELOG.md.
+
+105. [ ] **Marketing material generation** — Invoke Market Researcher + UX Specialist agents. Generate: project description (short/long), feature highlights, comparison with alternatives, target audience analysis, README badges, social media announcement draft. Display in Marketing tab, editable before use.
+
+106. [ ] **Pre-release checklist enforcement** — Automated checklist before publish is allowed: all tests pass (cargo test / pytest / npm test), no open blocker issues, user verification complete on all features (item 50), CHANGELOG up to date, license file present, no secrets in codebase. Checklist displayed in Packaging tab with pass/fail per item. Publish blocked until all critical items pass.
+
+107. [ ] **Post-release monitoring** — After publish: track download counts (crates.io API, PyPI stats, npm downloads, Docker pulls), new issue reports mentioning the release version, GitHub release engagement (stars, reactions). Display in History tab. Alert if post-release issue spike detected.
+
+108. [ ] **Rollback capability** — Yank/unpublish from platforms that support it (crates.io yank, PyPI delete, npm unpublish, Docker tag delete). Revert git tag. Generate rollback advisory from changelog. Confirmation required with explicit version input.
+
+---
+
+### Token Efficiency & Session Management (from Instruction Inbox — 2026-04-25)
+
+_Queued work from `instructions_inbox.md` (TOK-001 through TOK-003 in the 2026-04-25 batch). Source idea file: `plans/2026-04-25-01-15.md`. Formally incorporated 2026-04-10._
+
+**Cross-References & Dependencies:**
+- **TOK-001 → item 27 (token optimization pipeline):** Item 27 implemented three layers of token optimization (intake compression, inbox lifecycle, handoff trimming). TOK-001 elevates this to a systematic organizational mandate: full audit of all delivery mechanisms, controlled injection layer, visible token budget tracker, and documented protocol. Extends and formalizes item 27.
+- **TOK-002 → item 10, OPT-010 (item 90):** Concurrent session limits build on item 10's waiting-for-input detection and OPT-010's session lifecycle system. The warning gate is a proactive enforcement mechanism before sessions are spawned.
+- **TOK-003 → TOK-002:** Device classification is a prerequisite for the per-class session limits in TOK-002. Primary and compatibility session counters are independent — cross-platform projects are not penalized.
+
+109. [ ] **TOK-001: Token delivery audit and controlled injection system** — Systematic audit of all context delivery mechanisms (tool calls, session prompts, workforce context) for token waste. Design a controlled context injection layer that delivers only what each agent step requires. Evaluate prompt compression, output summarization, file-cluster batching, semantic deduplication. Add a token budget tracker to the Analyze panel or persistent status bar metric. Document the controlled delivery protocol so all future workforce/operation design follows it. Constraint: token efficiency governs all architectural decisions — treat as a design constraint, not a feature. Extends item 27's three-layer pipeline to a full organizational standard. (source: plans/2026-04-25-01-15.md)
+
+110. [ ] **TOK-002: Per-project concurrent session limits with warning gate** — Each project gets a configurable max concurrent session count (default: 3, independently configurable for primary vs compatibility classes per TOK-003). Store limit in project config in `orrch-core`. When user attempts to open a session beyond the limit, display a warning modal explaining the token cost risk and require explicit confirmation. Expose `N sessions / max` counter in Oversee panel's project view. Rationale: live sessions are more token-efficient than respawning; this gate enforces that discipline. Extends item 10 (waiting-for-input detection) and OPT-010 (item 90, session lifecycle). (source: plans/2026-04-25-01-15.md)
+
+111. [ ] **TOK-003: Multi-device session classification (primary vs compatibility)** — Extend session metadata with device role: primary (orrion) vs compatibility (orrpheus, mbp15, cb17, or any non-primary host). Detect via hostname or user-configured machine config. Classification is per-project: cross-platform projects permit higher session counts because compatibility sessions are a distinct workstream, not redundant parallelism. TOK-002's warning gate applies limits separately per class — primary limit and compatibility limit are independent counters. Machine config stored in orrchestrator's config (alongside backends, valves). (source: plans/2026-04-25-01-15.md)
+
+---
+
 ### Carried Forward (from 1.0.0 queued items)
 - [x] **Agent profile management** — swappable CLAUDE.md/GEMINI.md profiles per project. **Status: DONE** — `Project.agent_profile: Option<String>` read from `.agent_profile` dotfile via `load_agent_profile`, wired into `Project::load()`; helpers `Project::agent_profile_filename()` (fallback `CLAUDE.md`), `agent_profile_path()`, `save_agent_profile()`; `orrch_agents::load_project_core_context(project_root, profile_filename) -> Option<String>` re-exported at the crate root. Runtime wiring: `mcp__orrchestrator__agent_invoke` accepts a `project_dir` parameter that reads the project's `.agent_profile` dotfile (or uses an explicit `profile_filename` override), loads the named file via `load_project_core_context`, and injects it as the core context in the resulting prompt — so swapping a project between Claude and Gemini profiles is now a one-line dotfile edit.
-- [x] **Instruction inbox migration** — replace `fb2p.md` with per-project `instructions_inbox.md` managed by COO. Deprecate `/interpret-user-instructions` skill. Intake handled by `workforce:instruction-intake` module (EA → COO → PM). COO trims on version publish, truncates long files. Status: DONE — feedback.rs now writes per-project instructions_inbox.md; fb2p function names retained as deprecated wrappers; TUI call sites updated.
+- [x] **Instruction inbox migration** — replace `PLAN.md` with per-project `instructions_inbox.md` managed by COO. Deprecate `/interpret-user-instructions` skill. Intake handled by `workforce:instruction-intake` module (EA → COO → PM). COO trims on version publish, truncates long files. Status: DONE — feedback.rs now writes per-project instructions_inbox.md; PLAN function names retained as deprecated wrappers; TUI call sites updated.
 
 ---
 
@@ -454,7 +551,7 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 3. [x] **Dashboard view** — session list with status, info panel, project picker modal
 4. [x] **Session maximize/focus** — full-screen a session for direct user interaction, Esc to return
 5. [x] **External vim editor** — press `f` to spawn real vim in a new terminal window (falls back to same terminal over SSH)
-6. [x] **Feedback routing** — parse feedback for project names, append to fb2p.md, save to .feedback/, routing summary overlay
+6. [x] **Feedback routing** — parse feedback for project names, append to PLAN.md, save to .feedback/, routing summary overlay
 7. [x] **Default "continue development" spawn** — empty goal = "continue development" prompt, the primary workflow
 8. [x] **Parallel feature pipelines** — multiple Claude instances per project on different features
 9. [x] **Live progress** — parse Claude Code output for task completion signals
@@ -467,8 +564,8 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 16. [x] **Cross-project knowledge base** — shared `~/projects/.troubleshooting-global.md` for ecosystem-wide patterns
 17. [x] **Multi-backend support** — Claude + Gemini CLI, auto-detection, Tab to switch in project picker
 18. [x] **Interactive project picker** — modal overlay, arrow keys to navigate, Tab to toggle backend
-19. [x] **Inline project editor** — e/f key in project detail spawns vim, routes directly to project fb2p.md on save
-20. [x] **Master plan append mode** — m key spawns vim for append text, appends to MASTER_PLAN.md on save, routes to fb2p.md
+19. [x] **Inline project editor** — e/f key in project detail spawns vim, routes directly to project PLAN.md on save
+20. [x] **Master plan append mode** — m key spawns vim for append text, appends to MASTER_PLAN.md on save, routes to PLAN.md
 21. [x] **Ideas vault** — "Plans" menu (p key) for undeveloped ideas, stored in orrchestrator/plans/
 22. [x] **Better PLAN.md parsing** — descriptions from first paragraph, next priority item, improved format detection
 23. [x] **Color tags** — manual green/yellow/red (t key cycles), stored in .orrtag, default sort by tag
@@ -520,11 +617,13 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 | `q` | Global | Quit |
 
 ## Recent Changes
+- 2026-04-10: **Instruction inbox refreshed — 3 new items (TOK-001 through TOK-003) routed from idea 2026-04-25-01-15 and incorporated as roadmap items 109-111** in new "Token Efficiency & Session Management" section. Focus: token minimization as organizational design constraint (extends item 27), per-project concurrent session limits with warning gate (extends items 10/90), multi-device session classification (primary orrion vs compatibility devices). Cross-references: TOK-001→item 27, TOK-002→items 10/90, TOK-003→TOK-002.
+- 2026-04-10: **Instruction inbox refreshed — 17 new items (OPT-001 through OPT-017) routed from idea 2026-04-24-20-16 and incorporated as roadmap items 81-97, plus Phase 9 (Publish page, items 98-108).** Focus: UI bugfixes (navigation traps, scroll regressions, deprecated view leaks), session lifecycle management (hot/cold tracking, stale cleanup, completion signaling, session briefs), tmux overhaul (labels, splitting, custom configs), self-extending agent library (MCP creation tools), project classification tools, in-TUI renaming, platform porting workflow, Analyze expansion, Hypervise expansion, Publish page design. 6 raw instructions merged into 2 composite items (OPT-010 from 10-15, OPT-012 from 17-19). Cross-references: OPT-003↔item 78, OPT-004↔item 66, OPT-005↔items 29/30, OPT-007→item 27, OPT-008↔OPT-015, OPT-010→items 10/CP-5, OPT-011↔items 5/72, OPT-012↔item 71, OPT-016→item 25, OPT-017→CP-5. No structural conflicts.
 - 2026-04-09: **Instruction inbox refreshed — 7 new items (INS-001 through INS-007) routed from idea 2026-04-23-20-34 and incorporated as roadmap items 74-80.** Focus: Design > Plans panel, dynamic Library/Workforce views, foundational scroll architecture, dead-keybind audit, human-readable workflow edit mode. Hard dependency flagged: INS-001 (Plans panel) requires INS-005 (automatic scroll architecture). Cross-references added: INS-005 to item 65 (responsive tab bar), INS-007 to items 21/33/34/37 (workforce editors). No structural conflicts with existing roadmap.
 - 2026-04-09: **2.0.0 roadmap closure sprint.** Closed the last 6 unchecked items on the 2.0.0 roadmap (11, 12, 15, 16, 20, 21) — all were architecturally superseded by completed Critical Path / Phase 5 / Phase 6 work. No code changes required: items 11/15/16 superseded by CP-1/CP-4/CP-5/CP-6, item 12 by item 32 (mentor_review_profile + Library wiring), item 20 by CP-5 (live agent tree polling .orrch/workflow.json), item 21 by items 34 + 37 (Workforce > Teams tab in TUI + web node editor). 2.0.0 roadmap is now 100% complete pending Phase 8 acceptance.
-- 2026-04-09: **Instruction inbox migration complete.** `crates/orrch-core/src/feedback.rs` now writes per-project `instructions_inbox.md` instead of `fb2p.md`. `append_to_fb2p` and `append_to_fb2p_direct` retained as `#[deprecated]` wrappers forwarding to `append_to_inbox`/`append_to_inbox_direct`. TUI call sites in `app.rs` (5 filesystem literals + 2 function calls + 6 comments) and `ui.rs` (1 user-visible message) updated. All 90 orrch-core tests pass; cargo build clean with no new warnings.
+- 2026-04-09: **Instruction inbox migration complete.** `crates/orrch-core/src/feedback.rs` now writes per-project `instructions_inbox.md` instead of `PLAN.md`. `append_to_PLAN` and `append_to_PLAN_direct` retained as `#[deprecated]` wrappers forwarding to `append_to_inbox`/`append_to_inbox_direct`. TUI call sites in `app.rs` (5 filesystem literals + 2 function calls + 6 comments) and `ui.rs` (1 user-visible message) updated. All 90 orrch-core tests pass; cargo build clean with no new warnings.
 - 2026-04-03: **MCP server elevated to Critical Path (CP-7).** Items 30 (Library MCP server) and 61 (orrch-mcp server) consolidated into CP-7 — a unified MCP server (stdio transport) exposing all library contents and pipeline operations as tools. Skill distribution via symlinked files is unsustainable; a single MCP server is the distribution layer that makes CP-1 through CP-6 accessible to all harnesses without file duplication.
 - 2026-04-03: **Instruction inbox incorporated into roadmap.** INS-001 through INS-009 from `instructions_inbox.md` formally added to PLAN.md as "UI Polish & Infrastructure (from Instruction Inbox)" section (items 65-73). INS-001 (responsive tabs), INS-002 (sub-tab navigation), INS-003 (Library left-justification) marked complete. INS-004 through INS-009 queued as pending. No duplicates with existing roadmap items; INS-004 distinguished from item 56 (Library harnesses vs Workforce harnesses editor), INS-009 noted as complementary to CP-6.
 - 2026-04-03: **Architecture pivot: skill-based workflow execution.** The prompt injection approach (old CP-1/CP-2/CP-3) is scrapped after two live tests confirmed sessions ignore 15k tokens of injected workforce instructions. New architecture: workflow definitions become executable skills (`.md` prompt files). The `/develop-feature` skill IS the Hypervisor — it spawns agents via Agent tool calls, pipes results, enforces context isolation. Orrchestrator provides visibility (live agent tree in Hypervise) and intervention. Skills vs Tools separation: skills = LLM judgment (workflows, agent roles), tools = deterministic ops (file routing, git, scaffolding). Instruction intake gets a user audit step (raw vs optimized side-by-side review before distribution). `build_workforce_context()` and SpawnWorkforce prompt injection deprecated. Critical Path rewritten with 6 new items (CP-1 through CP-6).
 - 2026-04-03: **CRITICAL PATH reprioritization.** Items 15 (template selector), 16 (workforce-aware spawning), and 11 (COO optimizer) moved to a new Critical Path section above Phase 0. Root cause: a spawned session operated as a solo developer, ignoring the DEVELOP FEATURE workflow entirely. The spawn flow does not inject workforce context — `AgentRunner::build_prompt()` exists but is never called in the actual spawn path. All orchestration architecture is dead code until CP-1/CP-2/CP-3 ship. Items marked unblocked for immediate implementation.
-- 2026-03-31: **FRESH PLAN.md written.** Processed redesign_plan into 8-phase roadmap toward 2.0.0 (43 items + 2 carried forward). All 8 design decisions resolved. Architecture expanded: 3 new crates, 4-panel layout, 19 agent roles, workforce templates, operation modules, multi-provider AI, node-based designer. Hypervisor agent profile created + agent profile system implemented (new spawn wizard step). fb2p.md model deprecated in favor of per-project `instructions_inbox.md` managed by COO via intake workforces. Ollama via Crush/OpenCode, library as git-backed GitHub repo + MCP server, workforce format is structured markdown.
+- 2026-03-31: **FRESH PLAN.md written.** Processed redesign_plan into 8-phase roadmap toward 2.0.0 (43 items + 2 carried forward). All 8 design decisions resolved. Architecture expanded: 3 new crates, 4-panel layout, 19 agent roles, workforce templates, operation modules, multi-provider AI, node-based designer. Hypervisor agent profile created + agent profile system implemented (new spawn wizard step). PLAN.md model deprecated in favor of per-project `instructions_inbox.md` managed by COO via intake workforces. Ollama via Crush/OpenCode, library as git-backed GitHub repo + MCP server, workforce format is structured markdown.
