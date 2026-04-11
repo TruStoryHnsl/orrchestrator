@@ -77,28 +77,31 @@ impl PipelineState {
 
     /// Compute the display color as (r, g, b) based on the 100-step gradient.
     ///
-    /// 0-4: default text color (no change)
-    /// 5: harsh transition to maximum yellow
-    /// 5-50: gradient from yellow back to default
-    /// 50: default (instructions in inboxes)
-    /// 50-100: gradient from default to green
-    /// 100: maximum green
+    /// Semantics:
+    /// - `0-4`: default text color — intention exists but not submitted, so
+    ///   it blends in with regular list items.
+    /// - `5`: harsh transition to maximum yellow when the user submits.
+    /// - `5-100`: linear gradient from yellow to green across the entire
+    ///   post-submission lifecycle. At progress 5-49 the COO is processing
+    ///   intake; at progress 50 intake is complete with 0% implemented; at
+    ///   progress 51-99 implementation is partial; at 100 it's done.
+    /// - `100`: maximum green.
+    ///
+    /// The `default` colour parameter is accepted for callers that still
+    /// want to pass it, but only the `0-4` pre-submission band actually uses
+    /// it. A just-taken-in intention (progress 50, 0% implemented) is
+    /// rendered at full yellow so it's maximally visible during the window
+    /// when the user most needs to act on it.
     pub fn gradient_color(&self, default: (u8, u8, u8), yellow: (u8, u8, u8), green: (u8, u8, u8)) -> (u8, u8, u8) {
         let p = self.progress;
         if p < 5 {
             default
-        } else if p == 5 {
-            yellow
-        } else if p <= 50 {
-            // Gradient from yellow (5) to default (50)
-            let t = (p - 5) as f64 / 45.0; // 0.0 at p=5, 1.0 at p=50
-            lerp_color(yellow, default, t)
-        } else if p < 100 {
-            // Gradient from default (50) to green (100)
-            let t = (p - 50) as f64 / 50.0; // 0.0 at p=50, 1.0 at p=100
-            lerp_color(default, green, t)
-        } else {
+        } else if p >= 100 {
             green
+        } else {
+            // Linear gradient from yellow (p=5) to green (p=100).
+            let t = (p - 5) as f64 / 95.0; // 0.0 at p=5, 1.0 at p=100
+            lerp_color(yellow, green, t)
         }
     }
 }
@@ -418,10 +421,19 @@ mod tests {
     }
 
     #[test]
-    fn test_gradient_back_to_default_at_50() {
+    fn test_gradient_at_50_is_mid_yellow_to_green() {
+        // At progress 50 the pipeline has finished intake but nothing has
+        // been implemented yet. Under the new gradient, this sits roughly
+        // halfway between yellow and green — close to the yellow end,
+        // because the 5..100 range is 95 units wide and 50 is at t ≈ 0.47.
         let state = PipelineState { progress: 50, ..Default::default() };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
-        assert_eq!(color, (200, 200, 220));
+        // Must NOT be default (200, 200, 220).
+        assert_ne!(color, (200, 200, 220));
+        // Red channel should have dropped from 255 but still be above green's 80.
+        assert!(color.0 < 255 && color.0 > 80);
+        // Blue channel should be rising from 50 toward 120 but still nearer 50.
+        assert!(color.2 > 50 && color.2 < 120);
     }
 
     #[test]
@@ -432,11 +444,36 @@ mod tests {
     }
 
     #[test]
-    fn test_gradient_midpoint_yellow_to_default() {
-        let state = PipelineState { progress: 27, ..Default::default() }; // ~halfway 5-50
+    fn test_gradient_pure_yellow_immediately_after_submit() {
+        // Progress 5 fires the moment the user presses `s`. This is the
+        // "harsh transition to maximum yellow" state.
+        let state = PipelineState { progress: 5, ..Default::default() };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
-        // Should be roughly between yellow and default
-        assert!(color.0 > 200 && color.0 < 255);
+        assert_eq!(color, (255, 200, 50));
+    }
+
+    #[test]
+    fn test_gradient_monotonic_from_yellow_to_green() {
+        // Walk the gradient and confirm the red channel drops monotonically
+        // (yellow → green means red decreases) and the blue channel rises
+        // monotonically (50 → 120). Any dip into the "default" blue/gray
+        // band would show up as non-monotonic movement.
+        let mut prev_r = 255i16;
+        let mut prev_b = 50i16;
+        for p in 5..=100u8 {
+            let state = PipelineState { progress: p, ..Default::default() };
+            let (r, _g, b) = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
+            assert!(
+                r as i16 <= prev_r,
+                "red channel must be monotonically non-increasing; p={p} r={r} prev={prev_r}"
+            );
+            assert!(
+                b as i16 >= prev_b,
+                "blue channel must be monotonically non-decreasing; p={p} b={b} prev={prev_b}"
+            );
+            prev_r = r as i16;
+            prev_b = b as i16;
+        }
     }
 
     #[test]

@@ -2048,11 +2048,17 @@ impl App {
     }
 
     /// Rebuild the list of project indices that have PLAN.md files.
+    ///
+    /// A project appears in the Plans panel if it has a plan file at all —
+    /// even if the parser couldn't extract any phases. This way users can
+    /// still open and edit plans that use non-checkbox bullet formats, and
+    /// every project that was created with a scaffolded PLAN.md is visible
+    /// from the moment it exists.
     pub fn plans_refresh_project_list(&mut self) {
         self.plans_project_indices = self.projects
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.has_plan && !p.plan_phases.is_empty())
+            .filter(|(_, p)| p.has_plan)
             .map(|(i, _)| i)
             .collect();
         if self.plans_project_selected >= self.plans_project_indices.len() {
@@ -2819,19 +2825,60 @@ impl App {
                 }
             }
             KeyCode::Char('y') => {
-                // Confirm review. Two side effects beyond writing the
-                // decision file:
-                //   1. Bump the source idea's vault progress to 50, so the
-                //      gradient moves out of the yellow intake band.
-                //   2. Spawn a continuation session to run skill steps 5-7
+                // Confirm review. Side effects beyond writing the decision:
+                //   1. Scan the optimized text for `NEW PROJECT:` directives
+                //      and scaffold each one that doesn't already exist. This
+                //      runs BEFORE routing so the word-boundary matcher in
+                //      feedback::identify_target_projects will naturally
+                //      pick up the new project on its next pass.
+                //   2. Bump the source idea's vault progress to 50. This
+                //      marks the intake as complete (instructions
+                //      distributed); the gradient stays in the yellow band
+                //      until implementation progress is recorded.
+                //   3. Spawn a continuation session to run skill steps 5-7
                 //      (route → append inboxes → PM incorporate). The
                 //      original intake session has already exited.
                 if let Some(review) = self.intake_review.take() {
                     let source_idea = review.source_idea.clone();
                     let workspace = review.workspace.clone();
                     let optimized = review.optimized.clone();
+
+                    // Step 1: new-project detection + scaffolding
+                    let directives = orrch_core::detect_new_project_directives(&optimized);
+                    let mut scaffolded: Vec<String> = Vec::new();
+                    let mut scaffold_errors: Vec<String> = Vec::new();
+                    for directive in &directives {
+                        let slug = orrch_core::slugify_project_name(&directive.name);
+                        if slug.is_empty() {
+                            continue;
+                        }
+                        let target = self.projects_dir.join(&slug);
+                        if target.exists() {
+                            // Already exists — routing will find it naturally.
+                            continue;
+                        }
+                        let scaffold = orrch_core::ProjectScaffold {
+                            name: &directive.name,
+                            scope: orrch_core::Scope::Private,
+                            temperature: Temperature::Cold,
+                            summary: &directive.summary,
+                        };
+                        match orrch_core::create_project_scaffold(&self.projects_dir, &scaffold) {
+                            Ok(_) => scaffolded.push(slug),
+                            Err(e) => scaffold_errors.push(format!("{}: {e}", directive.name)),
+                        }
+                    }
+
                     match orrch_core::write_intake_decision(&review, "confirmed", &review.optimized) {
                         Ok(_) => {
+                            // Reload projects so any newly scaffolded ones
+                            // appear immediately in the Oversee/Plans panels
+                            // before the user looks again.
+                            if !scaffolded.is_empty() {
+                                self.projects = orrch_core::load_projects(&self.projects_dir);
+                                self.plans_refresh_project_list();
+                            }
+
                             if let Some(idea_filename) = source_idea {
                                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                                 let _ = orrch_core::vault::update_pipeline_progress(
@@ -2840,19 +2887,42 @@ impl App {
                                 self.ideas = orrch_core::vault::load_ideas(&vault);
 
                                 // Continuation session: run skill steps 5-7
-                                // against the confirmed review.
+                                // against the confirmed review. The goal
+                                // string surfaces any scaffolded projects so
+                                // the Claude session knows about them when
+                                // routing.
                                 let project_dir = self.projects_dir.join("orrchestrator");
+                                let scaffolded_hint = if scaffolded.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(
+                                        "\n\nNote: the following new project(s) were scaffolded \
+                                         BEFORE routing and should be treated as valid targets: {}.",
+                                        scaffolded.join(", ")
+                                    )
+                                };
                                 let goal = format!(
                                     "Continue intake from confirmed review at {}/review.json. \
                                      Run skill steps 5-7: route the optimized instructions to projects, \
                                      append them to instructions_inbox.md files, then have the PM \
-                                     incorporate them into PLAN.md. The optimized text is:\n\n{}",
+                                     incorporate them into PLAN.md.{}\n\n\
+                                     The optimized text is:\n\n{}",
                                     workspace.display(),
+                                    scaffolded_hint,
                                     optimized,
                                 );
                                 let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
                             }
-                            self.notify("Intake confirmed — distribution session spawned".into());
+
+                            // User-facing notification reflects what actually happened.
+                            let mut msg = String::from("Intake confirmed — distribution session spawned");
+                            if !scaffolded.is_empty() {
+                                msg.push_str(&format!(" (scaffolded: {})", scaffolded.join(", ")));
+                            }
+                            if !scaffold_errors.is_empty() {
+                                msg.push_str(&format!(" (scaffold errors: {})", scaffold_errors.join("; ")));
+                            }
+                            self.notify(msg);
                         }
                         Err(e) => self.notify(format!("Failed to confirm: {e}")),
                     }
@@ -5017,24 +5087,29 @@ impl App {
     }
 
     /// Create the project directory and scaffold files.
+    ///
+    /// Delegates to `orrch_core::create_project_scaffold` so the TUI
+    /// "New Project" flow writes the same starter set (`.scope`, optional
+    /// `.orrtemp`, `CLAUDE.md`, `PLAN.md`) as the intake pipeline's
+    /// "NEW PROJECT:" branch. The `path` argument must be directly under the
+    /// projects directory — its final component becomes the project name.
     fn create_new_project(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        std::fs::create_dir(path)?;
+        let projects_dir = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("project path has no parent directory"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("project path has no name component"))?
+            .to_string_lossy()
+            .into_owned();
 
-        // Write .scope
-        std::fs::write(path.join(".scope"), self.new_project_scope.label())?;
-
-        // Write .orrtemp if hot
-        if self.new_project_temp == Temperature::Hot {
-            std::fs::write(path.join(".orrtemp"), "hot")?;
-        }
-
-        // Create a minimal CLAUDE.md
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        std::fs::write(
-            path.join("CLAUDE.md"),
-            format!("# {name}\n\nProject instructions for Claude Code.\n"),
-        )?;
-
+        let scaffold = orrch_core::ProjectScaffold {
+            name: &name,
+            scope: self.new_project_scope,
+            temperature: self.new_project_temp,
+            summary: "",
+        };
+        orrch_core::create_project_scaffold(projects_dir, &scaffold)?;
         Ok(())
     }
 

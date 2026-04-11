@@ -48,7 +48,7 @@ Workforce tabs:  Workflows | Teams | Agents | Skills | Tools | MCP | Profiles | 
 - **Hypervisor agent** orchestrates workforces via subagent nesting (unlimited depth)
 - **Context isolation** — verification agents (testers) never see other verifiers' results on the same task
 - **File inbox between operations** (`instructions_inbox.md`), prompt injection within workflows
-- **fb2p.md is deprecated** — replaced by per-project `instructions_inbox.md` managed by COO
+- **PLAN.md is deprecated** — replaced by per-project `instructions_inbox.md` managed by COO
 - **Three-tier model system**: enterprise (Claude/GPT-4o), mid-tier (Mistral Large), local (Ollama)
 - **Workforce format**: structured markdown with pipe-delimited step tables (auto-detects parallel groups)
 - **API valves**: per-provider on/off toggle persisted in `~/.config/orrchestrator/valves.json`

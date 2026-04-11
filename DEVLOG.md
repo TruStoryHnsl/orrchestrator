@@ -84,23 +84,23 @@
 
 ---
 
-## Dev Session: 2026-04-09 — Instruction Inbox Migration (fb2p.md → instructions_inbox.md)
+## Dev Session: 2026-04-09 — Instruction Inbox Migration (PLAN.md → instructions_inbox.md)
 
 ### Completed
-- **Instruction inbox migration** (Carried Forward item) — migrated all live filesystem references from `fb2p.md` to `instructions_inbox.md` across the codebase. `crates/orrch-core/src/feedback.rs`: renamed `append_to_fb2p` → `append_to_inbox` and `append_to_fb2p_direct` → `append_to_inbox_direct`, retained the old names as `#[deprecated]` wrappers forwarding to the new functions, switched the filesystem path and the initial-file header text to "Instructions Inbox", updated `save_and_route_feedback`/`submit_feedback` call sites, and fixed the `test_save_and_route` test. `crates/orrch-tui/src/app.rs`: 5 `.join("fb2p.md")` literals + 2 `append_to_fb2p_direct` call sites + local variable renames + 6 stale comments updated. `crates/orrch-tui/src/ui.rs`: user-visible message "saved to workspace fb2p.md" → "saved to workspace instructions_inbox.md". Rework pass caught a reader regression in `crates/orrch-core/src/project.rs` `count_queued_prompts()` (still pointed at `fb2p.md`, would report 0 queued prompts for migrated projects) — fixed. Non-blocking: `library/skills/agent-coo.md` ignore list updated so COO does not re-ingest its own inbox.
+- **Instruction inbox migration** (Carried Forward item) — migrated all live filesystem references from `PLAN.md` to `instructions_inbox.md` across the codebase. `crates/orrch-core/src/feedback.rs`: renamed `append_to_PLAN` → `append_to_inbox` and `append_to_PLAN_direct` → `append_to_inbox_direct`, retained the old names as `#[deprecated]` wrappers forwarding to the new functions, switched the filesystem path and the initial-file header text to "Instructions Inbox", updated `save_and_route_feedback`/`submit_feedback` call sites, and fixed the `test_save_and_route` test. `crates/orrch-tui/src/app.rs`: 5 `.join("PLAN.md")` literals + 2 `append_to_PLAN_direct` call sites + local variable renames + 6 stale comments updated. `crates/orrch-tui/src/ui.rs`: user-visible message "saved to workspace PLAN.md" → "saved to workspace instructions_inbox.md". Rework pass caught a reader regression in `crates/orrch-core/src/project.rs` `count_queued_prompts()` (still pointed at `PLAN.md`, would report 0 queued prompts for migrated projects) — fixed. Non-blocking: `library/skills/agent-coo.md` ignore list updated so COO does not re-ingest its own inbox.
 
 ### Verification
-- Tester A (independent): PASS across 7 checks — build clean, 90 orrch-core tests pass, no live `fb2p.md` literals in orrch-tui, deprecated wrappers in place with correct attributes, PLAN.md checkbox + changelog entry present, inbox header text correct.
-- Tester B (independent): FAIL on first pass — found the `project.rs:832-841` reader regression. After rework: `grep fb2p crates/orrch-core/src/project.rs` returns 0 matches, `cargo test -p orrch-core` 90/90, `cargo build` clean.
+- Tester A (independent): PASS across 7 checks — build clean, 90 orrch-core tests pass, no live `PLAN.md` literals in orrch-tui, deprecated wrappers in place with correct attributes, PLAN.md checkbox + changelog entry present, inbox header text correct.
+- Tester B (independent): FAIL on first pass — found the `project.rs:832-841` reader regression. After rework: `grep PLAN crates/orrch-core/src/project.rs` returns 0 matches, `cargo test -p orrch-core` 90/90, `cargo build` clean.
 - PM verdict: REWORK → SHIP. One rework cycle (within the 3-cycle cap).
 
 ### Known follow-ups (non-blocking)
-- `library/skills/interpret-user-instructions.md` is an already-deprecated skill that still contains 9 active `fb2p.md` references inside its instructions. The whole skill is marked deprecated in CLAUDE.md; leaving as-is (do not edit deprecated skill bodies).
+- `library/skills/interpret-user-instructions.md` is an already-deprecated skill that still contains 9 active `PLAN.md` references inside its instructions. The whole skill is marked deprecated in CLAUDE.md; leaving as-is (do not edit deprecated skill bodies).
 - No new unit test explicitly asserting `append_to_inbox` writes to `instructions_inbox.md` under a tempdir. `test_save_and_route` exercises the full `save_and_route_feedback` → inbox write path, so the behavior is covered indirectly.
 
 ### Files Changed
 - `crates/orrch-core/src/feedback.rs` — function renames, deprecated wrappers, filesystem path, header text, test update
-- `crates/orrch-core/src/project.rs` — `count_queued_prompts` now reads `instructions_inbox.md`, local `fb2p_path` → `inbox_path`
+- `crates/orrch-core/src/project.rs` — `count_queued_prompts` now reads `instructions_inbox.md`, local `PLAN_path` → `inbox_path`
 - `crates/orrch-tui/src/app.rs` — 5 path literals, 2 function calls, 6 comments, 2 local vars
 - `crates/orrch-tui/src/ui.rs` — 1 user-visible message string
 - `library/skills/agent-coo.md` — ignore list updated
