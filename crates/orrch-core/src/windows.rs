@@ -526,15 +526,19 @@ pub fn select_and_focus(cat: SessionCategory, window_index: u32) -> bool {
     focus_category_window(cat)
 }
 
-/// Kill a specific tmux window.
+/// Kill a specific tmux window and remove its managed-sessions record.
 pub fn kill_session(cat: SessionCategory, window_name: &str) -> bool {
     let name = cat.tmux_name();
-    Command::new("tmux")
+    let ok = Command::new("tmux")
         .args(["kill-window", "-t", &format!("{name}:{window_name}")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .is_ok_and(|s| s.success())
+        .is_ok_and(|s| s.success());
+    if ok {
+        remove_session_record(name, window_name);
+    }
+    ok
 }
 
 // ─── Kill All Managed Sessions ──────────────────────────────────────
@@ -574,10 +578,17 @@ fn session_records_path() -> std::path::PathBuf {
     orrch_config_dir().join("managed-sessions.json")
 }
 
-/// Append a record for a newly spawned window.
+/// Append a record for a newly spawned window. Purges stale entries first.
 pub fn record_spawned_window(cat: &str, window_name: &str) {
     let path = session_records_path();
     let mut records = load_session_records();
+
+    // Purge closed windows before appending so the file never accumulates orphans.
+    records.retain(|rec| {
+        if !tmux_has_session(&rec.category) { return false; }
+        tmux_window_exists(&rec.category, &rec.window_name)
+    });
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -587,10 +598,30 @@ pub fn record_spawned_window(cat: &str, window_name: &str) {
         window_name: window_name.to_string(),
         spawned_at: now,
     });
-    if let Ok(json) = serde_json::to_string_pretty(&records) {
-        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
-        let _ = std::fs::write(&path, json);
+    save_session_records(&path, &records);
+}
+
+/// Remove the record for a window that has been killed.
+pub fn remove_session_record(cat: &str, window_name: &str) {
+    let path = session_records_path();
+    let mut records = load_session_records();
+    records.retain(|rec| !(rec.category == cat && rec.window_name == window_name));
+    save_session_records(&path, &records);
+}
+
+/// Remove all records whose tmux windows no longer exist. Returns the number purged.
+pub fn purge_orphaned_sessions() -> usize {
+    let path = session_records_path();
+    let records = load_session_records();
+    let before = records.len();
+    let live: Vec<SessionRecord> = records.into_iter().filter(|rec| {
+        tmux_has_session(&rec.category) && tmux_window_exists(&rec.category, &rec.window_name)
+    }).collect();
+    let purged = before - live.len();
+    if purged > 0 {
+        save_session_records(&path, &live);
     }
+    purged
 }
 
 /// Remove all session records (call after clean exit).
@@ -605,26 +636,32 @@ pub fn load_session_records() -> Vec<SessionRecord> {
     serde_json::from_str(&data).unwrap_or_default()
 }
 
+fn save_session_records(path: &std::path::Path, records: &[SessionRecord]) {
+    if let Ok(json) = serde_json::to_string_pretty(records) {
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn tmux_window_exists(session: &str, window_name: &str) -> bool {
+    let output = Command::new("tmux")
+        .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    output.ok().filter(|o| o.status.success()).map(|o| {
+        let text = String::from_utf8_lossy(&o.stdout);
+        text.lines().any(|l| l.trim() == window_name)
+    }).unwrap_or(false)
+}
+
 // ─── Orphan Detection ───────────────────────────────────────────────
 
 /// Detect session records that refer to tmux windows that no longer exist.
 /// Returns the orphaned records.
 pub fn detect_orphaned_sessions() -> Vec<SessionRecord> {
-    let records = load_session_records();
-    records.into_iter().filter(|rec| {
-        // If the tmux session is entirely gone, the window is orphaned
-        if !tmux_has_session(&rec.category) { return true; }
-        // Check if the specific window still exists in that session
-        let output = Command::new("tmux")
-            .args(["list-windows", "-t", &rec.category, "-F", "#{window_name}"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .output();
-        let window_exists = output.ok().filter(|o| o.status.success()).map(|o| {
-            let text = String::from_utf8_lossy(&o.stdout);
-            text.lines().any(|l| l.trim() == rec.window_name)
-        }).unwrap_or(false);
-        !window_exists
+    load_session_records().into_iter().filter(|rec| {
+        !tmux_has_session(&rec.category) || !tmux_window_exists(&rec.category, &rec.window_name)
     }).collect()
 }
 
