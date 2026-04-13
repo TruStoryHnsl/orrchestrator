@@ -3116,17 +3116,20 @@ impl App {
                 if !map.is_empty() && self.project_selected < map.len() - 1 { self.project_selected += 1; }
             }
             KeyCode::Right => {
-                // → on a project = expand it AND enter it
-                if let Some(pidx) = self.selected_project_index() {
-                    self.expanded_projects.insert(pidx);
-                    self.tree_browsing = true;
-                    self.tree_project = Some(pidx);
-                    self.tree_selected = 0;
-                    self.update_tree_preview(pidx);
+                if let Some(ListEntry::Project(idx)) = self.build_list_map().get(self.project_selected) {
+                    let idx = *idx;
+                    self.session_selected = 0;
+                    self.roadmap_selected = 0;
+                    self.detail_focus = if self.projects.get(idx).is_some_and(|p| !p.roadmap.is_empty()) {
+                        DetailFocus::Roadmap
+                    } else {
+                        DetailFocus::Sessions
+                    };
+                    if let Some(proj) = self.projects.get(idx) {
+                        self.browser_open(&proj.path.clone());
+                    }
+                    self.sub = SubView::ProjectDetail(idx);
                 }
-            }
-            KeyCode::Left => {
-                // ← at project list level does nothing (already at top)
             }
             _ => {}
         }
@@ -3325,7 +3328,7 @@ impl App {
 
         // Global commands always available
         match key {
-            KeyCode::Esc => { self.sub = SubView::List; return Ok(()); }
+            KeyCode::Esc | KeyCode::Left => { self.sub = SubView::List; return Ok(()); }
             KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
             KeyCode::Char('f') | KeyCode::Char('e') => {
                 self.request_vim(VimKind::ProjectFeedback(proj_idx));
@@ -3372,14 +3375,11 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Cycle focus: Roadmap → Sessions → DevMap → Browser → Roadmap
-                let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
+                // Cycle focus: Roadmap → Sessions → Browser → Roadmap
                 let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
                     DetailFocus::Roadmap => DetailFocus::Sessions,
-                    DetailFocus::Sessions => {
-                        if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser }
-                    }
+                    DetailFocus::Sessions => DetailFocus::Browser,
                     DetailFocus::DevMap => DetailFocus::Browser,
                     DetailFocus::Browser => {
                         if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
@@ -3398,11 +3398,7 @@ impl App {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to sessions
                 if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
-                    self.detail_focus = if self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty()) {
-                        DetailFocus::DevMap
-                    } else {
-                        DetailFocus::Sessions
-                    };
+                    self.detail_focus = DetailFocus::Sessions;
                     return Ok(());
                 }
                 self.key_browser_in_detail(key, proj_idx)
@@ -3499,9 +3495,8 @@ impl App {
                 if session_count > 0 && self.session_selected < session_count - 1 {
                     self.session_selected += 1;
                 } else {
-                    // Past last session → move to dev map (if available) or browser
-                    let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
-                    self.detail_focus = if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser };
+                    // Past last session → move to browser
+                    self.detail_focus = DetailFocus::Browser;
                 }
             }
             KeyCode::Enter => {

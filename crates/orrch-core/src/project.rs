@@ -321,12 +321,16 @@ impl Project {
         self.roadmap.iter().find(|r| !r.done())
     }
 
+    pub fn roadmap_complete(&self) -> bool {
+        !self.roadmap.is_empty() && self.open_count() == 0
+    }
+
     pub fn default_action(&self) -> &'static str {
         if !self.has_plan && self.description.is_empty() {
             "create plan"
         } else if self.queued_prompts > 0 {
             "run queued"
-        } else if !self.roadmap.is_empty() && self.open_count() == 0 {
+        } else if self.roadmap_complete() {
             // All planned features complete — time to package or audit
             if self.meta.version_dirs.is_empty() {
                 "construct package"
@@ -1104,6 +1108,20 @@ mod tests {
         let mut proj = test_project("test");
         proj.description = "Has a CLAUDE.md description".into();
         assert_eq!(proj.default_action(), "continue dev");
+    }
+
+    #[test]
+    fn test_roadmap_complete() {
+        let mut proj = test_project("test");
+        assert!(!proj.roadmap_complete());
+        proj.roadmap.push(RoadmapItem {
+            number: 1,
+            title: "done".into(),
+            description: String::new(),
+            status: FeatureStatus::Done,
+            source_line: None,
+        });
+        assert!(proj.roadmap_complete());
     }
 
     #[test]
