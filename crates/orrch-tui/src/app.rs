@@ -1537,12 +1537,7 @@ impl App {
                         }
                     }
                     DetailFocus::DevMap => {
-                        let total = self.devmap_flat_count(*pidx);
-                        if delta < 0 {
-                            self.devmap_selected = self.devmap_selected.saturating_sub((-delta) as usize);
-                        } else if total > 0 {
-                            self.devmap_selected = (self.devmap_selected + delta as usize).min(total.saturating_sub(1));
-                        }
+                        self.detail_focus = DetailFocus::Browser;
                     }
                     DetailFocus::Browser => {
                         if self.browser_in_child {
@@ -3393,7 +3388,7 @@ impl App {
         match self.detail_focus {
             DetailFocus::Roadmap => self.key_detail_roadmap(key, proj_idx),
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
-            DetailFocus::DevMap => self.key_detail_devmap(key, proj_idx),
+            DetailFocus::DevMap => self.key_browser_in_detail(key, proj_idx),
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to sessions
