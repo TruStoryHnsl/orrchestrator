@@ -19,7 +19,7 @@ pub enum SessionEvent {
     Died { sid: String },
 }
 
-/// Manages Claude Code sessions in PTYs.
+/// Manages CLI agent sessions in PTYs.
 pub struct ProcessManager {
     sessions: HashMap<String, Session>,
     external: Vec<ExternalSession>,
@@ -104,7 +104,7 @@ impl ProcessManager {
         }
 
         if pid == 0 {
-            // Child — become the Claude Code process
+            // Child — become the selected CLI agent process
             unsafe {
                 libc::close(master_fd);
                 libc::setsid();
@@ -266,11 +266,11 @@ impl ProcessManager {
         }
     }
 
-    /// Discover external Claude Code processes.
-    /// Filters out: managed PIDs, shell wrappers, non-claude binaries.
+    /// Discover external CLI agent processes.
+    /// Filters out: managed PIDs, shell wrappers, and non-agent binaries.
     pub async fn discover_external(&mut self) -> anyhow::Result<()> {
         let output = tokio::process::Command::new("pgrep")
-            .args(["-af", "claude"])
+            .args(["-af", "claude|codex|gemini"])
             .output()
             .await?;
 
@@ -297,8 +297,14 @@ impl ProcessManager {
             if pid == own_pid { continue; }
             // Skip managed sessions
             if managed_pids.contains(&(pid as i32)) { continue; }
-            // Must be an actual claude binary, not a shell wrapper or pgrep itself
-            if !cmdline.contains("/claude") && !cmdline.starts_with("claude") { continue; }
+            // Must be an actual supported agent binary, not a shell wrapper or pgrep itself
+            let is_agent = cmdline.contains("/claude")
+                || cmdline.starts_with("claude")
+                || cmdline.contains("/codex")
+                || cmdline.starts_with("codex")
+                || cmdline.contains("/gemini")
+                || cmdline.starts_with("gemini");
+            if !is_agent { continue; }
             // Skip shell wrappers (zsh -c, bash -c, etc.)
             if cmdline.contains("zsh -c") || cmdline.contains("bash -c") || cmdline.contains("sh -c") { continue; }
             // Skip pgrep itself

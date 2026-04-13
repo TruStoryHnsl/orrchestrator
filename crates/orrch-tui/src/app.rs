@@ -4298,10 +4298,14 @@ impl App {
                             let host = (*host).clone();
                             let host_name = host.name.clone();
                             let backend_label = backend.label().to_string();
-                            let flags: Vec<String> = if backend == BackendKind::Claude {
-                                vec!["--dangerously-skip-permissions".into()]
-                            } else {
-                                Vec::new()
+                            let flags: Vec<String> = match backend {
+                                BackendKind::Claude => {
+                                    vec!["--dangerously-skip-permissions".into()]
+                                }
+                                BackendKind::Codex => {
+                                    vec!["--dangerously-bypass-approvals-and-sandbox".into()]
+                                }
+                                _ => Vec::new(),
                             };
                             let goal2 = goal.clone();
                             let proj_name2 = proj_name.clone();
