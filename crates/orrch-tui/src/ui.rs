@@ -1220,6 +1220,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         let done = proj.done_count();
         let total = proj.roadmap.len();
         let goals_str = if total > 0 { format!(" {done}/{total}") } else { String::new() };
+        let plan_str = if proj.has_plan { String::new() } else { " no-plan".to_string() };
         let pipeline_count = app.pipelines_for_project(&proj.path).len();
         let sess_str = if session_count > 0 {
             if pipeline_count > 1 {
@@ -1238,6 +1239,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(goals_str, Style::default().fg(if done == total && total > 0 { GREEN } else { TEXT_DIM })),
             Span::styled(sess_str, Style::default().fg(if waiting > 0 { WAITING_COLOR } else { GREEN })),
             Span::styled(queued_str, Style::default().fg(WAITING_COLOR)),
+            Span::styled(plan_str, Style::default().fg(WAITING_COLOR)),
             Span::styled(format!("  [{}]", proj.default_action()), Style::default().fg(TEXT_MUTED)),
             if proj.meta.apple_target { Span::styled(" 🍎", Style::default()) } else { Span::raw("") },
         ])];
@@ -1538,42 +1540,30 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     use crate::app::DetailFocus;
     let Some(proj) = app.projects.get(proj_idx) else { return; };
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
-    let in_devmap = app.detail_focus == DetailFocus::DevMap;
     let in_browser = app.detail_focus == DetailFocus::Browser;
 
-    let has_devmap = !proj.plan_phases.is_empty();
-    let devmap_height: u16 = if has_devmap {
-        // Show at least a few lines for the dev map
-        let visible_items = app.devmap_flat_count(proj_idx);
-        (visible_items.min(10) as u16).max(3) + 2 // +2 for borders
-    } else {
-        0
-    };
-
     let roadmap_height = proj.roadmap.len().min(8) as u16 + 3;
-    let mut constraints = vec![
+    let constraints = [
         Constraint::Length(2),              // header
         Constraint::Length(roadmap_height), // roadmap
         Constraint::Length(8),             // sessions (compact)
+        Constraint::Min(5),                // file browser
     ];
-    if has_devmap {
-        constraints.push(Constraint::Length(devmap_height)); // dev map
-    }
-    constraints.push(Constraint::Min(5)); // file browser
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
 
-    let devmap_slot = if has_devmap { 3 } else { usize::MAX };
-    let browser_slot = if has_devmap { 4 } else { 3 };
-
     // Header
-    let header = Paragraph::new(Line::from(vec![
+    let mut header_spans = vec![
         Span::styled(&proj.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(format!("  [{}] {}/{} goals", proj.scope.badge(), proj.done_count(), proj.roadmap.len()), Style::default().fg(TEXT_DIM)),
-    ])).style(Style::default().bg(BG_DARK));
+    ];
+    if !proj.has_plan {
+        header_spans.push(Span::styled("  no plan", Style::default().fg(WAITING_COLOR)));
+    }
+    let header = Paragraph::new(Line::from(header_spans)).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
     // Roadmap — color-coded by feature status
@@ -1590,8 +1580,16 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     };
     let roadmap = List::new(roadmap_items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(roadmap_border));
-    frame.render_widget(roadmap, layout[1]);
+        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(roadmap_border))
+        .highlight_style(Style::default())
+        .highlight_symbol("");
+    let roadmap_selected = if proj.roadmap.is_empty() {
+        None
+    } else {
+        Some(app.roadmap_selected.min(proj.roadmap.len().saturating_sub(1)))
+    };
+    let mut roadmap_state = ListState::default().with_selected(roadmap_selected);
+    frame.render_stateful_widget(roadmap, layout[1], &mut roadmap_state);
 
     // Sessions — selectable, shows managed + external, with duplicate-goal badges
     let proj_path = proj.path.clone();
@@ -1655,11 +1653,6 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         frame.render_stateful_widget(table, layout[2], &mut state);
     }
 
-    // Dev map — interactive feature tree from Plan.md
-    if has_devmap {
-        draw_dev_map(frame, app, layout[devmap_slot], proj_idx, in_devmap);
-    }
-
     // File browser — single tree column + preview pane
     let browser_border = if in_browser { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
     let unfocused_border = Style::default().fg(TEXT_MUTED);
@@ -1668,7 +1661,7 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(layout[browser_slot]);
+        .split(layout[3]);
 
     // Build tree items: current directory entries, with child entries expanded inline
     let mut tree_items: Vec<ListItem> = Vec::new();
@@ -2676,11 +2669,25 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("|", ""),
             ("n", "spawn"), ("x", "kill"), ("a", "actions"),
         ]),
-        (Panel::Oversee, SubView::List) => hint_line(&[
-            ("→", "enter project"), ("Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
-            ("|", ""),
-            ("↑↓", "select"), ("q", "quit"),
-        ]),
+        (Panel::Oversee, SubView::List) => {
+            let completed = app
+                .selected_project_index()
+                .and_then(|idx| app.projects.get(idx))
+                .is_some_and(|proj| proj.roadmap_complete());
+            if completed {
+                hint_line(&[
+                    ("→", "detail view"), ("f", "submit feedback"), ("n", "construct package"),
+                    ("|", ""),
+                    ("a", "actions"), ("↑↓", "select"),
+                ])
+            } else {
+                hint_line(&[
+                    ("→", "detail view"), ("Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
+                    ("|", ""),
+                    ("↑↓", "select"), ("q", "quit"),
+                ])
+            }
+        }
         (Panel::Design, SubView::List) => {
             match app.design_sub {
                 crate::app::DesignSub::Intentions => hint_line(&[

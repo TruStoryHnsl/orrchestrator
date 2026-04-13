@@ -127,6 +127,21 @@ fn vim_title_args(title: &str) -> Vec<String> {
     ]
 }
 
+fn request_window_focus(title: &str) {
+    if title.trim().is_empty() {
+        return;
+    }
+
+    let escaped = title.replace('\'', "'\"'\"'");
+    let script = format!("sleep 0.2; wmctrl -a '{escaped}' >/dev/null 2>&1");
+    let _ = Command::new("sh")
+        .args(["-lc", &script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 /// Get the vim -c args for branding (used by the blocking fallback in main.rs).
 pub fn vim_title_args_pub(title: &str) -> Vec<String> {
     vim_title_args(title)
@@ -159,5 +174,7 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
     // SAFETY: setsid() is async-signal-safe and has no preconditions.
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
 
-    cmd.spawn().ok()
+    let child = cmd.spawn().ok()?;
+    request_window_focus(title);
+    Some(child)
 }
