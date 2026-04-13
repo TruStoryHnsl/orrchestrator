@@ -588,7 +588,7 @@ pub struct App {
     pub production_versions: Vec<ProductionEntry>,
     pub production_selected: usize,
 
-    // Vim / external editor
+    // Nvim / external editor
     pub vim_request: Option<VimRequest>,
     pub pending_editors: Vec<PendingEditor>,
 
@@ -670,7 +670,7 @@ pub struct App {
     pub intake_review_scroll_opt: u16,
     pub intake_review_focus: IntakeReviewFocus,
 
-    // Split-off vim editors from the orrch-edit session
+    // Split-off nvim editors from the orrch-edit session
     pub split_off_editors: Vec<String>,
 
     // Audit trail expansion in Intentions panel (index of expanded idea, or None)
@@ -898,7 +898,7 @@ impl App {
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
         app.expanded_projects = (0..app.projects.len()).collect();
-        // Check for orphaned vim editor windows from a previous orrchestrator session.
+        // Check for orphaned nvim editor windows from a previous orrchestrator session.
         // Draft files persist on disk; the periodic reload will pick up any changes.
         let orphan_count = count_orphaned_editor_windows();
         if orphan_count > 0 {
@@ -1670,7 +1670,7 @@ impl App {
             }
         }
 
-        // Normalize vim navigation keys to arrows (except in text inputs)
+        // Normalize nvim navigation keys to arrows (except in text inputs)
         let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
@@ -2034,7 +2034,7 @@ impl App {
                     self.plans_set_status(proj_idx, orrch_core::FeatureStatus::Deprecated);
                 }
                 KeyCode::Char('e') => {
-                    // Edit feature in vim
+                    // Edit feature in nvim
                     self.plans_edit_in_vim(proj_idx);
                 }
                 KeyCode::Char('r') => {
@@ -2171,7 +2171,7 @@ impl App {
         }
     }
 
-    /// Open the project's PLAN.md in vim.
+    /// Open the project's PLAN.md in nvim.
     fn plans_edit_in_vim(&mut self, proj_idx: Option<usize>) {
         let Some(idx) = proj_idx else { return; };
         if let Some(proj) = self.projects.get(idx) {
@@ -2623,7 +2623,7 @@ impl App {
                 self.request_vim(VimKind::NewIdea);
             }
             KeyCode::Enter => {
-                // Open selected idea in vim for editing
+                // Open selected idea in nvim for editing
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     let path = idea.path.clone();
                     let title = format!("[intentions] {}", idea.title);
@@ -2803,7 +2803,7 @@ impl App {
                 }
             }
             KeyCode::Char('e') => {
-                // Edit optimized text in vim. Scratch file lives in the
+                // Edit optimized text in nvim. Scratch file lives in the
                 // per-idea workspace so concurrent reviews never collide.
                 if let Some(review) = &self.intake_review {
                     let edit_path = review.workspace.join("intake_optimized_edit.md");
@@ -3254,7 +3254,7 @@ impl App {
                         }
                     }
                 } else {
-                    // In file tree — open editable files in vim
+                    // In file tree — open editable files in nvim
                     if let Some(node) = tree_nodes.get(tree_offset) {
                         if node.is_editable {
                             let kind = VimKind::ProjectFeedback(proj_idx);
@@ -3961,7 +3961,7 @@ impl App {
                 };
                 if let Some(entry) = entry {
                     if entry.is_editable {
-                        // Open file in vim directly
+                        // Open file in nvim directly
                         let kind = VimKind::ProjectFeedback(proj_idx);
                         let title = self.vim_title(&kind);
                         self.vim_request = Some(VimRequest {
@@ -5033,9 +5033,9 @@ impl App {
         Ok(())
     }
 
-    // ─── Vim Integration ─────────────────────────────────────────
+    // ─── Nvim Integration ────────────────────────────────────────
 
-    /// Build a descriptive window title for a vim editing session.
+    /// Build a descriptive window title for an nvim editing session.
     fn vim_title(&self, kind: &VimKind) -> String {
         match kind {
             VimKind::GlobalFeedback => "[orrchestrator] Feedback".into(),
@@ -5053,7 +5053,7 @@ impl App {
         }
     }
 
-    /// Request an external vim session. Creates the temp file and sets vim_request.
+    /// Request an external nvim session. Creates the temp file and sets vim_request.
     fn request_vim(&mut self, kind: VimKind) {
         let file = match &kind {
             VimKind::GlobalFeedback | VimKind::ProjectFeedback(_) => {
@@ -5077,8 +5077,8 @@ impl App {
         }
     }
 
-    /// Called by the main loop when a pending editor's vim process exits.
-    /// Also called after blocking vim in the same terminal.
+    /// Called by the main loop when a pending editor's nvim process exits.
+    /// Also called after blocking nvim in the same terminal.
     pub fn handle_vim_complete(&mut self, file: &std::path::Path, kind: VimKind) {
         let text = std::fs::read_to_string(file).unwrap_or_default();
         if text.trim().is_empty() {
@@ -5149,11 +5149,11 @@ impl App {
                 self.notify("Plan updated".into());
             }
         }
-        // Always reload library + workforce data after any vim edit
+        // Always reload library + workforce data after any nvim edit
         self.reload_all_library_data();
     }
 
-    /// Check if any pending vim editors have finished (called each tick by main loop).
+    /// Check if any pending nvim editors have finished (called each tick by main loop).
     pub fn check_pending_editors(&mut self) {
         let mut completed = Vec::new();
         for (i, pe) in self.pending_editors.iter_mut().enumerate() {
@@ -5205,7 +5205,7 @@ impl App {
                 self.open_feedback_confirm();
             }
             KeyCode::Char('r') => {
-                // Resume editing — open in vim
+                // Resume editing — open in nvim
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     if item.status == FeedbackStatus::Draft {
                         let path = item.path.clone();
@@ -5470,9 +5470,9 @@ fn scan_production(projects: &[Project]) -> Vec<ProductionEntry> {
 }
 
 /// Count KWin windows with "[orrchestrator]" in their title.
-/// These are vim editors from a previous orrchestrator session that survived.
+/// These are nvim editors from a previous orrchestrator session that survived.
 fn count_orphaned_editor_windows() -> usize {
-    // Use pgrep to find vim processes whose command line includes [orrchestrator]
+    // Use pgrep to find nvim processes whose command line includes [orrchestrator]
     let output = std::process::Command::new("pgrep")
         .args(["-f", r#"\[orrchestrator\]"#])
         .output();
@@ -5550,7 +5550,7 @@ fn default_projects_dir() -> PathBuf {
 
 /// Task 31: build a prominent header block that's prepended to new library
 /// items created via the "AI-assisted" flow (Shift+N in Design > Workforce).
-/// This block is what the user sees on open in vim — they fill in the intent,
+/// This block is what the user sees on open in nvim — they fill in the intent,
 /// save, and then a follow-up slice will hand the file to a Claude session.
 fn ai_assistance_header(kind_label: &str) -> String {
     format!(

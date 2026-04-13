@@ -1,6 +1,6 @@
-//! Clipboard utilities and external vim spawning.
+//! Clipboard utilities and external nvim spawning.
 //!
-//! The custom inline editor has been replaced by spawning real vim instances.
+//! The custom inline editor has been replaced by spawning real nvim instances.
 //! This module retains clipboard helpers used by single-line text inputs (SpawnGoal).
 
 use std::process::{Command, Stdio};
@@ -58,7 +58,7 @@ pub fn clipboard_set(text: &str) -> bool {
         .is_some()
 }
 
-// ─── External Vim Spawning ──────────────────────────────────────────
+// ─── External Nvim Spawning ─────────────────────────────────────────
 
 /// What kind of editing session this is.
 #[derive(Debug, Clone)]
@@ -77,16 +77,16 @@ pub enum VimKind {
     PlanFile,
 }
 
-/// A request from App to the main loop to spawn vim.
+/// A request from App to the main loop to spawn nvim.
 #[derive(Debug)]
 pub struct VimRequest {
     pub file: std::path::PathBuf,
     pub kind: VimKind,
-    /// Window title — shown in taskbar, alt-tab, and vim titlebar.
+    /// Window title — shown in taskbar, alt-tab, and nvim titlebar.
     pub title: String,
 }
 
-/// A vim process that is running in a separate terminal window.
+/// An nvim process that is running in a separate terminal window.
 pub struct PendingEditor {
     pub child: std::process::Child,
     pub file: std::path::PathBuf,
@@ -112,7 +112,7 @@ fn find_terminal() -> Option<String> {
     None
 }
 
-/// Build vim -c args that brand the window as orrchestrator-owned.
+/// Build nvim `-c` args that brand the window as orrchestrator-owned.
 ///
 /// Sets three things:
 /// 1. Terminal title (visible in taskbar / alt-tab)
@@ -142,12 +142,12 @@ fn request_window_focus(title: &str) {
         .spawn();
 }
 
-/// Get the vim -c args for branding (used by the blocking fallback in main.rs).
+/// Get the nvim `-c` args for branding (used by the blocking fallback in main.rs).
 pub fn vim_title_args_pub(title: &str) -> Vec<String> {
     vim_title_args(title)
 }
 
-/// Spawn vim in a new terminal window. Returns the child process on success.
+/// Spawn nvim in a new terminal window. Returns the child process on success.
 ///
 /// The terminal process is detached (new session via setsid) so it survives
 /// orrchestrator crashes or restarts. Orphaned windows are re-adopted on startup.

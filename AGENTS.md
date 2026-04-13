@@ -34,7 +34,7 @@ Design sub-bar:  Intentions | Workforce | Library
 Workforce tabs:  Workflows | Teams | Agents | Skills | Tools | MCP | Profiles | Training | Models
 ```
 
-- **Design > Intentions**: Ideas vault with instruction intake pipeline. `n`=new, `s`=submit to pipeline, `Enter`=edit in vim. Ideas track 0-100% progress through color gradient (yellow→default→green).
+- **Design > Intentions**: Ideas vault with instruction intake pipeline. `n`=new, `s`=submit to pipeline, `Enter`=edit in nvim. Ideas track 0-100% progress through color gradient (yellow→default→green).
 - **Design > Workforce**: Full-stack .md editor for all workflow components. `Tab` switches internal tabs. `n`=new from template, `Enter`=edit, `d`=delete.
 - **Design > Library**: Read-only browser. `Tab` switches sub-tabs. `v`=toggle API valve on Models, `e`=toggle MCP server.
 - **Oversee**: Project tracker with expandable rows, file browser, session management.
