@@ -9,6 +9,7 @@ use crate::provider::{ProviderConfig, ProviderKind};
 #[serde(rename_all = "lowercase")]
 pub enum BackendKind {
     Claude,
+    Codex,
     Gemini,
     Crush,
     OpenCode,
@@ -22,6 +23,7 @@ impl BackendKind {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
+            Self::Codex => "codex",
             Self::Gemini => "gemini",
             Self::Crush => "crush",
             Self::OpenCode => "opencode",
@@ -33,6 +35,7 @@ impl BackendKind {
     pub fn badge(&self) -> &'static str {
         match self {
             Self::Claude => "[claude]",
+            Self::Codex => "[codex]",
             Self::Gemini => "[gemini]",
             Self::Crush => "[crush]",
             Self::OpenCode => "[opencode]",
@@ -43,7 +46,7 @@ impl BackendKind {
 
     /// Whether this backend uses a CLI/PTY transport.
     pub fn is_cli(&self) -> bool {
-        matches!(self, Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode)
+        matches!(self, Self::Claude | Self::Codex | Self::Gemini | Self::Crush | Self::OpenCode)
     }
 
     /// Whether this backend uses a direct HTTP API transport.
@@ -55,9 +58,9 @@ impl BackendKind {
     pub fn provider_name(&self) -> &'static str {
         match self {
             Self::Claude | Self::AnthropicApi => "Anthropic",
+            Self::Codex | Self::OpenAiApi => "OpenAI",
             Self::Gemini => "Google",
             Self::Crush | Self::OpenCode => "Local",
-            Self::OpenAiApi => "OpenAI",
         }
     }
 
@@ -66,7 +69,7 @@ impl BackendKind {
     /// For API backends, produces a stub config.
     pub fn to_provider(&self, config: &BackendsConfig) -> ProviderConfig {
         match self {
-            Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode => {
+            Self::Claude | Self::Codex | Self::Gemini | Self::Crush | Self::OpenCode => {
                 if let Some(cfg) = config.backends.get(self) {
                     ProviderConfig {
                         name: self.label().to_string(),
@@ -112,6 +115,7 @@ impl BackendKind {
     pub fn all() -> &'static [BackendKind] {
         &[
             Self::Claude,
+            Self::Codex,
             Self::Gemini,
             Self::Crush,
             Self::OpenCode,
@@ -122,7 +126,7 @@ impl BackendKind {
 
     /// Only CLI-based backends (for PTY spawning).
     pub fn cli_backends() -> &'static [BackendKind] {
-        &[Self::Claude, Self::Gemini, Self::Crush, Self::OpenCode]
+        &[Self::Claude, Self::Codex, Self::Gemini, Self::Crush, Self::OpenCode]
     }
 }
 
@@ -163,6 +167,14 @@ impl Default for BackendsConfig {
             },
         );
         backends.insert(
+            BackendKind::Codex,
+            BackendConfig {
+                command: "codex".into(),
+                flags: vec!["--dangerously-bypass-approvals-and-sandbox".into()],
+                available: false,
+            },
+        );
+        backends.insert(
             BackendKind::Gemini,
             BackendConfig {
                 command: "gemini".into(),
@@ -197,6 +209,9 @@ impl BackendsConfig {
         if path.exists() {
             if let Ok(contents) = std::fs::read_to_string(&path) {
                 if let Ok(mut cfg) = serde_yaml_or_json(&contents) {
+                    for (kind, default_cfg) in Self::default().backends {
+                        cfg.backends.entry(kind).or_insert(default_cfg);
+                    }
                     cfg.detect_availability();
                     return cfg;
                 }
@@ -397,6 +412,7 @@ mod tests {
     fn test_default_config() {
         let cfg = BackendsConfig::default();
         assert!(cfg.backends.contains_key(&BackendKind::Claude));
+        assert!(cfg.backends.contains_key(&BackendKind::Codex));
         assert!(cfg.backends.contains_key(&BackendKind::Gemini));
         assert!(cfg.backends.contains_key(&BackendKind::Crush));
         assert!(cfg.backends.contains_key(&BackendKind::OpenCode));
@@ -405,6 +421,7 @@ mod tests {
     #[test]
     fn test_backend_labels() {
         assert_eq!(BackendKind::Claude.label(), "claude");
+        assert_eq!(BackendKind::Codex.badge(), "[codex]");
         assert_eq!(BackendKind::Gemini.badge(), "[gemini]");
         assert_eq!(BackendKind::Crush.label(), "crush");
         assert_eq!(BackendKind::OpenCode.badge(), "[opencode]");
@@ -414,6 +431,18 @@ mod tests {
     fn test_get_command_unavailable() {
         let cfg = BackendsConfig::default(); // available=false by default
         assert!(cfg.get_command(BackendKind::Claude).is_none());
+    }
+
+    #[test]
+    fn test_codex_default_command() {
+        let cfg = BackendsConfig::default();
+        let codex_cfg = cfg.backends.get(&BackendKind::Codex).expect("codex entry");
+        assert_eq!(codex_cfg.command, "codex");
+        assert_eq!(
+            codex_cfg.flags,
+            vec!["--dangerously-bypass-approvals-and-sandbox".to_string()]
+        );
+        assert!(!codex_cfg.available, "default should be unavailable until detection runs");
     }
 
     #[test]
@@ -465,6 +494,7 @@ mod tests {
 
         let cli_variants = [
             (BackendKind::Claude, "claude"),
+            (BackendKind::Codex, "codex"),
             (BackendKind::Gemini, "gemini"),
             (BackendKind::Crush, "crush"),
             (BackendKind::OpenCode, "opencode"),
@@ -491,8 +521,8 @@ mod tests {
             assert!(!kind.is_cli());
         }
 
-        // Sanity-check BackendKind::all() still enumerates all six.
-        assert_eq!(BackendKind::all().len(), 6);
+        // Sanity-check BackendKind::all() still enumerates all seven.
+        assert_eq!(BackendKind::all().len(), 7);
     }
 
     #[test]
