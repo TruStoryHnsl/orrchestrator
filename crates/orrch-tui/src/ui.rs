@@ -84,6 +84,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::RenameWorkforce(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Workforce File"); }
         SubView::RenameIdea(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Idea"); }
         SubView::ConfirmRollback => { draw_panel_content(frame, app, layout[1]); draw_confirm_rollback(frame, app); }
+        SubView::ConfirmKillSession(ref name) => {
+            let name = name.clone();
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_kill_session(frame, &name);
+        }
+        SubView::RenameProject(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Project"); }
+        SubView::RenamePlanFeature { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Plan Feature"); }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -2194,10 +2201,15 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     }
 
     let sess_border = if in_sessions { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    let sess_title = if in_sessions {
+        " Sessions (Enter:brief  x:kill) "
+    } else {
+        " Sessions (Enter:brief  x:kill) "
+    };
     if session_rows.is_empty() {
         let msg = Paragraph::new("  No sessions. Press 'n' to spawn.")
             .style(Style::default().fg(TEXT_MUTED))
-            .block(Block::default().title(" Sessions (Enter:open  x:kill  n:spawn) ").borders(Borders::ALL).style(sess_border));
+            .block(Block::default().title(" Sessions (Enter:brief  x:kill  n:spawn) ").borders(Borders::ALL).style(sess_border));
         frame.render_widget(msg, layout[2]);
     } else {
         let max = session_rows.len().saturating_sub(1);
@@ -2219,11 +2231,59 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
             Constraint::Length(8), Constraint::Length(8), Constraint::Length(10),
         ])
         .header(Row::new(vec!["", "ID", "Goal", "State", "Uptime", "Backend"]).style(Style::default().fg(ACCENT)))
-        .block(Block::default().title(" Sessions (Enter:open  x:kill) ").borders(Borders::ALL).style(sess_border))
+        .block(Block::default().title(sess_title).borders(Borders::ALL).style(sess_border))
         .row_highlight_style(Style::default().bg(BG_HIGHLIGHT))
         .highlight_symbol("▶ ");
         let mut state = TableState::default().with_selected(if in_sessions { Some(app.session_selected) } else { None });
         frame.render_stateful_widget(table, layout[2], &mut state);
+
+        // 90e: inline session brief overlay when expanded
+        if in_sessions && app.session_detail_expanded {
+            let pm_sessions = app.sessions_for_project(&proj_path);
+            if let Some(sess) = pm_sessions.get(app.session_selected) {
+                // Look up matching ManagedSession for cwd + last_output
+                let managed_info = app.managed_sessions.iter()
+                    .find(|ms| ms.name.contains(&sess.sid) || sess.sid.contains(&ms.name));
+                let proj_dir_str = sess.project_dir.to_string_lossy().into_owned();
+                let cwd = managed_info.map(|ms| ms.cwd.as_str()).unwrap_or(&proj_dir_str);
+                let last_output = managed_info.map(|ms| ms.last_output.as_str()).unwrap_or("");
+                let output_preview: String = last_output.lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let brief_text = format!(
+                    "Name:   {}\nCwd:    {}\nStatus: {}\n{}",
+                    sess.sid,
+                    cwd,
+                    sess.state.label(),
+                    if output_preview.is_empty() { String::new() } else { format!("Output: {}", output_preview) }
+                );
+                // Position the brief as a floating panel overlapping the browser area
+                let brief_area = layout[browser_slot];
+                let brief_height = 6u16;
+                let brief = Rect {
+                    x: brief_area.x,
+                    y: brief_area.y,
+                    width: brief_area.width,
+                    height: brief_height.min(brief_area.height),
+                };
+                frame.render_widget(Clear, brief);
+                frame.render_widget(
+                    Paragraph::new(brief_text)
+                        .style(Style::default().fg(TEXT))
+                        .block(
+                            Block::default()
+                                .title(" Session Brief (Enter/Space to collapse) ")
+                                .borders(Borders::ALL)
+                                .style(Style::default().bg(Color::Rgb(10, 25, 40)).fg(CYAN)),
+                        )
+                        .wrap(Wrap { trim: false }),
+                    brief,
+                );
+                return; // skip drawing file browser (brief overlays it)
+            }
+        }
     }
 
     // File browser — single tree column + preview pane
@@ -3291,6 +3351,30 @@ fn draw_confirm_rollback(frame: &mut Frame, app: &App) {
                 .title(" Rollback Release ")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(40, 10, 10)).fg(TEXT)),
+        ),
+        popup,
+    );
+}
+
+// ─── Confirm kill session popup (90d) ────────────────────────────────
+
+fn draw_confirm_kill_session(frame: &mut Frame, name: &str) {
+    let popup = centered_popup(frame.area(), 50, 5);
+    frame.render_widget(Clear, popup);
+    let lines = vec![
+        Line::styled(
+            format!("Kill session '{name}'?"),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled("Y to confirm, n/Esc to cancel", Style::default().fg(TEXT_MUTED)),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .title(" Kill Session ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(40, 20, 10)).fg(TEXT)),
         ),
         popup,
     );

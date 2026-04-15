@@ -244,6 +244,12 @@ pub enum SubView {
     RenameIdea(usize),
     /// Confirm rollback of the selected release tag (108).
     ConfirmRollback,
+    /// Confirm kill of a managed session (90d). Carries the session name.
+    ConfirmKillSession(String),
+    /// Inline rename for a project in Oversee list (94c). Carries the project index.
+    RenameProject(usize),
+    /// Inline rename for a plan feature (94d).
+    RenamePlanFeature { phase_idx: usize, feat_idx: usize },
 }
 
 /// Sub-panels within the Design panel.
@@ -785,11 +791,14 @@ pub struct App {
     /// drops the handle which signals the worker thread to stop and joins it.
     pub webedit_server: Option<orrch_webedit::ServerHandle>,
 
-    // Inline rename buffer (94a/94b — workforce + ideas rename)
+    // Inline rename buffer (94a/94b/94c/94d — workforce + ideas + project + plan rename)
     pub rename_buffer: String,
 
     // Rollback advisory text to display after rollback (108)
     pub rollback_advisory: Option<String>,
+
+    // 90e: whether the selected session row in ProjectDetail > Sessions is expanded
+    pub session_detail_expanded: bool,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1000,6 +1009,7 @@ impl App {
             webedit_server: None,
             rename_buffer: String::new(),
             rollback_advisory: None,
+            session_detail_expanded: false,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1769,7 +1779,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_)) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. }) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -1895,6 +1905,12 @@ impl App {
             SubView::RenameWorkforce(idx) => { let idx = *idx; self.key_rename_workforce(key, idx) }
             SubView::RenameIdea(idx) => { let idx = *idx; self.key_rename_idea(key, idx) }
             SubView::ConfirmRollback => self.key_confirm_rollback(key),
+            SubView::ConfirmKillSession(_) => self.key_confirm_kill_session(key),
+            SubView::RenameProject(idx) => { let idx = *idx; self.key_rename_project(key, idx) }
+            SubView::RenamePlanFeature { phase_idx, feat_idx } => {
+                let (pi, fi) = (*phase_idx, *feat_idx);
+                self.key_rename_plan_feature(key, pi, fi)
+            }
         }
     }
 
@@ -2139,8 +2155,23 @@ impl App {
                     self.plans_edit_in_vim(proj_idx);
                 }
                 KeyCode::Char('r') => {
-                    // Refresh
-                    self.plans_reload_project(proj_idx);
+                    // 94d: if on a feature, open rename dialog; otherwise refresh
+                    if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
+                        let title = proj_idx.and_then(|idx| {
+                            self.projects.get(idx)?
+                                .plan_phases.get(phase_idx)?
+                                .features.get(feat_idx)
+                                .map(|f| f.title.clone())
+                        });
+                        if let Some(t) = title {
+                            self.rename_buffer = t;
+                            self.sub = SubView::RenamePlanFeature { phase_idx, feat_idx };
+                        } else {
+                            self.plans_reload_project(proj_idx);
+                        }
+                    } else {
+                        self.plans_reload_project(proj_idx);
+                    }
                 }
                 _ => {}
             }
@@ -3257,7 +3288,21 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('r') => { self.reload_projects(); self.notify("Reloaded".into()); }
+            KeyCode::Char('r') => {
+                // 94c: if a project is selected, open rename dialog; otherwise reload
+                if let Some(pidx) = self.selected_project_index() {
+                    if let Some(proj) = self.projects.get(pidx) {
+                        self.rename_buffer = proj.name.clone();
+                        self.sub = SubView::RenameProject(pidx);
+                    } else {
+                        self.reload_projects();
+                        self.notify("Reloaded".into());
+                    }
+                } else {
+                    self.reload_projects();
+                    self.notify("Reloaded".into());
+                }
+            }
             KeyCode::Char('f') => {
                 self.request_vim(VimKind::GlobalFeedback);
             }
@@ -3805,34 +3850,34 @@ impl App {
                 if self.session_selected == 0 {
                     // At top of sessions → move to roadmap
                     self.detail_focus = DetailFocus::Roadmap;
+                    self.session_detail_expanded = false;
                 } else {
                     self.session_selected = self.session_selected.saturating_sub(1);
+                    self.session_detail_expanded = false;
                 }
             }
             KeyCode::Down => {
                 if session_count > 0 && self.session_selected < session_count - 1 {
                     self.session_selected += 1;
+                    self.session_detail_expanded = false;
                 } else {
                     // Past last session → move to browser
                     self.detail_focus = DetailFocus::Browser;
+                    self.session_detail_expanded = false;
                 }
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                // 90e: If on a managed session row, toggle inline brief
                 if let Some(proj) = self.projects.get(proj_idx) {
                     let managed = self.sessions_for_project(&proj.path);
                     let managed_count = managed.len();
 
                     if self.session_selected < managed_count {
-                        // Managed session — open PTY focus
-                        if let Some(s) = managed.get(self.session_selected) {
-                            let sid = s.sid.clone();
-                            let all = self.pm.sessions();
-                            if let Some(global_idx) = all.iter().position(|gs| gs.sid == sid) {
-                                self.sub = SubView::SessionFocus(global_idx);
-                            }
-                        }
+                        // Managed session — toggle inline brief (90e)
+                        self.session_detail_expanded = !self.session_detail_expanded;
                     } else {
                         // External session — open conversation log viewer
+                        self.session_detail_expanded = false;
                         let ext_idx = self.session_selected - managed_count;
                         let externals = self.external_sessions_for_project(&proj.path);
                         if let Some(ext) = externals.get(ext_idx) {
@@ -4252,6 +4297,87 @@ impl App {
                                     self.idea_selected = item_idx.min(
                                         self.ideas.len().saturating_sub(1),
                                     );
+                                }
+                                Err(e) => self.notify(format!("Rename failed: {e}")),
+                            }
+                        }
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                self.rename_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.rename_buffer.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// 94c: Rename a project directory from Oversee main list.
+    fn key_rename_project(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                let new_name = self.rename_buffer.trim().to_string();
+                if !new_name.is_empty() {
+                    if let Some(proj) = self.projects.get(proj_idx) {
+                        let old_path = proj.path.clone();
+                        let new_path = old_path.parent()
+                            .map(|p| p.join(&new_name));
+                        if let Some(new_path) = new_path {
+                            if new_path.exists() {
+                                self.notify(format!("Directory already exists: {new_name}"));
+                            } else {
+                                match std::fs::rename(&old_path, &new_path) {
+                                    Ok(()) => {
+                                        self.notify(format!("Renamed to {new_name}"));
+                                        self.reload_projects();
+                                    }
+                                    Err(e) => self.notify(format!("Rename failed: {e}")),
+                                }
+                            }
+                        }
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                self.rename_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.rename_buffer.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// 94d: Rename a plan feature inline.
+    fn key_rename_plan_feature(&mut self, key: KeyCode, phase_idx: usize, feat_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                let new_title = self.rename_buffer.trim().to_string();
+                if !new_title.is_empty() {
+                    let proj_idx = self.plans_current_project_idx();
+                    if let Some(idx) = proj_idx {
+                        let plan_info = self.projects.get(idx).and_then(|proj| {
+                            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                            let old_title = proj.plan_phases.get(phase_idx)?.features.get(feat_idx).map(|f| f.title.clone())?;
+                            Some((plan_path, old_title))
+                        });
+                        if let Some((plan_path, old_title)) = plan_info {
+                            match orrch_core::rename_feature_in_plan(&plan_path, &old_title, &new_title) {
+                                Ok(_) => {
+                                    self.notify(format!("Renamed to {new_title}"));
+                                    self.plans_reload_project(Some(idx));
                                 }
                                 Err(e) => self.notify(format!("Rename failed: {e}")),
                             }
@@ -5109,16 +5235,42 @@ impl App {
                     self.notify(format!("Minimized {}", s.category.label()));
                 }
             }
-            KeyCode::Char('x') => {
-                // Kill selected session
+            KeyCode::Char('x') | KeyCode::Delete => {
+                // Show confirm modal before killing session (90d)
                 if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let cat = s.category;
                     let name = s.name.clone();
+                    self.sub = SubView::ConfirmKillSession(name);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ─── Confirm Kill Session (90d) ──────────────────────────────
+
+    fn key_confirm_kill_session(&mut self, key: KeyCode) -> Result<()> {
+        let name = if let SubView::ConfirmKillSession(ref n) = self.sub {
+            n.clone()
+        } else {
+            self.sub = SubView::List;
+            return Ok(());
+        };
+        match key {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                // Find the session category by name and kill it
+                let maybe = self.managed_sessions.iter().find(|s| s.name == name).map(|s| s.category);
+                if let Some(cat) = maybe {
                     orrch_core::windows::kill_session(cat, &name);
                     self.managed_sessions = orrch_core::windows::list_all_sessions();
-                    self.session_tab_selected = self.session_tab_selected.min(self.managed_sessions.len().saturating_sub(1));
+                    self.session_tab_selected = self.session_tab_selected
+                        .min(self.managed_sessions.len().saturating_sub(1));
                     self.notify(format!("Killed {name}"));
                 }
+                self.sub = SubView::List;
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.sub = SubView::List;
             }
             _ => {}
         }

@@ -687,6 +687,50 @@ pub fn mark_verified_in_plan(
     Ok(changed)
 }
 
+/// Rename a feature in PLAN.md in-place, preserving the status marker and surrounding text.
+///
+/// Finds the line containing `**old_title**` and replaces it with `**new_title**`.
+/// All other bytes are preserved exactly.
+pub fn rename_feature_in_plan(
+    plan_path: &std::path::Path,
+    old_title: &str,
+    new_title: &str,
+) -> std::io::Result<bool> {
+    let contents = std::fs::read_to_string(plan_path)?;
+    let old_needle = format!("**{}**", old_title.trim());
+    let new_replacement = format!("**{}**", new_title.trim());
+
+    if old_needle == new_replacement {
+        return Ok(false);
+    }
+
+    let mut out = String::with_capacity(contents.len());
+    let mut changed = false;
+
+    for line in contents.split_inclusive('\n') {
+        let (body, nl) = if let Some(stripped) = line.strip_suffix('\n') {
+            (stripped, "\n")
+        } else {
+            (line, "")
+        };
+
+        if !changed && body.contains(&old_needle) {
+            let replaced = body.replacen(&old_needle, &new_replacement, 1);
+            out.push_str(&replaced);
+            out.push_str(nl);
+            changed = true;
+        } else {
+            out.push_str(body);
+            out.push_str(nl);
+        }
+    }
+
+    if changed {
+        std::fs::write(plan_path, out)?;
+    }
+    Ok(changed)
+}
+
 /// Find the line index of a feature by its title.
 fn find_feature_line(lines: &[&str], title: &str) -> Option<usize> {
     for (i, line) in lines.iter().enumerate() {
