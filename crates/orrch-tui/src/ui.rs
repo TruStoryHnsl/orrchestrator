@@ -378,17 +378,19 @@ fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
 
-    // Populate packaging data on first render or when empty.
+    // Populate tab data on first render.
     if app.publish_tab == PublishTab::Packaging && app.release_notes_preview.is_none() {
         app.refresh_packaging_data();
+    }
+    if app.publish_tab == PublishTab::Compliance && app.license_report.is_none() {
+        app.refresh_compliance_data();
     }
 
     match app.publish_tab {
         PublishTab::Packaging => draw_packaging_tab(frame, app, chunks[1]),
         PublishTab::Distribution => draw_placeholder(frame, chunks[1], "Distribution",
             "Platform-specific distribution channels (GitHub Releases, crates.io, etc.) — coming soon."),
-        PublishTab::Compliance => draw_placeholder(frame, chunks[1], "Compliance",
-            "License auditing, dependency scanning, and legal review — coming soon."),
+        PublishTab::Compliance => draw_compliance_tab(frame, app, chunks[1]),
         PublishTab::Marketing => draw_placeholder(frame, chunks[1], "Marketing",
             "Release notes, changelogs, and marketing copy generation — coming soon."),
         PublishTab::History => draw_placeholder(frame, chunks[1], "History",
@@ -397,7 +399,7 @@ fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
-    // Split into checklist (top-right) and release notes (left/main).
+    // Split horizontally: left=release notes, right=checklist+build targets
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
@@ -405,18 +407,24 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     // ── Release Notes (left) ────────────────────────────────────────────
     let notes_text = app.release_notes_preview.as_deref().unwrap_or(
-        "Release notes not yet generated.\nNavigate to this tab to load.",
+        "Release notes not yet generated.\nNavigate to this tab to load.\n\n[v] preview next version changelog  [b] build artifacts",
     );
     let notes = Paragraph::new(notes_text)
         .style(Style::default().fg(TEXT))
         .wrap(Wrap { trim: false })
         .block(Block::default()
-            .title(" Release Notes ")
+            .title(" Release Notes  [v]=preview version  [b]=build ")
             .borders(Borders::ALL)
             .style(Style::default().fg(TEXT_MUTED)));
     frame.render_widget(notes, hsplit[0]);
 
-    // ── Pre-release Checklist (right) ──────────────────────────────────
+    // ── Right pane: checklist (top) + build targets (bottom) ───────────
+    let right_split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(hsplit[1]);
+
+    // Pre-release Checklist
     let checklist_rows: Vec<Row> = if app.checklist_results.is_empty() {
         vec![Row::new(vec![
             Cell::from("—").style(Style::default().fg(TEXT_DIM)),
@@ -442,7 +450,126 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .style(Style::default().fg(if all_pass { GREEN } else { TEXT_MUTED })))
         .column_spacing(1);
-    frame.render_widget(checklist, hsplit[1]);
+    frame.render_widget(checklist, right_split[0]);
+
+    // Build Targets
+    let build_rows: Vec<Row> = if app.build_targets.is_empty() {
+        vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from("No project files detected").style(Style::default().fg(TEXT_DIM)),
+        ])]
+    } else {
+        app.build_targets.iter().enumerate().map(|(i, target)| {
+            let result = app.build_results.get(i);
+            let (icon, icon_color) = match result {
+                Some(r) => match r.status {
+                    orrch_core::release::BuildStatus::Success => ("✓", GREEN),
+                    orrch_core::release::BuildStatus::Failed => ("✗", Color::Red),
+                    orrch_core::release::BuildStatus::Running => ("⏳", WAITING_COLOR),
+                    orrch_core::release::BuildStatus::Pending => ("·", TEXT_DIM),
+                },
+                None => ("·", TEXT_DIM),
+            };
+            Row::new(vec![
+                Cell::from(icon).style(Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
+                Cell::from(target.label.clone()).style(Style::default().fg(TEXT)),
+            ])
+        }).collect()
+    };
+
+    let build_title = if app.build_running { " Build Targets ⏳ " } else { " Build Targets  [b]=run " };
+    let build_table = Table::new(build_rows, [Constraint::Length(3), Constraint::Min(30)])
+        .block(Block::default()
+            .title(build_title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(1);
+    frame.render_widget(build_table, right_split[1]);
+}
+
+fn draw_compliance_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let vsplit = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+
+    // ── License Report (top) ───────────────────────────────────────────
+    let lic_rows: Vec<Row> = match &app.license_report {
+        None => vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from("").style(Style::default().fg(TEXT_DIM)),
+            Cell::from("Loading...").style(Style::default().fg(TEXT_DIM)),
+        ])],
+        Some(report) => {
+            if report.deps.is_empty() {
+                vec![Row::new(vec![
+                    Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+                    Cell::from("").style(Style::default().fg(TEXT_DIM)),
+                    Cell::from("No Cargo.lock found").style(Style::default().fg(TEXT_DIM)),
+                ])]
+            } else {
+                report.deps.iter().map(|dep| {
+                    let (status_color, status_label) = match dep.status {
+                        orrch_core::LicenseStatus::Permissive => (GREEN, dep.status.label()),
+                        orrch_core::LicenseStatus::Copyleft => (WAITING_COLOR, dep.status.label()),
+                        orrch_core::LicenseStatus::Unknown => (TEXT_DIM, dep.status.label()),
+                    };
+                    Row::new(vec![
+                        Cell::from(dep.name.clone()).style(Style::default().fg(TEXT)),
+                        Cell::from(dep.spdx.clone()).style(Style::default().fg(TEXT_DIM)),
+                        Cell::from(status_label).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    ])
+                }).collect()
+            }
+        }
+    };
+
+    let lic_title = match &app.license_report {
+        Some(r) => format!(" Licenses ({} deps, {} permissive, {} copyleft, {} unknown) ", r.total, r.permissive, r.copyleft, r.unknown),
+        None => " Licenses ".to_string(),
+    };
+    let lic_table = Table::new(lic_rows, [Constraint::Percentage(35), Constraint::Percentage(45), Constraint::Percentage(20)])
+        .block(Block::default()
+            .title(lic_title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(1);
+    frame.render_widget(lic_table, vsplit[0]);
+
+    // ── Copyright Report (bottom) ─────────────────────────────────────
+    let copy_rows: Vec<Row> = match &app.copyright_report {
+        None => vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from("Loading...").style(Style::default().fg(TEXT_DIM)),
+        ])],
+        Some(report) => {
+            if report.missing.is_empty() {
+                vec![Row::new(vec![
+                    Cell::from("✓").style(Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
+                    Cell::from(format!("All {} files have copyright headers", report.scanned)).style(Style::default().fg(GREEN)),
+                ])]
+            } else {
+                report.missing.iter().map(|m| {
+                    Row::new(vec![
+                        Cell::from("✗").style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Cell::from(m.path.clone()).style(Style::default().fg(TEXT_DIM)),
+                    ])
+                }).collect()
+            }
+        }
+    };
+
+    let copy_title = match &app.copyright_report {
+        Some(r) => format!(" Copyright Headers ({:.0}% coverage, {} missing) ", r.coverage_pct(), r.missing.len()),
+        None => " Copyright Headers ".to_string(),
+    };
+    let copy_table = Table::new(copy_rows, [Constraint::Length(3), Constraint::Min(40)])
+        .block(Block::default()
+            .title(copy_title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(1);
+    frame.render_widget(copy_table, vsplit[1]);
 }
 
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {

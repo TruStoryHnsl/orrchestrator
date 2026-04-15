@@ -628,6 +628,16 @@ pub struct App {
     pub release_notes_preview: Option<String>,
     /// Pre-release checklist results: (label, passed).
     pub checklist_results: Vec<(String, bool)>,
+    /// Detected build targets for the Packaging tab.
+    pub build_targets: Vec<orrch_core::release::BuildTarget>,
+    /// Build results keyed by target index.
+    pub build_results: Vec<orrch_core::release::BuildResult>,
+    /// True while a build is in-progress (background thread pending).
+    pub build_running: bool,
+    /// Cached license report for the Compliance tab.
+    pub license_report: Option<orrch_core::compliance::LicenseReport>,
+    /// Cached copyright report for the Compliance tab.
+    pub copyright_report: Option<orrch_core::compliance::CopyrightReport>,
 
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
@@ -886,6 +896,11 @@ impl App {
             publish_tab: PublishTab::Packaging,
             release_notes_preview: None,
             checklist_results: Vec::new(),
+            build_targets: Vec::new(),
+            build_results: Vec::new(),
+            build_running: false,
+            license_report: None,
+            copyright_report: None,
             ideas,
             idea_selected: 0,
             production_versions,
@@ -2662,15 +2677,45 @@ impl App {
         match key {
             KeyCode::Left => {
                 self.publish_tab = self.publish_tab.prev();
-                self.refresh_packaging_data();
+                self.refresh_publish_tab();
             }
             KeyCode::Right => {
                 self.publish_tab = self.publish_tab.next();
-                self.refresh_packaging_data();
+                self.refresh_publish_tab();
             }
             KeyCode::Char('r') => {
-                // Force-refresh release notes and checklist
-                self.refresh_packaging_data();
+                self.refresh_publish_tab();
+            }
+            KeyCode::Char('v') => {
+                // Preview next patch version changelog (does NOT create tag)
+                if self.publish_tab == PublishTab::Packaging {
+                    let proj_dir = self.projects_dir.join("orrchestrator");
+                    if proj_dir.exists() {
+                        let version = orrch_core::release::next_version_string(
+                            &proj_dir, orrch_core::release::BumpKind::Patch,
+                        );
+                        let entry = orrch_core::release::generate_changelog_entry(&proj_dir, &version);
+                        self.release_notes_preview = Some(format!(
+                            "Preview: {version} (not yet tagged)\n\n{entry}"
+                        ));
+                    }
+                }
+            }
+            KeyCode::Char('b') => {
+                // Trigger synchronous build of all detected targets
+                if self.publish_tab == PublishTab::Packaging && !self.build_running {
+                    let proj_dir = self.projects_dir.join("orrchestrator");
+                    if proj_dir.exists() {
+                        if self.build_targets.is_empty() {
+                            self.build_targets = orrch_core::release::detect_build_targets(&proj_dir);
+                        }
+                        self.build_running = true;
+                        self.build_results = self.build_targets.iter()
+                            .map(|t| orrch_core::release::build_artifact(&proj_dir, t))
+                            .collect();
+                        self.build_running = false;
+                    }
+                }
             }
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => { self.focus_depth = 0; }
@@ -2679,12 +2724,17 @@ impl App {
         Ok(())
     }
 
-    /// Regenerate release notes and checklist for the Packaging tab.
-    /// Uses orrchestrator's own project dir as the subject.
+    /// Refresh data for the currently active Publish tab.
+    pub fn refresh_publish_tab(&mut self) {
+        match self.publish_tab {
+            PublishTab::Packaging => self.refresh_packaging_data(),
+            PublishTab::Compliance => self.refresh_compliance_data(),
+            _ => {}
+        }
+    }
+
+    /// Regenerate release notes, checklist, and detect build targets for the Packaging tab.
     pub fn refresh_packaging_data(&mut self) {
-        use crate::app::PublishTab;
-        if self.publish_tab != PublishTab::Packaging { return; }
-        // Use orrchestrator's own directory as the release subject.
         let proj_dir = self.projects_dir.join("orrchestrator");
         if proj_dir.exists() {
             self.release_notes_preview = Some(
@@ -2694,6 +2744,18 @@ impl App {
                 .into_iter()
                 .map(|(check, passed)| (check.label().to_string(), passed))
                 .collect();
+            if self.build_targets.is_empty() {
+                self.build_targets = orrch_core::release::detect_build_targets(&proj_dir);
+            }
+        }
+    }
+
+    /// Refresh license + copyright data for the Compliance tab.
+    pub fn refresh_compliance_data(&mut self) {
+        let proj_dir = self.projects_dir.join("orrchestrator");
+        if proj_dir.exists() {
+            self.license_report = Some(orrch_core::compliance::scan_licenses(&proj_dir));
+            self.copyright_report = Some(orrch_core::compliance::check_copyright(&proj_dir));
         }
     }
 
