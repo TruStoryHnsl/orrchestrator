@@ -409,3 +409,351 @@ fn check_git_clean(project_dir: &Path) -> bool {
         _ => false,
     }
 }
+
+// ─── Distribution Platforms (item 101) ───────────────────────────────────────
+
+/// A publish target platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DistributionPlatform {
+    GitHubReleases,
+    CratesIo,
+    DockerHub,
+    Aur,
+    Homebrew,
+    Flathub,
+}
+
+impl DistributionPlatform {
+    pub const ALL: [DistributionPlatform; 6] = [
+        DistributionPlatform::GitHubReleases,
+        DistributionPlatform::CratesIo,
+        DistributionPlatform::DockerHub,
+        DistributionPlatform::Aur,
+        DistributionPlatform::Homebrew,
+        DistributionPlatform::Flathub,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::GitHubReleases => "GitHub Releases",
+            Self::CratesIo => "crates.io",
+            Self::DockerHub => "Docker Hub",
+            Self::Aur => "AUR",
+            Self::Homebrew => "Homebrew",
+            Self::Flathub => "Flathub",
+        }
+    }
+
+    /// Check if project has config/files suggesting this platform is applicable.
+    pub fn config_indicator(&self, project_dir: &Path) -> bool {
+        match self {
+            Self::GitHubReleases => project_dir.join(".git").exists(),
+            Self::CratesIo => project_dir.join("Cargo.toml").exists(),
+            Self::DockerHub => {
+                project_dir.join("Dockerfile").exists()
+                    || project_dir.join("docker-compose.yml").exists()
+                    || project_dir.join("compose.yml").exists()
+            }
+            Self::Aur => project_dir.join("PKGBUILD").exists(),
+            Self::Homebrew => {
+                project_dir.join("Formula").is_dir() || project_dir.join("homebrew").is_dir()
+            }
+            Self::Flathub => {
+                project_dir.join("flatpak").is_dir()
+                    || project_dir
+                        .read_dir()
+                        .ok()
+                        .map(|mut d| {
+                            d.any(|e| {
+                                e.ok()
+                                    .and_then(|e| {
+                                        let n = e.file_name();
+                                        let s = n.to_string_lossy().to_string();
+                                        if s.ends_with(".yml") || s.ends_with(".yaml") {
+                                            Some(s)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .map(|s| s.contains("flathub"))
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+            }
+        }
+    }
+}
+
+/// Publish status for a single platform.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlatformStatus {
+    /// No relevant config / indicator files found in project.
+    NotConfigured,
+    /// Configured but no version published yet.
+    NotPublished,
+    /// A version has been published (proxied via git tag).
+    Published(String),
+}
+
+impl PlatformStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::NotConfigured => "Not configured",
+            Self::NotPublished => "Not published",
+            Self::Published(_) => "Published",
+        }
+    }
+}
+
+/// Detect distribution status for all platforms.
+pub fn detect_distribution_status(
+    project_dir: &Path,
+) -> Vec<(DistributionPlatform, PlatformStatus)> {
+    let latest_tag = get_last_tag(project_dir);
+    DistributionPlatform::ALL
+        .iter()
+        .map(|&platform| {
+            let status = if !platform.config_indicator(project_dir) {
+                PlatformStatus::NotConfigured
+            } else {
+                match &latest_tag {
+                    Some(tag) => PlatformStatus::Published(tag.clone()),
+                    None => PlatformStatus::NotPublished,
+                }
+            };
+            (platform, status)
+        })
+        .collect()
+}
+
+// ─── Release History (item 107) ──────────────────────────────────────────────
+
+/// A single entry in the release history.
+#[derive(Debug, Clone)]
+pub struct ReleaseHistoryEntry {
+    pub tag: String,
+    pub date: String,
+    pub summary: String,
+}
+
+/// Read git tags and build a release history list (most recent first).
+pub fn load_release_history(project_dir: &Path) -> Vec<ReleaseHistoryEntry> {
+    let tag_out = Command::new("git")
+        .args(["tag", "--sort=-version:refname", "--format=%(refname:short)"])
+        .current_dir(project_dir)
+        .output();
+
+    let tags_raw = match tag_out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return Vec::new(),
+    };
+
+    let tags: Vec<&str> = tags_raw.lines().filter(|l| !l.trim().is_empty()).collect();
+    if tags.is_empty() {
+        return Vec::new();
+    }
+
+    tags.iter()
+        .map(|tag| {
+            // Try annotated tag date + subject first
+            let info_out = Command::new("git")
+                .args([
+                    "for-each-ref",
+                    "--format=%(taggerdate:short)|%(subject)",
+                    &format!("refs/tags/{tag}"),
+                ])
+                .current_dir(project_dir)
+                .output();
+
+            let (date, summary) = match info_out {
+                Ok(o) if o.status.success() => {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if s.contains('|') {
+                        let mut parts = s.splitn(2, '|');
+                        let d = parts.next().unwrap_or("").trim().to_string();
+                        let m = parts.next().unwrap_or("").trim().to_string();
+                        let d = if d.is_empty() {
+                            commit_date_for_tag(project_dir, tag)
+                        } else {
+                            d
+                        };
+                        (d, m)
+                    } else {
+                        (commit_date_for_tag(project_dir, tag), s)
+                    }
+                }
+                _ => (commit_date_for_tag(project_dir, tag), String::new()),
+            };
+
+            let summary = if summary.is_empty() {
+                format!("Release {tag}")
+            } else {
+                summary
+            };
+
+            ReleaseHistoryEntry {
+                tag: tag.to_string(),
+                date,
+                summary,
+            }
+        })
+        .collect()
+}
+
+fn commit_date_for_tag(project_dir: &Path, tag: &str) -> String {
+    let out = Command::new("git")
+        .args(["log", "-1", "--format=%as", tag])
+        .current_dir(project_dir)
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
+// ─── Marketing Metadata (item 105) ───────────────────────────────────────────
+
+/// Parsed marketing metadata from the project.
+#[derive(Debug, Clone, Default)]
+pub struct MarketingMetadata {
+    pub project_name: String,
+    pub description: String,
+    pub version: String,
+    pub repository: Option<String>,
+    pub license: Option<String>,
+    /// Feature highlights extracted from `feat:` commits.
+    pub features: Vec<String>,
+    /// Markdown badge snippet.
+    pub badge_snippet: String,
+}
+
+/// Extract marketing metadata from Cargo.toml + git log.
+pub fn load_marketing_metadata(project_dir: &Path) -> MarketingMetadata {
+    let cargo_path = project_dir.join("Cargo.toml");
+    let contents = match std::fs::read_to_string(&cargo_path) {
+        Ok(s) => s,
+        Err(_) => return MarketingMetadata::default(),
+    };
+
+    let mut meta = MarketingMetadata::default();
+
+    let mut in_package = false;
+    let mut in_workspace_package = false;
+    for line in contents.lines() {
+        let line = line.trim();
+        if line == "[package]" {
+            in_package = true;
+            in_workspace_package = false;
+        } else if line == "[workspace.package]" {
+            in_workspace_package = true;
+            in_package = false;
+        } else if line.starts_with('[') {
+            in_package = false;
+            in_workspace_package = false;
+        } else if in_package || in_workspace_package {
+            if let Some(val) = extract_toml_str(line, "name") {
+                meta.project_name = val;
+            } else if let Some(val) = extract_toml_str(line, "description") {
+                meta.description = val;
+            } else if let Some(val) = extract_toml_str(line, "version") {
+                meta.version = val;
+            } else if let Some(val) = extract_toml_str(line, "repository") {
+                meta.repository = Some(val);
+            } else if let Some(val) = extract_toml_str(line, "license") {
+                meta.license = Some(val);
+            }
+        }
+    }
+
+    // Fall back: scan all lines for name if workspace root had no [package]
+    if meta.project_name.is_empty() {
+        for line in contents.lines() {
+            let line = line.trim();
+            if let Some(val) = extract_toml_str(line, "name") {
+                meta.project_name = val;
+                break;
+            }
+        }
+    }
+    if meta.project_name.is_empty() {
+        meta.project_name = project_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+    }
+
+    // Feature highlights from feat: commits
+    let feat_out = Command::new("git")
+        .args(["log", "--oneline", "--no-merges", "--grep=^feat"])
+        .current_dir(project_dir)
+        .output();
+    if let Ok(o) = feat_out {
+        if o.status.success() {
+            for line in String::from_utf8_lossy(&o.stdout).lines().take(8) {
+                let msg = line.splitn(2, ' ').nth(1).unwrap_or(line).trim().to_string();
+                if !msg.is_empty() {
+                    meta.features.push(msg);
+                }
+            }
+        }
+    }
+
+    // Badge snippet
+    let repo_url = meta.repository.as_deref().unwrap_or("");
+    let repo_path = repo_url
+        .split("github.com/")
+        .nth(1)
+        .unwrap_or("")
+        .trim_end_matches(".git")
+        .to_string();
+
+    let license_id = meta
+        .license
+        .as_deref()
+        .unwrap_or("MIT")
+        .replace(' ', "_");
+
+    let mut badges: Vec<String> = Vec::new();
+    if !meta.version.is_empty() {
+        badges.push(format!(
+            "![version](https://img.shields.io/badge/version-{}-blue)",
+            meta.version
+        ));
+    }
+    badges.push(format!(
+        "![license](https://img.shields.io/badge/license-{}-green)",
+        license_id
+    ));
+    if !repo_path.is_empty() {
+        badges.push(format!(
+            "![build](https://github.com/{}/actions/workflows/ci.yml/badge.svg)",
+            repo_path
+        ));
+    }
+    meta.badge_snippet = badges.join("  \n");
+
+    meta
+}
+
+fn extract_toml_str(line: &str, key: &str) -> Option<String> {
+    let trimmed = line.trim();
+    // Must start with key followed by optional space then =
+    let rest = if let Some(r) = trimmed.strip_prefix(key) {
+        r.trim_start()
+    } else {
+        return None;
+    };
+    let rest = rest.strip_prefix('=')?;
+    let rest = rest.trim();
+    // Strip surrounding quotes
+    let inner = if rest.starts_with('"') {
+        rest.trim_matches('"')
+    } else if rest.starts_with('\'') {
+        rest.trim_matches('\'')
+    } else {
+        rest
+    }
+    .trim();
+    if inner.is_empty() { None } else { Some(inner.to_string()) }
+}
