@@ -159,5 +159,25 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
     // SAFETY: setsid() is async-signal-safe and has no preconditions.
     unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
 
-    cmd.spawn().ok()
+    let child = cmd.spawn().ok();
+
+    // Focus the new window after spawn. The window may not be mapped yet so
+    // we retry up to 3 times with 200 ms gaps. Failure is silent — focus is
+    // best-effort and wmctrl may not be installed on all platforms.
+    if child.is_some() {
+        let title_owned = title.to_string();
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                let ok = std::process::Command::new("wmctrl")
+                    .args(["-a", &title_owned])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if ok { break; }
+            }
+        });
+    }
+
+    child
 }
