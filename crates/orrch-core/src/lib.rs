@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod audit;
+pub mod compliance;
 pub mod backend;
 pub mod config;
 pub mod diff_log;
@@ -35,3 +36,5 @@ pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_cl
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};
+pub use compliance::{scan_licenses, check_copyright, LicenseReport, LicenseDep, LicenseStatus, CopyrightReport, MissingHeader};
+pub use release::{BumpKind, BuildTarget, BuildTargetKind, BuildResult, BuildStatus, detect_build_targets, build_artifact, bump_version, generate_changelog_entry, next_version_string};
