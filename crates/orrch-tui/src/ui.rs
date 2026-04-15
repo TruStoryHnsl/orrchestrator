@@ -149,7 +149,7 @@ fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
         Panel::Oversee => draw_projects(frame, app, area),
         Panel::Hypervise => draw_sessions_tab(frame, app, area),
         Panel::Analyze => draw_analyze(frame, app, area),
-        Panel::Publish => draw_placeholder(frame, area, "Publish", "Release packaging & marketing — coming soon.\n\n• Legal analysis of packages\n• Monetization strategy tools\n• Marketing campaign designer\n• Ad broker integration\n• Distribution platform management"),
+        Panel::Publish => draw_publish(frame, app, area),
     }
 }
 
@@ -282,6 +282,46 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
         .column_spacing(2);
 
     frame.render_widget(table, area);
+}
+
+/// Publish panel: tab bar + per-tab placeholder content (item 98).
+fn draw_publish(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::PublishTab;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Tab bar
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, tab) in PublishTab::ALL.iter().enumerate() {
+        if i > 0 { spans.push(Span::raw("  ")); }
+        let sel = *tab == app.publish_tab;
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        };
+        spans.push(Span::styled(tab.label(), style));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
+
+    // Per-tab placeholder
+    let (tab_title, tab_body) = match app.publish_tab {
+        PublishTab::Packaging => ("Packaging", "Build artifacts, version bundles, and release assets — coming soon."),
+        PublishTab::Distribution => ("Distribution", "Platform-specific distribution channels (GitHub Releases, crates.io, etc.) — coming soon."),
+        PublishTab::Compliance => ("Compliance", "License auditing, dependency scanning, and legal review — coming soon."),
+        PublishTab::Marketing => ("Marketing", "Release notes, changelogs, and marketing copy generation — coming soon."),
+        PublishTab::History => ("History", "Past releases, tags, and publication history — coming soon."),
+    };
+    let content = Paragraph::new(tab_body)
+        .style(Style::default().fg(TEXT_DIM))
+        .block(Block::default()
+            .title(format!(" {} ", tab_title))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(content, chunks[1]);
 }
 
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1219,7 +1259,14 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         };
         let done = proj.done_count();
         let total = proj.roadmap.len();
-        let goals_str = if total > 0 { format!(" {done}/{total}") } else { String::new() };
+        // OPT-006: show "no plan" indicator for projects without PLAN.md
+        let goals_str = if total > 0 {
+            format!(" {done}/{total}")
+        } else if !proj.has_plan {
+            " [no plan]".to_string()
+        } else {
+            String::new()
+        };
         let pipeline_count = app.pipelines_for_project(&proj.path).len();
         let sess_str = if session_count > 0 {
             if pipeline_count > 1 {
@@ -1235,7 +1282,11 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(proj.color_tag.icon(), Style::default().fg(tag_color)),
             Span::styled(format!(" {}", proj.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
             Span::styled(format!(" [{}]", proj.scope.badge()), Style::default().fg(CYAN)),
-            Span::styled(goals_str, Style::default().fg(if done == total && total > 0 { GREEN } else { TEXT_DIM })),
+            Span::styled(goals_str, Style::default().fg(
+                if done == total && total > 0 { GREEN }
+                else if !proj.has_plan && total == 0 { TEXT_MUTED }
+                else { TEXT_DIM }
+            )),
             Span::styled(sess_str, Style::default().fg(if waiting > 0 { WAITING_COLOR } else { GREEN })),
             Span::styled(queued_str, Style::default().fg(WAITING_COLOR)),
             Span::styled(format!("  [{}]", proj.default_action()), Style::default().fg(TEXT_MUTED)),
@@ -1538,36 +1589,23 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     use crate::app::DetailFocus;
     let Some(proj) = app.projects.get(proj_idx) else { return; };
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
-    let in_devmap = app.detail_focus == DetailFocus::DevMap;
     let in_browser = app.detail_focus == DetailFocus::Browser;
 
-    let has_devmap = !proj.plan_phases.is_empty();
-    let devmap_height: u16 = if has_devmap {
-        // Show at least a few lines for the dev map
-        let visible_items = app.devmap_flat_count(proj_idx);
-        (visible_items.min(10) as u16).max(3) + 2 // +2 for borders
-    } else {
-        0
-    };
-
-    let roadmap_height = proj.roadmap.len().min(8) as u16 + 3;
-    let mut constraints = vec![
+    // Roadmap height: capped at 12 visible items (scrollable)
+    let roadmap_height = proj.roadmap.len().min(12) as u16 + 3;
+    let constraints = vec![
         Constraint::Length(2),              // header
-        Constraint::Length(roadmap_height), // roadmap
+        Constraint::Length(roadmap_height), // roadmap (scrollable)
         Constraint::Length(8),             // sessions (compact)
+        Constraint::Min(5),                // file browser
     ];
-    if has_devmap {
-        constraints.push(Constraint::Length(devmap_height)); // dev map
-    }
-    constraints.push(Constraint::Min(5)); // file browser
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
 
-    let devmap_slot = if has_devmap { 3 } else { usize::MAX };
-    let browser_slot = if has_devmap { 4 } else { 3 };
+    let browser_slot = 3;
 
     // Header
     let header = Paragraph::new(Line::from(vec![
@@ -1576,21 +1614,25 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
-    // Roadmap — color-coded by feature status
+    // Roadmap — color-coded by feature status, scrollable via PgUp/PgDn
     let in_roadmap = app.detail_focus == crate::app::DetailFocus::Roadmap;
-    let roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
+    let scroll_offset = app.roadmap_scroll;
+    let all_roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
         let style = feature_status_style(item.status);
         let sel_prefix = if in_roadmap && i == app.roadmap_selected { "▸" } else { " " };
         ListItem::new(format!("{}{} {}", sel_prefix, item.status_icon(), item.title)).style(style)
     }).collect();
+    // Slice to visible window
+    let visible_roadmap: Vec<ListItem> = all_roadmap_items.into_iter().skip(scroll_offset).collect();
     let roadmap_border = if in_roadmap {
         Style::default().fg(ACCENT)
     } else {
         Style::default().fg(TEXT_DIM)
     };
-    let roadmap = List::new(roadmap_items)
+    let scroll_hint = if scroll_offset > 0 { format!(" Roadmap ↑{scroll_offset} ") } else { " Roadmap ".to_string() };
+    let roadmap = List::new(visible_roadmap)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(roadmap_border));
+        .block(Block::default().title(scroll_hint).borders(Borders::ALL).style(roadmap_border));
     frame.render_widget(roadmap, layout[1]);
 
     // Sessions — selectable, shows managed + external, with duplicate-goal badges
@@ -1653,11 +1695,6 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         .highlight_symbol("▶ ");
         let mut state = TableState::default().with_selected(if in_sessions { Some(app.session_selected) } else { None });
         frame.render_stateful_widget(table, layout[2], &mut state);
-    }
-
-    // Dev map — interactive feature tree from Plan.md
-    if has_devmap {
-        draw_dev_map(frame, app, layout[devmap_slot], proj_idx, in_devmap);
     }
 
     // File browser — single tree column + preview pane
@@ -2676,11 +2713,27 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("|", ""),
             ("n", "spawn"), ("x", "kill"), ("a", "actions"),
         ]),
-        (Panel::Oversee, SubView::List) => hint_line(&[
-            ("→", "enter project"), ("Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
-            ("|", ""),
-            ("↑↓", "select"), ("q", "quit"),
-        ]),
+        (Panel::Oversee, SubView::List) => {
+            // OPT-007: show completion-specific actions when selected project is done
+            let selected_complete = app.selected_project_index()
+                .and_then(|i| app.projects.get(i))
+                .map_or(false, |p| p.roadmap_complete());
+            if selected_complete {
+                hint_line(&[
+                    ("→/Enter", "detail view"), ("n", "spawn"),
+                    ("|", ""),
+                    ("a", "submit feedback | construct packages"),
+                    ("|", ""),
+                    ("↑↓", "select"), ("q", "quit"),
+                ])
+            } else {
+                hint_line(&[
+                    ("→/Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
+                    ("|", ""),
+                    ("↑↓", "select"), ("q", "quit"),
+                ])
+            }
+        },
         (Panel::Design, SubView::List) => {
             match app.design_sub {
                 crate::app::DesignSub::Intentions => hint_line(&[
@@ -2705,8 +2758,11 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 ]),
             }
         },
-        (Panel::Analyze, SubView::List) | (Panel::Publish, SubView::List) => hint_line(&[
+        (Panel::Analyze, SubView::List) => hint_line(&[
             ("←→", "panels"), ("Esc", "menu"),
+        ]),
+        (Panel::Publish, SubView::List) => hint_line(&[
+            ("←→", "tabs"), ("Esc", "menu"),
         ]),
         (Panel::Hypervise, SubView::List) => {
             let has_sessions = !app.managed_sessions.is_empty();

@@ -381,8 +381,49 @@ impl LibrarySub {
 pub enum DetailFocus {
     Roadmap,
     Sessions,
-    DevMap,
     Browser,
+}
+
+/// Sub-tabs for the Publish panel (item 98).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishTab {
+    Packaging,
+    Distribution,
+    Compliance,
+    Marketing,
+    History,
+}
+
+impl PublishTab {
+    pub const ALL: [PublishTab; 5] = [
+        PublishTab::Packaging,
+        PublishTab::Distribution,
+        PublishTab::Compliance,
+        PublishTab::Marketing,
+        PublishTab::History,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Packaging => "Packaging",
+            Self::Distribution => "Distribution",
+            Self::Compliance => "Compliance",
+            Self::Marketing => "Marketing",
+            Self::History => "History",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
 }
 
 /// Focus pane within the intake review overlay.
@@ -481,6 +522,7 @@ pub struct App {
     pub project_selected: usize,    // global selection index into the rendered list
     pub session_selected: usize,
     pub roadmap_selected: usize,
+    pub roadmap_scroll: usize,
     pub expanded_projects: HashSet<usize>,
     pub show_deprecated: bool,      // toggled in facilities section
 
@@ -580,6 +622,9 @@ pub struct App {
     /// True when focus is on the right (tree) pane; false = left (project list).
     pub plans_focus_right: bool,
 
+    // Publish panel (item 98)
+    pub publish_tab: PublishTab,
+
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
     pub idea_selected: usize,
@@ -670,7 +715,7 @@ pub struct App {
     pub intake_review_scroll_opt: u16,
     pub intake_review_focus: IntakeReviewFocus,
 
-    // Split-off vim editors from the orrch-edit session
+    // Split-off nvim editors from the orrch-edit session
     pub split_off_editors: Vec<String>,
 
     // Audit trail expansion in Intentions panel (index of expanded idea, or None)
@@ -769,6 +814,7 @@ impl App {
             project_selected: 0,
             session_selected: 0,
             roadmap_selected: 0,
+            roadmap_scroll: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
             app_menu_selected: 0,
@@ -833,6 +879,7 @@ impl App {
             plans_phase_expanded: usize::MAX,
             plans_tree_selected: 0,
             plans_focus_right: false,
+            publish_tab: PublishTab::Packaging,
             ideas,
             idea_selected: 0,
             production_versions,
@@ -898,7 +945,7 @@ impl App {
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
         app.expanded_projects = (0..app.projects.len()).collect();
-        // Check for orphaned vim editor windows from a previous orrchestrator session.
+        // Check for orphaned nvim editor windows from a previous orrchestrator session.
         // Draft files persist on disk; the periodic reload will pick up any changes.
         let orphan_count = count_orphaned_editor_windows();
         if orphan_count > 0 {
@@ -1536,14 +1583,6 @@ impl App {
                             self.session_selected += delta as usize;
                         }
                     }
-                    DetailFocus::DevMap => {
-                        let total = self.devmap_flat_count(*pidx);
-                        if delta < 0 {
-                            self.devmap_selected = self.devmap_selected.saturating_sub((-delta) as usize);
-                        } else if total > 0 {
-                            self.devmap_selected = (self.devmap_selected + delta as usize).min(total.saturating_sub(1));
-                        }
-                    }
                     DetailFocus::Browser => {
                         if self.browser_in_child {
                             if delta < 0 {
@@ -1670,7 +1709,7 @@ impl App {
             }
         }
 
-        // Normalize vim navigation keys to arrows (except in text inputs)
+        // Normalize nvim navigation keys to arrows (except in text inputs)
         let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
@@ -1755,7 +1794,7 @@ impl App {
                 Panel::Oversee => self.key_projects(key),
                 Panel::Hypervise => self.key_sessions_tab(key),
                 Panel::Analyze => self.key_placeholder(key),
-                Panel::Publish => self.key_placeholder(key),
+                Panel::Publish => self.key_publish(key),
             },
             SubView::ProjectDetail(_) => self.key_project_detail(key),
             SubView::SessionFocus(_) => self.key_session_focus(key),
@@ -2034,7 +2073,7 @@ impl App {
                     self.plans_set_status(proj_idx, orrch_core::FeatureStatus::Deprecated);
                 }
                 KeyCode::Char('e') => {
-                    // Edit feature in vim
+                    // Edit feature in nvim
                     self.plans_edit_in_vim(proj_idx);
                 }
                 KeyCode::Char('r') => {
@@ -2171,7 +2210,7 @@ impl App {
         }
     }
 
-    /// Open the project's PLAN.md in vim.
+    /// Open the project's PLAN.md in nvim.
     fn plans_edit_in_vim(&mut self, proj_idx: Option<usize>) {
         let Some(idx) = proj_idx else { return; };
         if let Some(proj) = self.projects.get(idx) {
@@ -2612,6 +2651,18 @@ impl App {
         Ok(())
     }
 
+    /// Key handler for the Publish panel (item 98).
+    fn key_publish(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Left => { self.publish_tab = self.publish_tab.prev(); }
+            KeyCode::Right => { self.publish_tab = self.publish_tab.next(); }
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Up => { self.focus_depth = 0; }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn key_ideas(&mut self, key: KeyCode) -> Result<()> {
         // Intake review mode takes over the Intentions panel
         if self.intake_review.is_some() {
@@ -2623,7 +2674,7 @@ impl App {
                 self.request_vim(VimKind::NewIdea);
             }
             KeyCode::Enter => {
-                // Open selected idea in vim for editing
+                // Open selected idea in nvim for editing
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     let path = idea.path.clone();
                     let title = format!("[intentions] {}", idea.title);
@@ -2803,7 +2854,7 @@ impl App {
                 }
             }
             KeyCode::Char('e') => {
-                // Edit optimized text in vim. Scratch file lives in the
+                // Edit optimized text in nvim. Scratch file lives in the
                 // per-idea workspace so concurrent reviews never collide.
                 if let Some(review) = &self.intake_review {
                     let edit_path = review.workspace.join("intake_optimized_edit.md");
@@ -3072,6 +3123,7 @@ impl App {
                             let idx = *idx;
                             self.session_selected = 0;
                             self.roadmap_selected = 0;
+                            self.roadmap_scroll = 0;
                             // Default focus to roadmap if it has items, else sessions
                             self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
                                 DetailFocus::Roadmap
@@ -3116,13 +3168,21 @@ impl App {
                 if !map.is_empty() && self.project_selected < map.len() - 1 { self.project_selected += 1; }
             }
             KeyCode::Right => {
-                // → on a project = expand it AND enter it
-                if let Some(pidx) = self.selected_project_index() {
-                    self.expanded_projects.insert(pidx);
-                    self.tree_browsing = true;
-                    self.tree_project = Some(pidx);
-                    self.tree_selected = 0;
-                    self.update_tree_preview(pidx);
+                // OPT-005: → on a project = open project detail view (same as Enter)
+                let map = self.build_list_map();
+                if let Some(entry) = map.get(self.project_selected) {
+                    if let ListEntry::Project(idx) = entry {
+                        let idx = *idx;
+                        self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                            DetailFocus::Roadmap
+                        } else {
+                            DetailFocus::Sessions
+                        };
+                        if let Some(proj) = self.projects.get(idx) {
+                            self.browser_open(&proj.path.clone());
+                        }
+                        self.sub = SubView::ProjectDetail(idx);
+                    }
                 }
             }
             KeyCode::Left => {
@@ -3251,7 +3311,7 @@ impl App {
                         }
                     }
                 } else {
-                    // In file tree — open editable files in vim
+                    // In file tree — open editable files in nvim
                     if let Some(node) = tree_nodes.get(tree_offset) {
                         if node.is_editable {
                             let kind = VimKind::ProjectFeedback(proj_idx);
@@ -3326,6 +3386,10 @@ impl App {
         // Global commands always available
         match key {
             KeyCode::Esc => { self.sub = SubView::List; return Ok(()); }
+            // Left exits project detail when not in the file browser (where Left navigates up)
+            KeyCode::Left if self.detail_focus != DetailFocus::Browser => {
+                self.sub = SubView::List; return Ok(());
+            }
             KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
             KeyCode::Char('f') | KeyCode::Char('e') => {
                 self.request_vim(VimKind::ProjectFeedback(proj_idx));
@@ -3372,15 +3436,11 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Cycle focus: Roadmap → Sessions → DevMap → Browser → Roadmap
-                let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
+                // Cycle focus: Roadmap → Sessions → Browser → Roadmap
                 let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
                     DetailFocus::Roadmap => DetailFocus::Sessions,
-                    DetailFocus::Sessions => {
-                        if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser }
-                    }
-                    DetailFocus::DevMap => DetailFocus::Browser,
+                    DetailFocus::Sessions => DetailFocus::Browser,
                     DetailFocus::Browser => {
                         if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
                     }
@@ -3393,16 +3453,11 @@ impl App {
         match self.detail_focus {
             DetailFocus::Roadmap => self.key_detail_roadmap(key, proj_idx),
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
-            DetailFocus::DevMap => self.key_detail_devmap(key, proj_idx),
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to sessions
                 if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
-                    self.detail_focus = if self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty()) {
-                        DetailFocus::DevMap
-                    } else {
-                        DetailFocus::Sessions
-                    };
+                    self.detail_focus = DetailFocus::Sessions;
                     return Ok(());
                 }
                 self.key_browser_in_detail(key, proj_idx)
@@ -3475,7 +3530,29 @@ impl App {
                     }
                 }
             }
+            KeyCode::PageDown => {
+                // Scroll roadmap view down
+                let max_scroll = roadmap_len.saturating_sub(1);
+                self.roadmap_scroll = (self.roadmap_scroll + 5).min(max_scroll);
+                // Keep selection in visible range
+                if self.roadmap_selected < self.roadmap_scroll {
+                    self.roadmap_selected = self.roadmap_scroll;
+                }
+            }
+            KeyCode::PageUp => {
+                // Scroll roadmap view up
+                self.roadmap_scroll = self.roadmap_scroll.saturating_sub(5);
+                // Keep selection in visible range
+                let visible_height = 9usize; // approximate
+                if self.roadmap_selected >= self.roadmap_scroll + visible_height {
+                    self.roadmap_selected = self.roadmap_scroll + visible_height - 1;
+                }
+            }
             _ => {}
+        }
+        // Keep scroll in sync with selection
+        if self.roadmap_selected < self.roadmap_scroll {
+            self.roadmap_scroll = self.roadmap_selected;
         }
         Ok(())
     }
@@ -3499,9 +3576,8 @@ impl App {
                 if session_count > 0 && self.session_selected < session_count - 1 {
                     self.session_selected += 1;
                 } else {
-                    // Past last session → move to dev map (if available) or browser
-                    let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
-                    self.detail_focus = if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser };
+                    // Past last session → move to browser
+                    self.detail_focus = DetailFocus::Browser;
                 }
             }
             KeyCode::Enter => {
@@ -3966,7 +4042,7 @@ impl App {
                 };
                 if let Some(entry) = entry {
                     if entry.is_editable {
-                        // Open file in vim directly
+                        // Open file in nvim directly
                         let kind = VimKind::ProjectFeedback(proj_idx);
                         let title = self.vim_title(&kind);
                         self.vim_request = Some(VimRequest {
@@ -5038,9 +5114,9 @@ impl App {
         Ok(())
     }
 
-    // ─── Vim Integration ─────────────────────────────────────────
+    // ─── Nvim Integration ─────────────────────────────────────────
 
-    /// Build a descriptive window title for a vim editing session.
+    /// Build a descriptive window title for an nvim editing session.
     fn vim_title(&self, kind: &VimKind) -> String {
         match kind {
             VimKind::GlobalFeedback => "[orrchestrator] Feedback".into(),
@@ -5082,8 +5158,8 @@ impl App {
         }
     }
 
-    /// Called by the main loop when a pending editor's vim process exits.
-    /// Also called after blocking vim in the same terminal.
+    /// Called by the main loop when a pending editor's nvim process exits.
+    /// Also called after blocking nvim in the same terminal.
     pub fn handle_vim_complete(&mut self, file: &std::path::Path, kind: VimKind) {
         let text = std::fs::read_to_string(file).unwrap_or_default();
         if text.trim().is_empty() {
@@ -5154,11 +5230,11 @@ impl App {
                 self.notify("Plan updated".into());
             }
         }
-        // Always reload library + workforce data after any vim edit
+        // Always reload library + workforce data after any nvim edit
         self.reload_all_library_data();
     }
 
-    /// Check if any pending vim editors have finished (called each tick by main loop).
+    /// Check if any pending nvim editors have finished (called each tick by main loop).
     pub fn check_pending_editors(&mut self) {
         let mut completed = Vec::new();
         for (i, pe) in self.pending_editors.iter_mut().enumerate() {
@@ -5210,7 +5286,7 @@ impl App {
                 self.open_feedback_confirm();
             }
             KeyCode::Char('r') => {
-                // Resume editing — open in vim
+                // Resume editing — open in nvim
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     if item.status == FeedbackStatus::Draft {
                         let path = item.path.clone();
@@ -5475,9 +5551,9 @@ fn scan_production(projects: &[Project]) -> Vec<ProductionEntry> {
 }
 
 /// Count KWin windows with "[orrchestrator]" in their title.
-/// These are vim editors from a previous orrchestrator session that survived.
+/// These are nvim editors from a previous orrchestrator session that survived.
 fn count_orphaned_editor_windows() -> usize {
-    // Use pgrep to find vim processes whose command line includes [orrchestrator]
+    // Use pgrep to find nvim processes whose command line includes [orrchestrator]
     let output = std::process::Command::new("pgrep")
         .args(["-f", r#"\[orrchestrator\]"#])
         .output();
@@ -5555,7 +5631,7 @@ fn default_projects_dir() -> PathBuf {
 
 /// Task 31: build a prominent header block that's prepended to new library
 /// items created via the "AI-assisted" flow (Shift+N in Design > Workforce).
-/// This block is what the user sees on open in vim — they fill in the intent,
+/// This block is what the user sees on open in nvim — they fill in the intent,
 /// save, and then a follow-up slice will hand the file to a Claude session.
 fn ai_assistance_header(kind_label: &str) -> String {
     format!(

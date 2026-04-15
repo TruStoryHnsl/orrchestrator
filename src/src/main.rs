@@ -284,7 +284,7 @@ async fn run_loop(
             last_intake_poll = Instant::now();
         }
 
-        // Handle vim request from app
+        // Handle nvim request from app
         if let Some(req) = app.vim_request.take() {
             if let Some(child) = spawn_vim_window(&req.file, &req.title) {
                 // New terminal window — TUI keeps running
@@ -294,11 +294,11 @@ async fn run_loop(
                     kind: req.kind,
                 });
             } else {
-                // Fallback: suspend TUI, run vim in same terminal
+                // Fallback: suspend TUI, run nvim in same terminal
                 disable_raw_mode()?;
                 execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
                 terminal.show_cursor()?;
-                // Use the same orrchestrator-branded vim args as the windowed path
+                // Use the same orrchestrator-branded nvim args as the windowed path
                 let vim_args = orrch_tui::editor::vim_title_args_pub(&req.title);
                 let _ = std::process::Command::new("nvim")
                     .args(&vim_args)
