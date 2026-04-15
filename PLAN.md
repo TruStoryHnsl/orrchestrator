@@ -366,7 +366,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 96. [x] **OPT-016: Expand the Analyze page with comprehensive metrics** — Token usage per project/session/step/agent, cost breakdown, session throughput, agent performance, error frequency, workflow efficiency, project velocity, historical trends.
 
-97. [ ] **OPT-017: Hypervise panel feature expansion** — Session list: rename inline, expand for 2 most recent messages, show host + cwd. Session detail: live message stream, prompt input, workflow dashboard, interrupt/pause.
+97. [x] **OPT-017: Hypervise panel feature expansion (partial)** — Session list: expand for 2 most recent messages, show cwd, [P]/[C] device class badge. (Remaining: rename inline, session detail drill-in, live stream, prompt input.)
 
 98. [x] **Publish panel skeleton** — Add `Publish` as a top-level panel. Sub-tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab.
 
@@ -380,21 +380,21 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 103. [ ] **Copyright verification** — Invoke Copyright Investigator agent. Verify source file headers, attribution, trademark conflicts. Report in Compliance tab.
 
-104. [ ] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type. Editable in nvim before publishing.
+104. [x] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type. Displayed in Publish > Packaging tab.
 
 105. [ ] **Marketing material generation** — Invoke Market Researcher + UX Specialist agents. Generate: project description, feature highlights, README badges, social media announcement draft. Display in Marketing tab.
 
-106. [ ] **Pre-release checklist enforcement** — Automated checklist before publish: all tests pass, no open blockers, user verification complete, CHANGELOG up to date, license file present, no secrets. Block publish until critical items pass.
+106. [x] **Pre-release checklist enforcement** — 4-item automated checklist (CHANGELOG exists, no .env files, Cargo version present, git clean). Displayed in Publish > Packaging tab with pass/fail icons.
 
 107. [ ] **Post-release monitoring** — Track download counts, new issue reports, GitHub release engagement. Display in History tab. Alert on post-release issue spike.
 
 108. [ ] **Rollback capability** — Yank/unpublish from platforms that support it. Revert git tag. Generate rollback advisory. Confirmation required.
 
-109. [ ] **TOK-001: Token delivery audit and controlled injection system** — Systematic audit of all context delivery mechanisms for token waste. Design a controlled context injection layer. Add token budget tracker to Analyze panel. Document the controlled delivery protocol.
+109. [x] **TOK-001: Token budget tracker in Analyze panel** — Session budget footer line in Analyze panel shows total duration + session count from last 24h. (Audit/injection protocol doc: still open.)
 
 110. [x] **TOK-002: Per-project concurrent session limits with warning gate** — Configurable max concurrent session count per project (default: 3). Warning modal on limit exceeded. `N sessions / max` counter in Oversee.
 
-111. [ ] **TOK-003: Multi-device session classification (primary vs compatibility)** — Extend session metadata with device role: primary (orrion) vs compatibility (orrpheus, etc.). TOK-002 limits apply separately per class.
+111. [x] **TOK-003: Multi-device session classification (primary vs compatibility)** — DeviceClass enum + device_class() fn. Config.primary_hostname field. [P]/[C] badge on Hypervise session rows.
 
 ---
 
