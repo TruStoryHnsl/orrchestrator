@@ -175,7 +175,21 @@ pub fn spawn_tmux_session(
         format!("cd {} && {}", shell_escape(&dir_str), backend_str)
     };
 
-    spawn_in_category(SessionCategory::Dev, session_name, &shell_cmd)
+    // Build window name as <project>:<short-goal> (OPT-012).
+    // project = last component of project_dir; short-goal = first 24 chars of goal with spaces→dashes.
+    let project_slug: String = project_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| session_name.to_string());
+    let goal_slug: String = goal
+        .unwrap_or(session_name)
+        .chars()
+        .take(24)
+        .map(|c| if c == ' ' { '-' } else { c })
+        .collect();
+    let window_name = format!("{project_slug}:{goal_slug}");
+
+    spawn_in_category(SessionCategory::Dev, &window_name, &shell_cmd)
 }
 
 /// Spawn an nvim editing session in the Edit category.
