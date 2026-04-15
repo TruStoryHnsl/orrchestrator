@@ -624,6 +624,10 @@ pub struct App {
 
     // Publish panel (item 98)
     pub publish_tab: PublishTab,
+    /// Cached release notes markdown (regenerated when entering Packaging tab).
+    pub release_notes_preview: Option<String>,
+    /// Pre-release checklist results: (label, passed).
+    pub checklist_results: Vec<(String, bool)>,
 
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
@@ -880,6 +884,8 @@ impl App {
             plans_tree_selected: 0,
             plans_focus_right: false,
             publish_tab: PublishTab::Packaging,
+            release_notes_preview: None,
+            checklist_results: Vec::new(),
             ideas,
             idea_selected: 0,
             production_versions,
@@ -2654,13 +2660,41 @@ impl App {
     /// Key handler for the Publish panel (item 98).
     fn key_publish(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Left => { self.publish_tab = self.publish_tab.prev(); }
-            KeyCode::Right => { self.publish_tab = self.publish_tab.next(); }
+            KeyCode::Left => {
+                self.publish_tab = self.publish_tab.prev();
+                self.refresh_packaging_data();
+            }
+            KeyCode::Right => {
+                self.publish_tab = self.publish_tab.next();
+                self.refresh_packaging_data();
+            }
+            KeyCode::Char('r') => {
+                // Force-refresh release notes and checklist
+                self.refresh_packaging_data();
+            }
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => { self.focus_depth = 0; }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Regenerate release notes and checklist for the Packaging tab.
+    /// Uses orrchestrator's own project dir as the subject.
+    pub fn refresh_packaging_data(&mut self) {
+        use crate::app::PublishTab;
+        if self.publish_tab != PublishTab::Packaging { return; }
+        // Use orrchestrator's own directory as the release subject.
+        let proj_dir = self.projects_dir.join("orrchestrator");
+        if proj_dir.exists() {
+            self.release_notes_preview = Some(
+                orrch_core::release::generate_release_notes(&proj_dir)
+            );
+            self.checklist_results = orrch_core::release::run_checklist(&proj_dir)
+                .into_iter()
+                .map(|(check, passed)| (check.label().to_string(), passed))
+                .collect();
+        }
     }
 
     fn key_ideas(&mut self, key: KeyCode) -> Result<()> {

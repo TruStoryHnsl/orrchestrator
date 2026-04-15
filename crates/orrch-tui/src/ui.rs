@@ -227,10 +227,10 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
 
     let summary = app.usage_tracker.summary();
 
-    // Split vertically: provider summary top, per-project breakdown bottom.
+    // Split vertically: provider summary, per-project breakdown, budget footer.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .constraints([Constraint::Percentage(44), Constraint::Percentage(53), Constraint::Length(1)])
         .split(area);
 
     // ── Provider summary ────────────────────────────────────────────────────
@@ -335,10 +335,28 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
         .column_spacing(2);
 
     frame.render_widget(proj_table, chunks[1]);
+
+    // ── Token budget status bar ──────────────────────────────────────────────
+    let total_secs: f64 = summary.per_provider.iter().map(|p| p.total_duration_secs).sum();
+    let total_mins = (total_secs / 60.0).round() as u64;
+    let hours = total_mins / 60;
+    let mins = total_mins % 60;
+    let duration_str = if hours > 0 {
+        format!("{hours}h {mins}m")
+    } else {
+        format!("{mins}m")
+    };
+    let budget_line = format!(
+        " Session budget: {} total · {} sessions (last {}h)",
+        duration_str, summary.total_sessions, summary.period_hours
+    );
+    let budget_bar = Paragraph::new(budget_line)
+        .style(Style::default().fg(TEXT_MUTED).bg(BG_DARK));
+    frame.render_widget(budget_bar, chunks[2]);
 }
 
 /// Publish panel: tab bar + per-tab placeholder content (item 98).
-fn draw_publish(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     use crate::app::PublishTab;
 
     let chunks = Layout::default()
@@ -360,21 +378,71 @@ fn draw_publish(frame: &mut Frame, app: &App, area: Rect) {
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
 
-    // Per-tab placeholder
-    let (tab_title, tab_body) = match app.publish_tab {
-        PublishTab::Packaging => ("Packaging", "Build artifacts, version bundles, and release assets — coming soon."),
-        PublishTab::Distribution => ("Distribution", "Platform-specific distribution channels (GitHub Releases, crates.io, etc.) — coming soon."),
-        PublishTab::Compliance => ("Compliance", "License auditing, dependency scanning, and legal review — coming soon."),
-        PublishTab::Marketing => ("Marketing", "Release notes, changelogs, and marketing copy generation — coming soon."),
-        PublishTab::History => ("History", "Past releases, tags, and publication history — coming soon."),
-    };
-    let content = Paragraph::new(tab_body)
-        .style(Style::default().fg(TEXT_DIM))
+    // Populate packaging data on first render or when empty.
+    if app.publish_tab == PublishTab::Packaging && app.release_notes_preview.is_none() {
+        app.refresh_packaging_data();
+    }
+
+    match app.publish_tab {
+        PublishTab::Packaging => draw_packaging_tab(frame, app, chunks[1]),
+        PublishTab::Distribution => draw_placeholder(frame, chunks[1], "Distribution",
+            "Platform-specific distribution channels (GitHub Releases, crates.io, etc.) — coming soon."),
+        PublishTab::Compliance => draw_placeholder(frame, chunks[1], "Compliance",
+            "License auditing, dependency scanning, and legal review — coming soon."),
+        PublishTab::Marketing => draw_placeholder(frame, chunks[1], "Marketing",
+            "Release notes, changelogs, and marketing copy generation — coming soon."),
+        PublishTab::History => draw_placeholder(frame, chunks[1], "History",
+            "Past releases, tags, and publication history — coming soon."),
+    }
+}
+
+fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
+    // Split into checklist (top-right) and release notes (left/main).
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(area);
+
+    // ── Release Notes (left) ────────────────────────────────────────────
+    let notes_text = app.release_notes_preview.as_deref().unwrap_or(
+        "Release notes not yet generated.\nNavigate to this tab to load.",
+    );
+    let notes = Paragraph::new(notes_text)
+        .style(Style::default().fg(TEXT))
+        .wrap(Wrap { trim: false })
         .block(Block::default()
-            .title(format!(" {} ", tab_title))
+            .title(" Release Notes ")
             .borders(Borders::ALL)
             .style(Style::default().fg(TEXT_MUTED)));
-    frame.render_widget(content, chunks[1]);
+    frame.render_widget(notes, hsplit[0]);
+
+    // ── Pre-release Checklist (right) ──────────────────────────────────
+    let checklist_rows: Vec<Row> = if app.checklist_results.is_empty() {
+        vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from("Navigate here to run checks").style(Style::default().fg(TEXT_DIM)),
+        ])]
+    } else {
+        app.checklist_results.iter().map(|(label, passed)| {
+            let (icon, color) = if *passed { ("✓", GREEN) } else { ("✗", Color::Red) };
+            Row::new(vec![
+                Cell::from(icon).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Cell::from(label.clone()).style(Style::default().fg(if *passed { TEXT } else { Color::Red })),
+            ])
+        }).collect()
+    };
+
+    let all_pass = !app.checklist_results.is_empty()
+        && app.checklist_results.iter().all(|(_, p)| *p);
+    let checklist_title = if all_pass { " Pre-release ✓ " } else { " Pre-release Checklist " };
+
+    let checklist = Table::new(checklist_rows, [Constraint::Length(3), Constraint::Min(30)])
+        .block(Block::default()
+            .title(checklist_title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(if all_pass { GREEN } else { TEXT_MUTED })))
+        .column_spacing(1);
+    frame.render_widget(checklist, hsplit[1]);
 }
 
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -2065,20 +2133,44 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(TEXT)
             };
 
-            // Session row: marker icon name [status] cwd
+            // Session row: marker icon name [status]
             lines.push(Line::from(vec![
                 Span::styled(marker, Style::default().fg(ACCENT)),
                 Span::styled(format!("{} ", s.status.icon()), Style::default().fg(status_color)),
                 Span::styled(&s.name, style),
                 Span::styled(format!("  [{}]", s.status.label()), Style::default().fg(status_color)),
+                {
+                    use orrch_core::session::device_class;
+                    let dc = device_class(None);
+                    Span::styled(
+                        format!(" {}", dc.badge()),
+                        Style::default().fg(match dc {
+                            orrch_core::session::DeviceClass::Primary => CYAN,
+                            orrch_core::session::DeviceClass::Compatibility => TEXT_MUTED,
+                        }),
+                    )
+                },
             ]));
 
-            // Show last output line underneath
-            if !s.last_output.is_empty() {
+            // Show cwd (truncated)
+            if !s.cwd.is_empty() {
+                let cwd_display: String = s.cwd.chars().rev().take(60).collect::<String>()
+                    .chars().rev().collect();
+                let prefix = if s.cwd.len() > 60 { "…" } else { "" };
                 lines.push(Line::styled(
-                    format!("      {}", s.last_output),
-                    Style::default().fg(TEXT_MUTED),
+                    format!("      {prefix}{cwd_display}"),
+                    Style::default().fg(Color::Rgb(80, 80, 120)),
                 ));
+            }
+
+            // Show up to 2 recent output lines underneath
+            for output_line in s.last_output.lines().take(2) {
+                if !output_line.trim().is_empty() {
+                    lines.push(Line::styled(
+                        format!("      {}", output_line),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                }
             }
 
             flat_idx += 1;
