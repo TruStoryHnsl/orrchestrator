@@ -192,6 +192,30 @@ pub fn spawn_tmux_session(
     spawn_in_category(SessionCategory::Dev, &window_name, &shell_cmd)
 }
 
+/// Spawn an interactive PI session in the Dev category via tmux.
+///
+/// Uses the regular PTY path (not RPC mode) — suitable for user-facing interactive work.
+/// For programmatic/RPC use, construct a `PiRpcSession` directly.
+/// Returns the tmux window name on success.
+pub fn spawn_pi_session(
+    project_dir: &Path,
+    provider: Option<&str>,
+    model: Option<&str>,
+    goal: Option<&str>,
+    session_name: &str,
+) -> anyhow::Result<String> {
+    let mut cmd = vec!["pi".to_string()];
+    if let Some(p) = provider {
+        cmd.push("--provider".to_string());
+        cmd.push(p.to_string());
+    }
+    if let Some(m) = model {
+        cmd.push("--model".to_string());
+        cmd.push(m.to_string());
+    }
+    spawn_tmux_session(project_dir, &cmd, goal, session_name)
+}
+
 /// Spawn an nvim editing session in the Edit category.
 pub fn spawn_vim_in_tmux(file_path: &Path, window_name: &str) -> anyhow::Result<String> {
     let cmd = format!("nvim {}", shell_escape(&file_path.to_string_lossy()));
