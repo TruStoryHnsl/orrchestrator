@@ -385,6 +385,48 @@ pub enum DetailFocus {
     Browser,
 }
 
+/// Sub-tabs for the Publish panel (item 98).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishTab {
+    Packaging,
+    Distribution,
+    Compliance,
+    Marketing,
+    History,
+}
+
+impl PublishTab {
+    pub const ALL: [PublishTab; 5] = [
+        PublishTab::Packaging,
+        PublishTab::Distribution,
+        PublishTab::Compliance,
+        PublishTab::Marketing,
+        PublishTab::History,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Packaging => "Packaging",
+            Self::Distribution => "Distribution",
+            Self::Compliance => "Compliance",
+            Self::Marketing => "Marketing",
+            Self::History => "History",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
 /// Focus pane within the intake review overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntakeReviewFocus {
@@ -579,6 +621,9 @@ pub struct App {
     pub plans_tree_selected: usize,
     /// True when focus is on the right (tree) pane; false = left (project list).
     pub plans_focus_right: bool,
+
+    // Publish panel (item 98)
+    pub publish_tab: PublishTab,
 
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
@@ -833,6 +878,7 @@ impl App {
             plans_phase_expanded: usize::MAX,
             plans_tree_selected: 0,
             plans_focus_right: false,
+            publish_tab: PublishTab::Packaging,
             ideas,
             idea_selected: 0,
             production_versions,
@@ -1755,7 +1801,7 @@ impl App {
                 Panel::Oversee => self.key_projects(key),
                 Panel::Hypervise => self.key_sessions_tab(key),
                 Panel::Analyze => self.key_placeholder(key),
-                Panel::Publish => self.key_placeholder(key),
+                Panel::Publish => self.key_publish(key),
             },
             SubView::ProjectDetail(_) => self.key_project_detail(key),
             SubView::SessionFocus(_) => self.key_session_focus(key),
@@ -2612,6 +2658,18 @@ impl App {
         Ok(())
     }
 
+    /// Key handler for the Publish panel (item 98).
+    fn key_publish(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Left => { self.publish_tab = self.publish_tab.prev(); }
+            KeyCode::Right => { self.publish_tab = self.publish_tab.next(); }
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Up => { self.focus_depth = 0; }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn key_ideas(&mut self, key: KeyCode) -> Result<()> {
         // Intake review mode takes over the Intentions panel
         if self.intake_review.is_some() {
@@ -3116,13 +3174,21 @@ impl App {
                 if !map.is_empty() && self.project_selected < map.len() - 1 { self.project_selected += 1; }
             }
             KeyCode::Right => {
-                // → on a project = expand it AND enter it
-                if let Some(pidx) = self.selected_project_index() {
-                    self.expanded_projects.insert(pidx);
-                    self.tree_browsing = true;
-                    self.tree_project = Some(pidx);
-                    self.tree_selected = 0;
-                    self.update_tree_preview(pidx);
+                // OPT-005: → on a project = open project detail view (same as Enter)
+                let map = self.build_list_map();
+                if let Some(entry) = map.get(self.project_selected) {
+                    if let ListEntry::Project(idx) = entry {
+                        let idx = *idx;
+                        self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                            DetailFocus::Roadmap
+                        } else {
+                            DetailFocus::Sessions
+                        };
+                        if let Some(proj) = self.projects.get(idx) {
+                            self.browser_open(&proj.path.clone());
+                        }
+                        self.sub = SubView::ProjectDetail(idx);
+                    }
                 }
             }
             KeyCode::Left => {
