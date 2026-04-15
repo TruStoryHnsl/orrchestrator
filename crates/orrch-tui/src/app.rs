@@ -381,7 +381,6 @@ impl LibrarySub {
 pub enum DetailFocus {
     Roadmap,
     Sessions,
-    DevMap,
     Browser,
 }
 
@@ -481,6 +480,7 @@ pub struct App {
     pub project_selected: usize,    // global selection index into the rendered list
     pub session_selected: usize,
     pub roadmap_selected: usize,
+    pub roadmap_scroll: usize,
     pub expanded_projects: HashSet<usize>,
     pub show_deprecated: bool,      // toggled in facilities section
 
@@ -769,6 +769,7 @@ impl App {
             project_selected: 0,
             session_selected: 0,
             roadmap_selected: 0,
+            roadmap_scroll: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
             app_menu_selected: 0,
@@ -1534,14 +1535,6 @@ impl App {
                             self.session_selected = self.session_selected.saturating_sub((-delta) as usize);
                         } else {
                             self.session_selected += delta as usize;
-                        }
-                    }
-                    DetailFocus::DevMap => {
-                        let total = self.devmap_flat_count(*pidx);
-                        if delta < 0 {
-                            self.devmap_selected = self.devmap_selected.saturating_sub((-delta) as usize);
-                        } else if total > 0 {
-                            self.devmap_selected = (self.devmap_selected + delta as usize).min(total.saturating_sub(1));
                         }
                     }
                     DetailFocus::Browser => {
@@ -3072,6 +3065,7 @@ impl App {
                             let idx = *idx;
                             self.session_selected = 0;
                             self.roadmap_selected = 0;
+                            self.roadmap_scroll = 0;
                             // Default focus to roadmap if it has items, else sessions
                             self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
                                 DetailFocus::Roadmap
@@ -3326,6 +3320,10 @@ impl App {
         // Global commands always available
         match key {
             KeyCode::Esc => { self.sub = SubView::List; return Ok(()); }
+            // Left exits project detail when not in the file browser (where Left navigates up)
+            KeyCode::Left if self.detail_focus != DetailFocus::Browser => {
+                self.sub = SubView::List; return Ok(());
+            }
             KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
             KeyCode::Char('f') | KeyCode::Char('e') => {
                 self.request_vim(VimKind::ProjectFeedback(proj_idx));
@@ -3372,15 +3370,11 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Cycle focus: Roadmap → Sessions → DevMap → Browser → Roadmap
-                let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
+                // Cycle focus: Roadmap → Sessions → Browser → Roadmap
                 let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
                     DetailFocus::Roadmap => DetailFocus::Sessions,
-                    DetailFocus::Sessions => {
-                        if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser }
-                    }
-                    DetailFocus::DevMap => DetailFocus::Browser,
+                    DetailFocus::Sessions => DetailFocus::Browser,
                     DetailFocus::Browser => {
                         if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
                     }
@@ -3393,16 +3387,11 @@ impl App {
         match self.detail_focus {
             DetailFocus::Roadmap => self.key_detail_roadmap(key, proj_idx),
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
-            DetailFocus::DevMap => self.key_detail_devmap(key, proj_idx),
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to sessions
                 if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
-                    self.detail_focus = if self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty()) {
-                        DetailFocus::DevMap
-                    } else {
-                        DetailFocus::Sessions
-                    };
+                    self.detail_focus = DetailFocus::Sessions;
                     return Ok(());
                 }
                 self.key_browser_in_detail(key, proj_idx)
@@ -3475,7 +3464,29 @@ impl App {
                     }
                 }
             }
+            KeyCode::PageDown => {
+                // Scroll roadmap view down
+                let max_scroll = roadmap_len.saturating_sub(1);
+                self.roadmap_scroll = (self.roadmap_scroll + 5).min(max_scroll);
+                // Keep selection in visible range
+                if self.roadmap_selected < self.roadmap_scroll {
+                    self.roadmap_selected = self.roadmap_scroll;
+                }
+            }
+            KeyCode::PageUp => {
+                // Scroll roadmap view up
+                self.roadmap_scroll = self.roadmap_scroll.saturating_sub(5);
+                // Keep selection in visible range
+                let visible_height = 9usize; // approximate
+                if self.roadmap_selected >= self.roadmap_scroll + visible_height {
+                    self.roadmap_selected = self.roadmap_scroll + visible_height - 1;
+                }
+            }
             _ => {}
+        }
+        // Keep scroll in sync with selection
+        if self.roadmap_selected < self.roadmap_scroll {
+            self.roadmap_scroll = self.roadmap_selected;
         }
         Ok(())
     }
@@ -3499,9 +3510,8 @@ impl App {
                 if session_count > 0 && self.session_selected < session_count - 1 {
                     self.session_selected += 1;
                 } else {
-                    // Past last session → move to dev map (if available) or browser
-                    let has_devmap = self.projects.get(proj_idx).is_some_and(|p| !p.plan_phases.is_empty());
-                    self.detail_focus = if has_devmap { DetailFocus::DevMap } else { DetailFocus::Browser };
+                    // Past last session → move to browser
+                    self.detail_focus = DetailFocus::Browser;
                 }
             }
             KeyCode::Enter => {
