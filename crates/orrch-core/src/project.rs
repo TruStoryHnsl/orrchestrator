@@ -213,6 +213,9 @@ pub struct Project {
     /// dotfile at the project root. When `None`, the runner falls back to
     /// `CLAUDE.md`.
     pub agent_profile: Option<String>,
+    /// TOK-002: maximum concurrent sessions for this project.
+    /// Persisted as `.max_sessions` at the project root. Defaults to 3.
+    pub max_sessions: usize,
 }
 
 impl Project {
@@ -247,6 +250,7 @@ impl Project {
 
         let temperature = load_temperature(path);
         let agent_profile = load_agent_profile(path);
+        let max_sessions = load_max_sessions(path);
         let is_hyperfolder = name == "admin";
 
         let sub_projects = if is_hyperfolder {
@@ -271,6 +275,7 @@ impl Project {
             is_hyperfolder,
             sub_projects,
             agent_profile,
+            max_sessions,
         }
     }
 
@@ -595,6 +600,15 @@ fn load_agent_profile(path: &Path) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+/// TOK-002: read `.max_sessions` at the project root. Defaults to 3.
+fn load_max_sessions(path: &Path) -> usize {
+    let file = path.join(".max_sessions");
+    std::fs::read_to_string(file)
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(3)
 }
 
 fn load_color_tag(path: &Path) -> ColorTag {
@@ -1091,6 +1105,7 @@ mod tests {
             is_hyperfolder: false,
             sub_projects: Vec::new(),
             agent_profile: None,
+            max_sessions: 3,
         }
     }
 

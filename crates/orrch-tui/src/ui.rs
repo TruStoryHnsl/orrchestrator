@@ -227,6 +227,13 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
 
     let summary = app.usage_tracker.summary();
 
+    // Split vertically: provider summary top, per-project breakdown bottom.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(area);
+
+    // ── Provider summary ────────────────────────────────────────────────────
     if summary.per_provider.is_empty() {
         let msg = Paragraph::new("No usage data yet. Session metrics will appear here as you spawn sessions.")
             .style(Style::default().fg(TEXT_DIM))
@@ -234,54 +241,100 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
                 .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
                 .borders(Borders::ALL)
                 .style(Style::default().fg(TEXT_MUTED)));
-        frame.render_widget(msg, area);
-        return;
+        frame.render_widget(msg, chunks[0]);
+    } else {
+        let header = Row::new(vec![
+            Cell::from("Provider").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Cell::from("Sessions").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        ]).height(1).bottom_margin(1);
+
+        let mut rows: Vec<Row> = Vec::new();
+        let mut total_duration: f64 = 0.0;
+
+        for p in &summary.per_provider {
+            total_duration += p.total_duration_secs;
+            let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
+            rows.push(Row::new(vec![
+                Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
+                Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
+                Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
+                Cell::from(last).style(Style::default().fg(TEXT_DIM)),
+            ]));
+        }
+
+        rows.push(Row::new(vec![
+            Cell::from("Total").style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Cell::from(format!("{}", summary.total_sessions)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Cell::from(usage::format_duration(total_duration)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Cell::from(""),
+        ]).top_margin(1));
+
+        let widths = [
+            Constraint::Length(14),
+            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Length(12),
+        ];
+
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::default()
+                .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)))
+            .column_spacing(2);
+
+        frame.render_widget(table, chunks[0]);
     }
 
-    let header = Row::new(vec![
-        Cell::from("Provider").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    // ── Per-project breakdown ────────────────────────────────────────────────
+    let proj_header = Row::new(vec![
+        Cell::from("Project").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Sessions").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Max").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Tokens").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Cost").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]).height(1).bottom_margin(1);
 
-    let mut rows: Vec<Row> = Vec::new();
-    let mut total_duration: f64 = 0.0;
+    let proj_rows: Vec<Row> = if app.projects.is_empty() {
+        vec![Row::new(vec![
+            Cell::from("(no projects loaded)").style(Style::default().fg(TEXT_DIM)),
+            Cell::from(""), Cell::from(""), Cell::from(""), Cell::from(""),
+        ])]
+    } else {
+        app.projects.iter().map(|proj| {
+            let sess = app.active_session_count(&proj.path);
+            let max = proj.max_sessions;
+            // Tokens and cost are not tracked per-project yet — show placeholder.
+            Row::new(vec![
+                Cell::from(proj.name.clone()).style(Style::default().fg(if sess > 0 { CYAN } else { TEXT })),
+                Cell::from(format!("{sess}")).style(Style::default().fg(if sess > 0 { GREEN } else { TEXT_DIM })),
+                Cell::from(format!("{max}")).style(Style::default().fg(TEXT_DIM)),
+                Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+                Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            ])
+        }).collect()
+    };
 
-    for p in &summary.per_provider {
-        total_duration += p.total_duration_secs;
-        let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
-        rows.push(Row::new(vec![
-            Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
-            Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
-            Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
-            Cell::from(last).style(Style::default().fg(TEXT_DIM)),
-        ]));
-    }
-
-    rows.push(Row::new(vec![
-        Cell::from("Total").style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Cell::from(format!("{}", summary.total_sessions)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Cell::from(usage::format_duration(total_duration)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Cell::from(""),
-    ]).top_margin(1));
-
-    let widths = [
-        Constraint::Length(14),
+    let proj_widths = [
+        Constraint::Min(18),
+        Constraint::Length(9),
+        Constraint::Length(5),
         Constraint::Length(10),
-        Constraint::Length(12),
-        Constraint::Length(12),
+        Constraint::Length(10),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
+    let proj_table = Table::new(proj_rows, proj_widths)
+        .header(proj_header)
         .block(Block::default()
-            .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
+            .title(" Per-Project Breakdown ")
             .borders(Borders::ALL)
             .style(Style::default().fg(TEXT_MUTED)))
         .column_spacing(2);
 
-    frame.render_widget(table, area);
+    frame.render_widget(proj_table, chunks[1]);
 }
 
 /// Publish panel: tab bar + per-tab placeholder content (item 98).
@@ -1268,12 +1321,13 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             String::new()
         };
         let pipeline_count = app.pipelines_for_project(&proj.path).len();
+        let max_sess = proj.max_sessions;
         let sess_str = if session_count > 0 {
             if pipeline_count > 1 {
                 // Show pipeline count for parallel work
-                if waiting > 0 { format!(" {pipeline_count}⊞⚠") } else { format!(" {pipeline_count}⊞") }
+                if waiting > 0 { format!(" {pipeline_count}/{max_sess}⊞⚠") } else { format!(" {pipeline_count}/{max_sess}⊞") }
             } else {
-                if waiting > 0 { format!(" {session_count}⚠") } else { format!(" {session_count}▶") }
+                if waiting > 0 { format!(" {session_count}/{max_sess}⚠") } else { format!(" {session_count}/{max_sess}▶") }
             }
         } else { String::new() };
         let queued_str = if proj.queued_prompts > 0 { format!(" Q:{}", proj.queued_prompts) } else { String::new() };
