@@ -238,6 +238,12 @@ pub enum SubView {
     AddFeature(usize),
     /// Add MCP Server registration form.
     AddMcpServer,
+    /// Inline rename for a workforce file (94a). Carries the item index.
+    RenameWorkforce(usize),
+    /// Inline rename for an idea/intentions file (94b). Carries the item index.
+    RenameIdea(usize),
+    /// Confirm rollback of the selected release tag (108).
+    ConfirmRollback,
 }
 
 /// Sub-panels within the Design panel.
@@ -778,6 +784,12 @@ pub struct App {
     /// server is running on the contained handle's `addr()`. Dropping `App`
     /// drops the handle which signals the worker thread to stop and joins it.
     pub webedit_server: Option<orrch_webedit::ServerHandle>,
+
+    // Inline rename buffer (94a/94b — workforce + ideas rename)
+    pub rename_buffer: String,
+
+    // Rollback advisory text to display after rollback (108)
+    pub rollback_advisory: Option<String>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -986,6 +998,8 @@ impl App {
             add_mcp_field: 0,
 
             webedit_server: None,
+            rename_buffer: String::new(),
+            rollback_advisory: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1755,7 +1769,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_)) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -1878,6 +1892,9 @@ impl App {
             SubView::WorkflowPicker => self.key_workflow_picker(key),
             SubView::AddFeature(pidx) => { let pidx = *pidx; self.key_add_feature(key, pidx) }
             SubView::AddMcpServer => self.key_add_mcp_server(key),
+            SubView::RenameWorkforce(idx) => { let idx = *idx; self.key_rename_workforce(key, idx) }
+            SubView::RenameIdea(idx) => { let idx = *idx; self.key_rename_idea(key, idx) }
+            SubView::ConfirmRollback => self.key_confirm_rollback(key),
         }
     }
 
@@ -2442,8 +2459,18 @@ impl App {
                     });
                 }
             }
-            // INS-004: force re-scan all library/workforce data from disk
+            // 94a: inline rename for the selected workforce file
             KeyCode::Char('r') => {
+                let items = self.wf_items_for_tab();
+                if let Some((name, _)) = items.get(self.wf_selected) {
+                    // Strip .md extension for editing comfort; we re-append on save
+                    self.rename_buffer = name.trim_end_matches(".md").to_string();
+                    let idx = self.wf_selected;
+                    self.sub = SubView::RenameWorkforce(idx);
+                }
+            }
+            // INS-004: force re-scan all library/workforce data from disk (now uppercase R)
+            KeyCode::Char('R') => {
                 self.reload_all_library_data();
                 self.wf_selected = self.wf_selected.min(
                     self.wf_items_for_tab().len().saturating_sub(1),
@@ -2779,6 +2806,31 @@ impl App {
                     _ => {}
                 }
             }
+            KeyCode::Char('D') => {
+                // 108: Rollback — delete the selected tag (Packaging tab uses
+                // the most-recent tag from history; History tab uses the
+                // currently selected row).
+                let tag_opt: Option<String> = match self.publish_tab {
+                    PublishTab::Packaging => {
+                        let dir = self.projects_dir.join("orrchestrator");
+                        let history = orrch_core::release::load_release_history(&dir);
+                        history.into_iter().next().map(|e| e.tag)
+                    }
+                    PublishTab::History => {
+                        self.release_history
+                            .as_ref()
+                            .and_then(|h| h.get(self.history_selected))
+                            .map(|e| e.tag.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(tag) = tag_opt {
+                    self.rename_buffer = tag; // reuse buffer to pass tag through confirm
+                    self.sub = SubView::ConfirmRollback;
+                } else {
+                    self.notify("No release tag selected".into());
+                }
+            }
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => { self.focus_depth = 0; }
             _ => {}
@@ -2815,6 +2867,8 @@ impl App {
     /// Regenerate release notes, checklist, and detect build targets for the Packaging tab.
     pub fn refresh_packaging_data(&mut self) {
         let proj_dir = self.projects_dir.join("orrchestrator");
+        // 108: clear rollback advisory on refresh
+        self.rollback_advisory = None;
         if proj_dir.exists() {
             self.release_notes_preview = Some(
                 orrch_core::release::generate_release_notes(&proj_dir)
@@ -2908,7 +2962,15 @@ impl App {
                     }
                 }
             }
+            // 94b: inline rename for the selected idea file (r = rename, R = review)
             KeyCode::Char('r') => {
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    self.rename_buffer = idea.title.clone();
+                    let idx = self.idea_selected;
+                    self.sub = SubView::RenameIdea(idx);
+                }
+            }
+            KeyCode::Char('R') => {
                 // Review selected idea — show raw idea (left) vs its derived
                 // instructions (right). Prefer the per-idea workspace's
                 // review.json (which has the actual COO output) and fall
@@ -4103,6 +4165,135 @@ impl App {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    // ─── Rename handlers (94a / 94b) ─────────────────────────────────────
+
+    /// 94a: Inline rename for a workforce/library file.
+    fn key_rename_workforce(&mut self, key: KeyCode, item_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                let new_name = self.rename_buffer.trim().to_string();
+                if !new_name.is_empty() {
+                    let items = self.wf_items_for_tab();
+                    if let Some((_, old_path)) = items.get(item_idx) {
+                        let old_path = old_path.clone();
+                        let dir = old_path.parent().unwrap_or(std::path::Path::new("."));
+                        // Always use .md extension
+                        let new_filename = if new_name.ends_with(".md") {
+                            new_name.clone()
+                        } else {
+                            format!("{new_name}.md")
+                        };
+                        let new_path = dir.join(&new_filename);
+                        if new_path == old_path {
+                            self.notify("Name unchanged".into());
+                        } else if new_path.exists() {
+                            self.notify(format!("File already exists: {new_filename}"));
+                        } else {
+                            match std::fs::rename(&old_path, &new_path) {
+                                Ok(()) => {
+                                    self.notify(format!("Renamed to {new_filename}"));
+                                    self.reload_all_library_data();
+                                    // Keep selection at same index
+                                    self.wf_selected = item_idx.min(
+                                        self.wf_items_for_tab().len().saturating_sub(1),
+                                    );
+                                }
+                                Err(e) => self.notify(format!("Rename failed: {e}")),
+                            }
+                        }
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                self.rename_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.rename_buffer.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// 94b: Inline rename for an idea file in Design > Intentions.
+    fn key_rename_idea(&mut self, key: KeyCode, item_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                let new_title = self.rename_buffer.trim().to_string();
+                if !new_title.is_empty() {
+                    if let Some(idea) = self.ideas.get(item_idx).cloned() {
+                        let dir = idea.path.parent().unwrap_or(std::path::Path::new("."));
+                        // Slugify: lowercase, spaces→dashes, strip non-alnum-dash
+                        let slug: String = new_title.to_lowercase()
+                            .chars()
+                            .map(|c| if c == ' ' { '-' } else { c })
+                            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                            .collect();
+                        let new_filename = format!("{slug}.md");
+                        let new_path = dir.join(&new_filename);
+                        if new_path == idea.path {
+                            self.notify("Name unchanged".into());
+                        } else if new_path.exists() {
+                            self.notify(format!("File already exists: {new_filename}"));
+                        } else {
+                            match std::fs::rename(&idea.path, &new_path) {
+                                Ok(()) => {
+                                    self.notify(format!("Renamed to {new_filename}"));
+                                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                                    self.ideas = orrch_core::vault::load_ideas(&vault);
+                                    self.idea_selected = item_idx.min(
+                                        self.ideas.len().saturating_sub(1),
+                                    );
+                                }
+                                Err(e) => self.notify(format!("Rename failed: {e}")),
+                            }
+                        }
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                self.rename_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.rename_buffer.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// 108: Confirm rollback of the selected release tag.
+    fn key_confirm_rollback(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let tag = self.rename_buffer.clone();
+                let dir = self.projects_dir.join("orrchestrator");
+                match orrch_core::release::rollback_release(&dir, &tag) {
+                    Ok(advisory) => {
+                        // Invalidate cached history so the next render picks up the deletion.
+                        self.release_history = None;
+                        self.rollback_advisory = Some(advisory.clone());
+                        self.notify(format!("Tag '{tag}' deleted — see advisory below"));
+                    }
+                    Err(e) => self.notify(format!("Rollback failed: {e}")),
+                }
+                self.sub = SubView::List;
+            }
+            _ => {
+                self.sub = SubView::List;
+            }
         }
         Ok(())
     }

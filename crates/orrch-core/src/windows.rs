@@ -506,6 +506,39 @@ fn infer_session_status(tmux_session: &str, window_index: u32) -> (SessionStatus
     (status, display)
 }
 
+/// Scan `sessions` in place and mark any entry whose tmux window no longer
+/// exists as `SessionStatus::Dead`.  Returns the number of sessions marked dead.
+///
+/// Call this on each UI tick (after `list_all_sessions`) so the Hypervise panel
+/// reflects windows that have been closed or killed since the last full refresh.
+pub fn cleanup_stale_sessions(sessions: &mut Vec<ManagedSession>) -> usize {
+    let mut marked = 0usize;
+    for s in sessions.iter_mut() {
+        if s.status == SessionStatus::Dead {
+            continue; // already dead, skip the tmux round-trip
+        }
+        // Probe the window: if tmux returns an error the window is gone.
+        let alive = Command::new("tmux")
+            .args([
+                "list-windows",
+                "-t",
+                &format!("{}:{}", s.category.tmux_name(), s.index),
+                "-F",
+                "#{window_index}",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|st| st.success())
+            .unwrap_or(false);
+        if !alive {
+            s.status = SessionStatus::Dead;
+            marked += 1;
+        }
+    }
+    marked
+}
+
 // ─── Window Management (kdotool / qdbus) ────────────────────────────
 
 /// Focus an alacritty window for a tmux session category.
