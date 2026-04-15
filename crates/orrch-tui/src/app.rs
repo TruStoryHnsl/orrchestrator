@@ -639,6 +639,24 @@ pub struct App {
     /// Cached copyright report for the Compliance tab.
     pub copyright_report: Option<orrch_core::compliance::CopyrightReport>,
 
+    // Publish panel: Distribution (item 101)
+    /// Per-platform publish status (populated on first entry to Distribution tab).
+    pub distribution_status: Option<Vec<(orrch_core::release::DistributionPlatform, orrch_core::release::PlatformStatus)>>,
+    /// Selected row in the Distribution tab table.
+    pub distribution_selected: usize,
+
+    // Publish panel: History (item 107)
+    /// Cached release history list (populated on first entry to History tab).
+    pub release_history: Option<Vec<orrch_core::release::ReleaseHistoryEntry>>,
+    /// Selected row in the History tab list.
+    pub history_selected: usize,
+
+    // Publish panel: Marketing (item 105)
+    /// Cached marketing metadata (populated on first entry to Marketing tab).
+    pub marketing_metadata: Option<orrch_core::release::MarketingMetadata>,
+    /// Scroll offset for the Marketing tab.
+    pub marketing_scroll: u16,
+
     // Ideas panel
     pub ideas: Vec<orrch_core::vault::Idea>,
     pub idea_selected: usize,
@@ -901,6 +919,12 @@ impl App {
             build_running: false,
             license_report: None,
             copyright_report: None,
+            distribution_status: None,
+            distribution_selected: 0,
+            release_history: None,
+            history_selected: 0,
+            marketing_metadata: None,
+            marketing_scroll: 0,
             ideas,
             idea_selected: 0,
             production_versions,
@@ -2717,6 +2741,44 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('j') | KeyCode::Down => {
+                match self.publish_tab {
+                    PublishTab::Distribution => {
+                        if let Some(ref s) = self.distribution_status {
+                            let len = s.len();
+                            if len > 0 {
+                                self.distribution_selected = (self.distribution_selected + 1).min(len - 1);
+                            }
+                        }
+                    }
+                    PublishTab::History => {
+                        if let Some(ref h) = self.release_history {
+                            let len = h.len();
+                            if len > 0 {
+                                self.history_selected = (self.history_selected + 1).min(len - 1);
+                            }
+                        }
+                    }
+                    PublishTab::Marketing => {
+                        self.marketing_scroll = self.marketing_scroll.saturating_add(1);
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('k') => {
+                match self.publish_tab {
+                    PublishTab::Distribution => {
+                        self.distribution_selected = self.distribution_selected.saturating_sub(1);
+                    }
+                    PublishTab::History => {
+                        self.history_selected = self.history_selected.saturating_sub(1);
+                    }
+                    PublishTab::Marketing => {
+                        self.marketing_scroll = self.marketing_scroll.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+            }
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => { self.focus_depth = 0; }
             _ => {}
@@ -2729,7 +2791,24 @@ impl App {
         match self.publish_tab {
             PublishTab::Packaging => self.refresh_packaging_data(),
             PublishTab::Compliance => self.refresh_compliance_data(),
-            _ => {}
+            PublishTab::Distribution => {
+                let dir = self.projects_dir.join("orrchestrator");
+                if dir.exists() {
+                    self.distribution_status = Some(orrch_core::release::detect_distribution_status(&dir));
+                }
+            }
+            PublishTab::History => {
+                let dir = self.projects_dir.join("orrchestrator");
+                if dir.exists() {
+                    self.release_history = Some(orrch_core::release::load_release_history(&dir));
+                }
+            }
+            PublishTab::Marketing => {
+                let dir = self.projects_dir.join("orrchestrator");
+                if dir.exists() {
+                    self.marketing_metadata = Some(orrch_core::release::load_marketing_metadata(&dir));
+                }
+            }
         }
     }
 

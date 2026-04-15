@@ -385,16 +385,25 @@ fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.publish_tab == PublishTab::Compliance && app.license_report.is_none() {
         app.refresh_compliance_data();
     }
+    if app.publish_tab == PublishTab::Distribution && app.distribution_status.is_none() {
+        let dir = app.projects_dir.join("orrchestrator");
+        app.distribution_status = Some(orrch_core::release::detect_distribution_status(&dir));
+    }
+    if app.publish_tab == PublishTab::History && app.release_history.is_none() {
+        let dir = app.projects_dir.join("orrchestrator");
+        app.release_history = Some(orrch_core::release::load_release_history(&dir));
+    }
+    if app.publish_tab == PublishTab::Marketing && app.marketing_metadata.is_none() {
+        let dir = app.projects_dir.join("orrchestrator");
+        app.marketing_metadata = Some(orrch_core::release::load_marketing_metadata(&dir));
+    }
 
     match app.publish_tab {
         PublishTab::Packaging => draw_packaging_tab(frame, app, chunks[1]),
-        PublishTab::Distribution => draw_placeholder(frame, chunks[1], "Distribution",
-            "Platform-specific distribution channels (GitHub Releases, crates.io, etc.) — coming soon."),
+        PublishTab::Distribution => draw_distribution_tab(frame, app, chunks[1]),
         PublishTab::Compliance => draw_compliance_tab(frame, app, chunks[1]),
-        PublishTab::Marketing => draw_placeholder(frame, chunks[1], "Marketing",
-            "Release notes, changelogs, and marketing copy generation — coming soon."),
-        PublishTab::History => draw_placeholder(frame, chunks[1], "History",
-            "Past releases, tags, and publication history — coming soon."),
+        PublishTab::Marketing => draw_marketing_tab(frame, app, chunks[1]),
+        PublishTab::History => draw_history_tab(frame, app, chunks[1]),
     }
 }
 
@@ -570,6 +579,257 @@ fn draw_compliance_tab(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().fg(TEXT_MUTED)))
         .column_spacing(1);
     frame.render_widget(copy_table, vsplit[1]);
+}
+
+// ─── Distribution tab (item 101) ─────────────────────────────────────────────
+
+fn draw_distribution_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let rows: Vec<Row> = match &app.distribution_status {
+        None => vec![Row::new(vec![
+            Cell::from("Loading…").style(Style::default().fg(TEXT_DIM)),
+            Cell::from(""),
+            Cell::from(""),
+        ])],
+        Some(statuses) => statuses
+            .iter()
+            .enumerate()
+            .map(|(i, (platform, status))| {
+                let selected = i == app.distribution_selected;
+                let row_style = if selected {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                };
+
+                let (status_str, status_color) = match status {
+                    orrch_core::release::PlatformStatus::NotConfigured => ("—  Not configured", TEXT_DIM),
+                    orrch_core::release::PlatformStatus::NotPublished => ("·  Not published", WAITING_COLOR),
+                    orrch_core::release::PlatformStatus::Published(_) => ("✓  Published", GREEN),
+                };
+                let version_str = match status {
+                    orrch_core::release::PlatformStatus::Published(v) => v.clone(),
+                    _ => String::new(),
+                };
+
+                Row::new(vec![
+                    Cell::from(platform.label()).style(row_style),
+                    Cell::from(status_str).style(Style::default().fg(status_color)),
+                    Cell::from(version_str).style(Style::default().fg(TEXT_DIM)),
+                ])
+            })
+            .collect(),
+    };
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(18),
+            Constraint::Length(22),
+            Constraint::Min(10),
+        ],
+    )
+    .header(
+        Row::new(vec!["Platform", "Status", "Version"])
+            .style(Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD)),
+    )
+    .block(
+        Block::default()
+            .title(" Distribution Platforms  [j/k]=select ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)),
+    )
+    .column_spacing(2);
+    frame.render_widget(table, area);
+}
+
+// ─── History tab (item 107) ───────────────────────────────────────────────────
+
+fn draw_history_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let entries: &[orrch_core::release::ReleaseHistoryEntry] = match &app.release_history {
+        None => &[],
+        Some(v) => v.as_slice(),
+    };
+
+    if entries.is_empty() {
+        let msg = if app.release_history.is_none() {
+            "Loading…"
+        } else {
+            "No releases found. Create an annotated git tag to start tracking history."
+        };
+        frame.render_widget(
+            Paragraph::new(msg)
+                .style(Style::default().fg(TEXT_DIM))
+                .block(
+                    Block::default()
+                        .title(" Release History ")
+                        .borders(Borders::ALL)
+                        .style(Style::default().fg(TEXT_MUTED)),
+                ),
+            area,
+        );
+        return;
+    }
+
+    let rows: Vec<Row> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let selected = i == app.history_selected;
+            let (tag_style, summary_style) = if i == 0 {
+                // Most recent: highlight
+                (
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                )
+            } else if selected {
+                (
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default().fg(TEXT),
+                )
+            } else {
+                (
+                    Style::default().fg(ACCENT),
+                    Style::default().fg(TEXT_DIM),
+                )
+            };
+            Row::new(vec![
+                Cell::from(entry.tag.clone()).style(tag_style),
+                Cell::from(entry.date.clone()).style(Style::default().fg(TEXT_DIM)),
+                Cell::from(entry.summary.clone()).style(summary_style),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(14),
+            Constraint::Length(12),
+            Constraint::Min(20),
+        ],
+    )
+    .header(
+        Row::new(vec!["Tag", "Date", "Summary"])
+            .style(Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD)),
+    )
+    .block(
+        Block::default()
+            .title(format!(" Release History ({} releases)  [j/k]=select ", entries.len()))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)),
+    )
+    .column_spacing(2);
+    frame.render_widget(table, area);
+}
+
+// ─── Marketing tab (item 105) ─────────────────────────────────────────────────
+
+fn draw_marketing_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let meta = match &app.marketing_metadata {
+        None => {
+            frame.render_widget(
+                Paragraph::new("Loading…")
+                    .style(Style::default().fg(TEXT_DIM))
+                    .block(
+                        Block::default()
+                            .title(" Marketing ")
+                            .borders(Borders::ALL)
+                            .style(Style::default().fg(TEXT_MUTED)),
+                    ),
+                area,
+            );
+            return;
+        }
+        Some(m) => m,
+    };
+
+    // Split into 3 vertical sections
+    let vsplit = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),  // Description
+            Constraint::Min(6),     // Features
+            Constraint::Length(6),  // Badges
+        ])
+        .split(area);
+
+    // ── Description ────────────────────────────────────────────────────
+    let desc_title = if meta.version.is_empty() {
+        format!(" {} ", meta.project_name)
+    } else {
+        format!(" {} v{} ", meta.project_name, meta.version)
+    };
+    let desc_text = if meta.description.is_empty() {
+        "(no description in Cargo.toml)".to_string()
+    } else {
+        meta.description.clone()
+    };
+    let extra = match (&meta.repository, &meta.license) {
+        (Some(repo), Some(lic)) => format!("\n{repo}  •  {lic}"),
+        (Some(repo), None) => format!("\n{repo}"),
+        (None, Some(lic)) => format!("\nLicense: {lic}"),
+        (None, None) => String::new(),
+    };
+    frame.render_widget(
+        Paragraph::new(format!("{desc_text}{extra}"))
+            .style(Style::default().fg(TEXT))
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .title(desc_title)
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            ),
+        vsplit[0],
+    );
+
+    // ── Feature Highlights ─────────────────────────────────────────────
+    let feat_lines: Vec<Line> = if meta.features.is_empty() {
+        vec![Line::from(Span::styled(
+            "No feat: commits found in git log.",
+            Style::default().fg(TEXT_DIM),
+        ))]
+    } else {
+        meta.features
+            .iter()
+            .map(|f| {
+                Line::from(vec![
+                    Span::styled("  • ", Style::default().fg(ACCENT)),
+                    Span::styled(f.clone(), Style::default().fg(TEXT)),
+                ])
+            })
+            .collect()
+    };
+    frame.render_widget(
+        Paragraph::new(feat_lines)
+            .scroll((app.marketing_scroll, 0))
+            .block(
+                Block::default()
+                    .title(format!(" Feature Highlights ({}) ", meta.features.len()))
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            ),
+        vsplit[1],
+    );
+
+    // ── Badges ─────────────────────────────────────────────────────────
+    let badge_text = if meta.badge_snippet.is_empty() {
+        "(no badge data available)".to_string()
+    } else {
+        meta.badge_snippet.clone()
+    };
+    frame.render_widget(
+        Paragraph::new(badge_text)
+            .style(Style::default().fg(TEXT_DIM))
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .title(" README Badges ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            ),
+        vsplit[2],
+    );
 }
 
 fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
