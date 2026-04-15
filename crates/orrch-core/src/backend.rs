@@ -12,6 +12,7 @@ pub enum BackendKind {
     Gemini,
     Crush,
     OpenCode,
+    Pi,
     #[serde(rename = "anthropic_api")]
     AnthropicApi,
     #[serde(rename = "openai_api")]
@@ -25,6 +26,7 @@ impl BackendKind {
             Self::Gemini => "gemini",
             Self::Crush => "crush",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
             Self::AnthropicApi => "anthropic-api",
             Self::OpenAiApi => "openai-api",
         }
@@ -36,6 +38,7 @@ impl BackendKind {
             Self::Gemini => "[gemini]",
             Self::Crush => "[crush]",
             Self::OpenCode => "[opencode]",
+            Self::Pi => "[pi]",
             Self::AnthropicApi => "[anthropic-api]",
             Self::OpenAiApi => "[openai-api]",
         }
@@ -43,7 +46,7 @@ impl BackendKind {
 
     /// Whether this backend uses a CLI/PTY transport.
     pub fn is_cli(&self) -> bool {
-        matches!(self, Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode)
+        matches!(self, Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode | Self::Pi)
     }
 
     /// Whether this backend uses a direct HTTP API transport.
@@ -57,6 +60,7 @@ impl BackendKind {
             Self::Claude | Self::AnthropicApi => "Anthropic",
             Self::Gemini => "Google",
             Self::Crush | Self::OpenCode => "Local",
+            Self::Pi => "Multi",
             Self::OpenAiApi => "OpenAI",
         }
     }
@@ -66,7 +70,7 @@ impl BackendKind {
     /// For API backends, produces a stub config.
     pub fn to_provider(&self, config: &BackendsConfig) -> ProviderConfig {
         match self {
-            Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode => {
+            Self::Claude | Self::Gemini | Self::Crush | Self::OpenCode | Self::Pi => {
                 if let Some(cfg) = config.backends.get(self) {
                     ProviderConfig {
                         name: self.label().to_string(),
@@ -115,6 +119,7 @@ impl BackendKind {
             Self::Gemini,
             Self::Crush,
             Self::OpenCode,
+            Self::Pi,
             Self::AnthropicApi,
             Self::OpenAiApi,
         ]
@@ -122,7 +127,7 @@ impl BackendKind {
 
     /// Only CLI-based backends (for PTY spawning).
     pub fn cli_backends() -> &'static [BackendKind] {
-        &[Self::Claude, Self::Gemini, Self::Crush, Self::OpenCode]
+        &[Self::Claude, Self::Gemini, Self::Crush, Self::OpenCode, Self::Pi]
     }
 }
 
@@ -182,6 +187,14 @@ impl Default for BackendsConfig {
             BackendKind::OpenCode,
             BackendConfig {
                 command: "opencode".into(),
+                flags: vec![],
+                available: false,
+            },
+        );
+        backends.insert(
+            BackendKind::Pi,
+            BackendConfig {
+                command: "pi".into(),
                 flags: vec![],
                 available: false,
             },
@@ -300,8 +313,24 @@ pub fn send_api_message(backend: BackendKind, model_id: &str, prompt: &str) -> a
     match backend {
         BackendKind::AnthropicApi => send_anthropic(model_id, prompt),
         BackendKind::OpenAiApi => send_openai(model_id, prompt),
+        BackendKind::Pi => send_pi(prompt),
         _ => anyhow::bail!("{} is not an HTTP API backend", backend.label()),
     }
+}
+
+/// Send a one-shot prompt via `pi --print --no-session --provider anthropic`.
+fn send_pi(prompt: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("pi")
+        .args(["--print", "--no-session", "--provider", "anthropic"])
+        .arg(prompt)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_err(|e| anyhow::anyhow!("pi command failed to spawn: {e}"))?;
+    if !output.status.success() {
+        anyhow::bail!("pi exited with status {}", output.status);
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
@@ -400,6 +429,7 @@ mod tests {
         assert!(cfg.backends.contains_key(&BackendKind::Gemini));
         assert!(cfg.backends.contains_key(&BackendKind::Crush));
         assert!(cfg.backends.contains_key(&BackendKind::OpenCode));
+        assert!(cfg.backends.contains_key(&BackendKind::Pi));
     }
 
     #[test]
@@ -408,6 +438,8 @@ mod tests {
         assert_eq!(BackendKind::Gemini.badge(), "[gemini]");
         assert_eq!(BackendKind::Crush.label(), "crush");
         assert_eq!(BackendKind::OpenCode.badge(), "[opencode]");
+        assert_eq!(BackendKind::Pi.label(), "pi");
+        assert_eq!(BackendKind::Pi.badge(), "[pi]");
     }
 
     #[test]
@@ -468,6 +500,7 @@ mod tests {
             (BackendKind::Gemini, "gemini"),
             (BackendKind::Crush, "crush"),
             (BackendKind::OpenCode, "opencode"),
+            (BackendKind::Pi, "pi"),
         ];
         for (kind, expected_name) in cli_variants {
             let provider = kind.to_provider(&cfg);
@@ -491,8 +524,8 @@ mod tests {
             assert!(!kind.is_cli());
         }
 
-        // Sanity-check BackendKind::all() still enumerates all six.
-        assert_eq!(BackendKind::all().len(), 6);
+        // Sanity-check BackendKind::all() enumerates all seven.
+        assert_eq!(BackendKind::all().len(), 7);
     }
 
     #[test]
