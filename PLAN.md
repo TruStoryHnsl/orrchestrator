@@ -334,7 +334,7 @@ _Queued work from `instructions_inbox.md` (INS-001 through INS-007 in the 2026-0
 
 _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subsequent feedback sessions._
 
-81. [ ] **OPT-001: Focus new ideation editor window on creation** — When a new file is created from Design > Intentions, the spawned editor window must receive desktop focus immediately. Audit `spawn_vim_window` in `editor.rs` — ensure terminal emulator command includes focus-stealing flags (`wmctrl -a` post-spawn, or emulator-specific `--focus` flags). Test on orrion (CachyOS/KWin).
+81. [x] **OPT-001: Focus new ideation editor window on creation** — When a new file is created from Design > Intentions, the spawned editor window must receive desktop focus immediately. Audit `spawn_vim_window` in `editor.rs` — ensure terminal emulator command includes focus-stealing flags (`wmctrl -a` post-spawn, or emulator-specific `--focus` flags). Test on orrion (CachyOS/KWin).
 
 82. [x] **OPT-002: Remove dev map from project detail, show only roadmap** — Project detail pages render both a "dev map" and a "feature roadmap." Remove the dev map display. Show only the roadmap. Audit all project detail rendering paths in `ui.rs` to confirm a single roadmap view.
 
@@ -350,13 +350,13 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 88. [x] **OPT-008: Write platform porting workflow** — Create `operations/platform_port.md` — multi-step workflow for porting to any target platform (PyPI, crates.io, npm, Docker Hub, Flathub, AUR, Homebrew, apt/deb, etc.). Pipe-delimited step table format. Agents: Researcher, Developer, Repo Manager, Licensing Auditor, Feature Tester, Beta Tester.
 
-89. [ ] **OPT-009: Self-extending agent library via MCP** — Add MCP tools: `create_agent`, `create_skill`, `create_tool`, `create_workflow` for runtime library extension. Behavioral contract: agents encountering problems outside expertise ask for an expert; if none exists, create the expert agent + skills via MCP, save to library, invoke.
+89. [x] **OPT-009: Self-extending agent library via MCP** — Add MCP tools: `create_agent`, `create_skill`, `create_tool`, `create_workflow` for runtime library extension. Behavioral contract: agents encountering problems outside expertise ask for an expert; if none exists, create the expert agent + skills via MCP, save to library, invoke.
 
 90. [ ] **OPT-010: Session lifecycle management** — Unified system: (a) hot/cold project tracking in Oversee; (b) stale session cleanup; (c) session status indicators; (d) session close protocol; (e) session brief navigation in project details TUI.
 
 91. [x] **OPT-011: Use nvim instead of vim** — Audit all editor invocations. Replace all `vim` with `nvim`. Window titles and docs must say `nvim`.
 
-92. [ ] **OPT-012: Tmux session management overhaul** — Tab naming: `<project>:<short-goal>`. Window splitting support. Custom tmux config shipped at `config/tmux.conf`. Do NOT use system tmux config.
+92. [x] **OPT-012: Tmux session management overhaul** — Tab naming: `<project>:<short-goal>`. Window splitting support. Custom tmux config shipped at `config/tmux.conf`. Do NOT use system tmux config.
 
 93. [ ] **OPT-013: Project classification and lifecycle tools** — Tools to classify projects by lifecycle stage (active, maintenance, archived, deprecated) and surface appropriate actions per stage.
 
@@ -364,7 +364,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 95. [ ] **OPT-015: Publish page plan** — Detailed plan for Phase 9 (Publish panel). Covers: release packaging, version tagging, changelog, platform distribution, license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback.
 
-96. [ ] **OPT-016: Expand the Analyze page with comprehensive metrics** — Token usage per project/session/step/agent, cost breakdown, session throughput, agent performance, error frequency, workflow efficiency, project velocity, historical trends.
+96. [x] **OPT-016: Expand the Analyze page with comprehensive metrics** — Token usage per project/session/step/agent, cost breakdown, session throughput, agent performance, error frequency, workflow efficiency, project velocity, historical trends.
 
 97. [ ] **OPT-017: Hypervise panel feature expansion** — Session list: rename inline, expand for 2 most recent messages, show host + cwd. Session detail: live message stream, prompt input, workflow dashboard, interrupt/pause.
 
@@ -392,7 +392,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 109. [ ] **TOK-001: Token delivery audit and controlled injection system** — Systematic audit of all context delivery mechanisms for token waste. Design a controlled context injection layer. Add token budget tracker to Analyze panel. Document the controlled delivery protocol.
 
-110. [ ] **TOK-002: Per-project concurrent session limits with warning gate** — Configurable max concurrent session count per project (default: 3). Warning modal on limit exceeded. `N sessions / max` counter in Oversee.
+110. [x] **TOK-002: Per-project concurrent session limits with warning gate** — Configurable max concurrent session count per project (default: 3). Warning modal on limit exceeded. `N sessions / max` counter in Oversee.
 
 111. [ ] **TOK-003: Multi-device session classification (primary vs compatibility)** — Extend session metadata with device role: primary (orrion) vs compatibility (orrpheus, etc.). TOK-002 limits apply separately per class.
 
