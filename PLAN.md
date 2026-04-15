@@ -352,7 +352,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 89. [x] **OPT-009: Self-extending agent library via MCP** — Add MCP tools: `create_agent`, `create_skill`, `create_tool`, `create_workflow` for runtime library extension. Behavioral contract: agents encountering problems outside expertise ask for an expert; if none exists, create the expert agent + skills via MCP, save to library, invoke.
 
-90. [ ] **OPT-010: Session lifecycle management** — Unified system: (a) hot/cold project tracking in Oversee; (b) stale session cleanup; (c) session status indicators; (d) session close protocol; (e) session brief navigation in project details TUI.
+90. [ ] **OPT-010: Session lifecycle management** — Unified system: (a) hot/cold project tracking in Oversee ✓; (b) stale session cleanup ✓; (c) session status indicators ✓; (d) session close protocol; (e) session brief navigation in project details TUI.
 
 91. [x] **OPT-011: Use nvim instead of vim** — Audit all editor invocations. Replace all `vim` with `nvim`. Window titles and docs must say `nvim`.
 
@@ -360,7 +360,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 93. [ ] **OPT-013: Project classification and lifecycle tools** — Tools to classify projects by lifecycle stage (active, maintenance, archived, deprecated) and surface appropriate actions per stage.
 
-94. [ ] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files, projects, intentions, plans, agents, skills, tools, workflows.
+94. [ ] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files ✓, projects, intentions ✓, plans, agents ✓, skills ✓, tools ✓, workflows ✓.
 
 95. [x] **OPT-015: Publish page plan** — Detailed plan for Phase 9 (Publish panel). Covers: release packaging, version tagging, changelog, platform distribution, license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback.
 
@@ -388,7 +388,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 107. [x] **Post-release monitoring** — Track download counts, new issue reports, GitHub release engagement. Display in History tab. Alert on post-release issue spike.
 
-108. [ ] **Rollback capability** — Yank/unpublish from platforms that support it. Revert git tag. Generate rollback advisory. Confirmation required.
+108. [x] **Rollback capability** — Yank/unpublish from platforms that support it. Revert git tag. Generate rollback advisory. Confirmation required.
 
 109. [x] **TOK-001: Token budget tracker in Analyze panel** — Session budget footer line in Analyze panel shows total duration + session count from last 24h. (Audit/injection protocol doc: still open.)
 
