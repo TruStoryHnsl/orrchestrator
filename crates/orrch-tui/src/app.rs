@@ -356,12 +356,14 @@ pub enum LibrarySub {
     McpServers,
     Skills,
     Tools,
+    PiExtensions,
 }
 
 impl LibrarySub {
-    pub const ALL: [LibrarySub; 6] = [
+    pub const ALL: [LibrarySub; 7] = [
         LibrarySub::Agents, LibrarySub::Models, LibrarySub::Harnesses,
         LibrarySub::McpServers, LibrarySub::Skills, LibrarySub::Tools,
+        LibrarySub::PiExtensions,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -372,6 +374,7 @@ impl LibrarySub {
             Self::McpServers => "MCP",
             Self::Skills => "Skills",
             Self::Tools => "Tools",
+            Self::PiExtensions => "PI Ext",
         }
     }
 
@@ -586,6 +589,7 @@ pub struct App {
     pub library_skills: Vec<(String, PathBuf)>,  // (name, path) from library/skills/
     pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
     pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
+    pub library_pi_extensions: Vec<orrch_library::LibraryItem>, // PI extensions (.ts)
     pub valve_store: orrch_library::ValveStore,
     pub usage_tracker: orrch_core::UsageTracker,
 
@@ -842,6 +846,7 @@ impl App {
         let library_skills = scan_md_dir(&library_root.join("skills"));
         let library_tools = scan_md_dir(&library_root.join("tools"));
         let library_profiles = scan_md_dir(&library_root.join("profiles"));
+        let library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
         let valve_store = orrch_library::ValveStore::load();
         let mut usage_tracker = orrch_core::UsageTracker::new();
         usage_tracker.set_defaults();
@@ -902,6 +907,7 @@ impl App {
             library_skills,
             library_tools,
             library_profiles,
+            library_pi_extensions,
             valve_store,
             usage_tracker,
             workforce_files,
@@ -2590,6 +2596,7 @@ impl App {
         self.library_skills = scan_md_dir(&library_root.join("skills"));
         self.library_tools = scan_md_dir(&library_root.join("tools"));
         self.library_profiles = scan_md_dir(&library_root.join("profiles"));
+        self.library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
         self.workforce_files = scan_md_dir(&orrch_dir.join("workforces"));
         self.operation_files = scan_md_dir(&orrch_dir.join("operations"));
     }
@@ -2707,6 +2714,65 @@ impl App {
                 self.add_mcp_field = 0;
                 self.sub = SubView::AddMcpServer;
             }
+            // PI-003: create new PI extension from template
+            KeyCode::Char('n') if self.library_sub == LibrarySub::PiExtensions => {
+                use orrch_library::templates::{TemplateCategory, create_from_template};
+                let orrch_dir = self.projects_dir.join("orrchestrator");
+                match create_from_template(TemplateCategory::PiExtension, &orrch_dir) {
+                    Ok(path) => {
+                        let title = format!("[new PI extension] {}", path.file_name().unwrap_or_default().to_string_lossy());
+                        self.vim_request = Some(VimRequest {
+                            file: path,
+                            kind: VimKind::NewIdea,
+                            title,
+                        });
+                        self.reload_library();
+                    }
+                    Err(e) => self.notify(format!("Failed to create PI extension: {e}")),
+                }
+            }
+            // PI-003: edit selected PI extension
+            KeyCode::Char('e') if self.library_sub == LibrarySub::PiExtensions => {
+                if let Some(item) = self.library_pi_extensions.get(self.library_selected) {
+                    let path = item.path.clone();
+                    let title = format!("[PI ext] {}", path.file_name().unwrap_or_default().to_string_lossy());
+                    self.vim_request = Some(VimRequest {
+                        file: path,
+                        kind: VimKind::NewIdea,
+                        title,
+                    });
+                }
+            }
+            // PI-003: export selected skill as PI extension
+            KeyCode::Char('x') if self.library_sub == LibrarySub::Skills => {
+                if let Some((_, skill_path)) = self.library_skills.get(self.library_selected) {
+                    let pi_ext_dir = self.projects_dir.join("orrchestrator").join("library").join("pi-extensions");
+                    let skill_path = skill_path.clone();
+                    match orrch_library::translate_skill_to_pi_extension(&skill_path, &pi_ext_dir) {
+                        Ok(out) => {
+                            let name = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            self.notify(format!("Exported to pi-extensions/{name}"));
+                            self.library_pi_extensions = orrch_library::load_pi_extensions(&pi_ext_dir);
+                        }
+                        Err(e) => self.notify(format!("Export failed: {e}")),
+                    }
+                }
+            }
+            // PI-003: export selected tool as PI extension
+            KeyCode::Char('x') if self.library_sub == LibrarySub::Tools => {
+                if let Some((_, tool_path)) = self.library_tools.get(self.library_selected) {
+                    let pi_ext_dir = self.projects_dir.join("orrchestrator").join("library").join("pi-extensions");
+                    let tool_path = tool_path.clone();
+                    match orrch_library::translate_tool_to_pi_extension(&tool_path, &pi_ext_dir) {
+                        Ok(out) => {
+                            let name = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            self.notify(format!("Exported to pi-extensions/{name}"));
+                            self.library_pi_extensions = orrch_library::load_pi_extensions(&pi_ext_dir);
+                        }
+                        Err(e) => self.notify(format!("Export failed: {e}")),
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -2742,6 +2808,7 @@ impl App {
             LibrarySub::McpServers => self.library_mcp_servers.len(),
             LibrarySub::Skills => self.library_skills.len(),
             LibrarySub::Tools => self.library_tools.len(),
+            LibrarySub::PiExtensions => self.library_pi_extensions.len(),
         }
     }
 
