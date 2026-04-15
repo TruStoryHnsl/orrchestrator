@@ -1241,6 +1241,7 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
                 LibrarySub::McpServers => app.library_mcp_servers.len(),
                 LibrarySub::Skills => app.library_skills.len(),
                 LibrarySub::Tools => app.library_tools.len(),
+                LibrarySub::PiExtensions => app.library_pi_extensions.len(),
             };
             let style = if sel {
                 let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
@@ -1269,8 +1270,9 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         LibrarySub::Models => draw_library_models(frame, app, chunks[0], chunks[1]),
         LibrarySub::Harnesses => draw_library_harnesses(frame, app, chunks[0], chunks[1]),
         LibrarySub::McpServers => draw_library_mcp(frame, app, chunks[0], chunks[1]),
-        LibrarySub::Skills => draw_library_generic(frame, app, &app.library_skills, "Skills", chunks[0], chunks[1]),
-        LibrarySub::Tools => draw_library_generic(frame, app, &app.library_tools, "Tools", chunks[0], chunks[1]),
+        LibrarySub::Skills => draw_library_generic(frame, app, &app.library_skills, "Skills", "x=export to PI", chunks[0], chunks[1]),
+        LibrarySub::Tools => draw_library_generic(frame, app, &app.library_tools, "Tools", "x=export to PI", chunks[0], chunks[1]),
+        LibrarySub::PiExtensions => draw_library_pi_extensions(frame, app, chunks[0], chunks[1]),
     }
 }
 
@@ -1498,7 +1500,7 @@ fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
     frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
 }
 
-fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std::path::PathBuf)], label: &str, list_area: Rect, preview_area: Rect) {
+fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std::path::PathBuf)], label: &str, extra_hint: &str, list_area: Rect, preview_area: Rect) {
     let visible_rows = list_area.height.saturating_sub(2) as usize;
     let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
     let mut items = Vec::new();
@@ -1520,7 +1522,8 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
         (false, true) => " [v..]",
         (false, false) => "",
     };
-    let title = format!(" {} ({}) r=refresh{} ", label, items_data.len(), scroll_hint);
+    let hint_part = if extra_hint.is_empty() { String::new() } else { format!(" {extra_hint}") };
+    let title = format!(" {} ({}) r=refresh{}{} ", label, items_data.len(), hint_part, scroll_hint);
     frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
 
     let preview = if let Some((_, path)) = items_data.get(app.library_selected) {
@@ -1531,6 +1534,49 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
         }
     } else {
         vec![Line::styled("Select an item to preview", Style::default().fg(TEXT_MUTED))]
+    };
+    frame.render_widget(Paragraph::new(preview)
+        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_pi_extensions(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let items_data = &app.library_pi_extensions;
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let mut items = Vec::new();
+    for (i, item) in items_data.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let marker = if sel { "■ " } else { "  " };
+        items.push(ListItem::new(Line::styled(format!("{marker}{}.ts", item.name), style)));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled("  No PI extensions — press 'n' to create, or 'x' on a Skill/Tool to export", Style::default().fg(TEXT_MUTED))));
+    }
+    let has_above = scroll_offset > 0;
+    let has_below = items_data.len() > scroll_offset + visible_rows;
+    let scroll_hint = match (has_above, has_below) {
+        (true, true) => " [..v^..]",
+        (true, false) => " [..^]",
+        (false, true) => " [v..]",
+        (false, false) => "",
+    };
+    let title = format!(" PI Extensions ({}) n=new e=edit r=refresh{} ", items_data.len(), scroll_hint);
+    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(item) = items_data.get(app.library_selected) {
+        let lines: Vec<Line> = item.content.lines()
+            .map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT)))
+            .collect();
+        if lines.is_empty() {
+            vec![Line::styled("(empty)", Style::default().fg(TEXT_MUTED))]
+        } else {
+            lines
+        }
+    } else {
+        vec![Line::styled("Select an extension to preview", Style::default().fg(TEXT_MUTED))]
     };
     frame.render_widget(Paragraph::new(preview)
         .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))

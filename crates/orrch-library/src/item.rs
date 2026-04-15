@@ -11,6 +11,7 @@ pub enum ItemKind {
     McpServer,
     WorkforceTemplate,
     ApiKey,
+    PiExtension,
 }
 
 impl ItemKind {
@@ -22,6 +23,7 @@ impl ItemKind {
             Self::McpServer => "MCP Server",
             Self::WorkforceTemplate => "Workforce Template",
             Self::ApiKey => "API Key",
+            Self::PiExtension => "PI Extension",
         }
     }
 
@@ -33,6 +35,7 @@ impl ItemKind {
             Self::McpServer => "mcp_servers",
             Self::WorkforceTemplate => "workforce_templates",
             Self::ApiKey => "api_keys",
+            Self::PiExtension => "pi-extensions",
         }
     }
 }
