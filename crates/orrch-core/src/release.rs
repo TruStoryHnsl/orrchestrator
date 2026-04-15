@@ -757,3 +757,49 @@ fn extract_toml_str(line: &str, key: &str) -> Option<String> {
     .trim();
     if inner.is_empty() { None } else { Some(inner.to_string()) }
 }
+
+// ─── Rollback (item 108) ──────────────────────────────────────────────────────
+
+/// Delete a local git tag and return a rollback advisory string.
+///
+/// Does NOT push `--delete` to the remote — that must be done manually if the
+/// tag has already been pushed.  The returned string documents exactly what was
+/// done and what the caller should do next.
+pub fn rollback_release(project_dir: &Path, tag: &str) -> anyhow::Result<String> {
+    // Validate that the tag exists locally.
+    let check = Command::new("git")
+        .args(["tag", "-l", tag])
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| anyhow::anyhow!("git tag -l failed: {e}"))?;
+
+    let found = String::from_utf8_lossy(&check.stdout);
+    if found.trim().is_empty() {
+        anyhow::bail!("tag '{tag}' not found in local repository");
+    }
+
+    // Delete the local tag.
+    let del = Command::new("git")
+        .args(["tag", "-d", tag])
+        .current_dir(project_dir)
+        .output()
+        .map_err(|e| anyhow::anyhow!("git tag -d failed: {e}"))?;
+
+    if !del.status.success() {
+        let stderr = String::from_utf8_lossy(&del.stderr);
+        anyhow::bail!("failed to delete tag '{tag}': {stderr}");
+    }
+
+    let advisory = format!(
+        "Rollback advisory\n\
+         ─────────────────\n\
+         Tag '{tag}' has been deleted locally.\n\
+         \n\
+         If the tag was already pushed to the remote, run:\n\
+         \n\
+         \tgit push origin :refs/tags/{tag}\n\
+         \n\
+         To reinstate, re-run the release workflow at the desired commit.\n",
+    );
+    Ok(advisory)
+}

@@ -81,6 +81,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::WorkflowPicker => { draw_panel_content(frame, app, layout[1]); draw_workflow_picker(frame, app); }
         SubView::AddFeature(idx) => { draw_project_detail(frame, app, layout[1], idx); draw_add_feature(frame, app); }
         SubView::AddMcpServer => { draw_panel_content(frame, app, layout[1]); draw_add_mcp_server(frame, app); }
+        SubView::RenameWorkforce(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Workforce File"); }
+        SubView::RenameIdea(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Idea"); }
+        SubView::ConfirmRollback => { draw_panel_content(frame, app, layout[1]); draw_confirm_rollback(frame, app); }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -415,16 +418,26 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // ── Release Notes (left) ────────────────────────────────────────────
-    let notes_text = app.release_notes_preview.as_deref().unwrap_or(
-        "Release notes not yet generated.\nNavigate to this tab to load.\n\n[v] preview next version changelog  [b] build artifacts",
-    );
+    // 108: show rollback advisory if one is pending
+    let notes_text = if let Some(ref advisory) = app.rollback_advisory {
+        advisory.as_str()
+    } else {
+        app.release_notes_preview.as_deref().unwrap_or(
+            "Release notes not yet generated.\nNavigate to this tab to load.\n\n[v] preview next version changelog  [b] build artifacts  [D] rollback selected tag",
+        )
+    };
+    let notes_title = if app.rollback_advisory.is_some() {
+        " Rollback Advisory  [r]=refresh to clear "
+    } else {
+        " Release Notes  [v]=preview version  [b]=build  [D]=rollback "
+    };
     let notes = Paragraph::new(notes_text)
-        .style(Style::default().fg(TEXT))
+        .style(Style::default().fg(if app.rollback_advisory.is_some() { Color::Red } else { TEXT }))
         .wrap(Wrap { trim: false })
         .block(Block::default()
-            .title(" Release Notes  [v]=preview version  [b]=build ")
+            .title(notes_title)
             .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+            .style(Style::default().fg(if app.rollback_advisory.is_some() { Color::Red } else { TEXT_MUTED })));
     frame.render_widget(notes, hsplit[0]);
 
     // ── Right pane: checklist (top) + build targets (bottom) ───────────
@@ -1092,12 +1105,12 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     let title = if app.workforce_tab == WorkforceTab::Workflows {
         format!(
-            " {} ({}) — n=new N=AI Enter=edit d=del x=export i=import r=refresh{}",
+            " {} ({}) — n=new N=AI Enter=edit r=rename d=del x=export i=import R=refresh{}",
             app.workforce_tab.label(), items_data.len(), scroll_hint,
         )
     } else {
         format!(
-            " {} ({}) — n=new N=AI Enter=edit d=del r=refresh{}",
+            " {} ({}) — n=new N=AI Enter=edit r=rename d=del R=refresh{}",
             app.workforce_tab.label(), items_data.len(), scroll_hint,
         )
     };
@@ -1787,9 +1800,16 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         } else { String::new() };
         let queued_str = if proj.queued_prompts > 0 { format!(" Q:{}", proj.queued_prompts) } else { String::new() };
 
+        // 90c: temperature badge
+        let (temp_badge, temp_color) = match proj.temperature {
+            orrch_core::Temperature::Hot => ("[H]", Color::Rgb(255, 120, 60)),
+            orrch_core::Temperature::Cold => ("[C]", Color::Rgb(80, 140, 220)),
+            orrch_core::Temperature::Ignored => ("[I]", TEXT_MUTED),
+        };
         let mut lines = vec![Line::from(vec![
             Span::styled(proj.color_tag.icon(), Style::default().fg(tag_color)),
             Span::styled(format!(" {}", proj.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {}", temp_badge), Style::default().fg(temp_color)),
             Span::styled(format!(" [{}]", proj.scope.badge()), Style::default().fg(CYAN)),
             Span::styled(goals_str, Style::default().fg(
                 if done == total && total > 0 { GREEN }
@@ -2474,6 +2494,8 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Refresh sessions on each render (fast — just reads tmux state)
     app.managed_sessions = orrch_core::windows::list_all_sessions();
+    // Mark any windows that have been closed since the last refresh as Dead (90a).
+    orrch_core::windows::cleanup_stale_sessions(&mut app.managed_sessions);
 
     // Poll workflow status from active sessions' working directories
     app.workflow_status = app.managed_sessions.iter()
@@ -2507,8 +2529,9 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             let selected = flat_idx == app.session_tab_selected;
             let marker = if selected { " ▶ " } else { "   " };
 
+            // 90b: Working=cyan, Waiting=yellow, Idle=dim, Dead=red
             let status_color = match s.status {
-                SessionStatus::Working => GREEN,
+                SessionStatus::Working => CYAN,
                 SessionStatus::Idle => TEXT_MUTED,
                 SessionStatus::WaitingForInput => WAITING_COLOR,
                 SessionStatus::Dead => Color::Red,
@@ -3218,6 +3241,61 @@ fn draw_confirm_deprecate(frame: &mut Frame, app: &App, proj_idx: usize) {
         .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
 }
 
+// ─── Rename popup (94a/94b) ───────────────────────────────────────────
+
+fn draw_rename_popup(frame: &mut Frame, app: &App, title: &str) {
+    let popup = centered_popup(frame.area(), 50, 5);
+    frame.render_widget(Clear, popup);
+    let content = format!(
+        "New name: {}_\n\nEnter=save  Esc=cancel",
+        app.rename_buffer
+    );
+    frame.render_widget(
+        Paragraph::new(content)
+            .style(Style::default().fg(TEXT))
+            .block(
+                Block::default()
+                    .title(format!(" {title} "))
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(ACCENT)),
+            ),
+        popup,
+    );
+}
+
+// ─── Confirm rollback popup (108) ────────────────────────────────────
+
+fn draw_confirm_rollback(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 55, 7);
+    frame.render_widget(Clear, popup);
+    let tag = &app.rename_buffer;
+    let lines = vec![
+        Line::styled(
+            format!("Delete release tag '{tag}'?"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(
+            "This removes the tag locally (does not push --delete).",
+            Style::default().fg(TEXT),
+        ),
+        Line::styled(
+            "To remove from remote: git push origin :refs/tags/<tag>",
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .title(" Rollback Release ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(40, 10, 10)).fg(TEXT)),
+        ),
+        popup,
+    );
+}
+
 // ─── Status Bar ───────────────────────────────────────────────────────
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -3270,12 +3348,12 @@ fn build_hint_line(app: &App) -> Line<'static> {
         (Panel::Design, SubView::List) => {
             match app.design_sub {
                 crate::app::DesignSub::Intentions => hint_line(&[
-                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("d", "delete"),
+                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("r", "rename"), ("R", "review"), ("d", "delete"),
                     ("|", ""),
                     ("↑↓", "select"), ("Tab", "sub-panel"),
                 ]),
                 crate::app::DesignSub::Workforce => hint_line(&[
-                    ("Enter", "edit"), ("n", "new"), ("N", "AI-create"), ("d", "del"), ("r", "refresh"),
+                    ("Enter", "edit"), ("n", "new"), ("N", "AI-create"), ("r", "rename"), ("d", "del"), ("R", "refresh"),
                     ("|", ""),
                     ("←→", "tabs"), ("Home/End", "jump"),
                 ]),
@@ -3295,7 +3373,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("←→", "panels"), ("Esc", "menu"),
         ]),
         (Panel::Publish, SubView::List) => hint_line(&[
-            ("←→", "tabs"), ("Esc", "menu"),
+            ("←→", "tabs"), ("v", "preview"), ("b", "build"), ("D", "rollback tag"), ("r", "refresh"), ("Esc", "menu"),
         ]),
         (Panel::Hypervise, SubView::List) => {
             let has_sessions = !app.managed_sessions.is_empty();
