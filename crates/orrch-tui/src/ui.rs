@@ -1538,36 +1538,23 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     use crate::app::DetailFocus;
     let Some(proj) = app.projects.get(proj_idx) else { return; };
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
-    let in_devmap = app.detail_focus == DetailFocus::DevMap;
     let in_browser = app.detail_focus == DetailFocus::Browser;
 
-    let has_devmap = !proj.plan_phases.is_empty();
-    let devmap_height: u16 = if has_devmap {
-        // Show at least a few lines for the dev map
-        let visible_items = app.devmap_flat_count(proj_idx);
-        (visible_items.min(10) as u16).max(3) + 2 // +2 for borders
-    } else {
-        0
-    };
-
-    let roadmap_height = proj.roadmap.len().min(8) as u16 + 3;
-    let mut constraints = vec![
+    // Roadmap height: capped at 12 visible items (scrollable)
+    let roadmap_height = proj.roadmap.len().min(12) as u16 + 3;
+    let constraints = vec![
         Constraint::Length(2),              // header
-        Constraint::Length(roadmap_height), // roadmap
+        Constraint::Length(roadmap_height), // roadmap (scrollable)
         Constraint::Length(8),             // sessions (compact)
+        Constraint::Min(5),                // file browser
     ];
-    if has_devmap {
-        constraints.push(Constraint::Length(devmap_height)); // dev map
-    }
-    constraints.push(Constraint::Min(5)); // file browser
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
 
-    let devmap_slot = if has_devmap { 3 } else { usize::MAX };
-    let browser_slot = if has_devmap { 4 } else { 3 };
+    let browser_slot = 3;
 
     // Header
     let header = Paragraph::new(Line::from(vec![
@@ -1576,21 +1563,25 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
-    // Roadmap — color-coded by feature status
+    // Roadmap — color-coded by feature status, scrollable via PgUp/PgDn
     let in_roadmap = app.detail_focus == crate::app::DetailFocus::Roadmap;
-    let roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
+    let scroll_offset = app.roadmap_scroll;
+    let all_roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
         let style = feature_status_style(item.status);
         let sel_prefix = if in_roadmap && i == app.roadmap_selected { "▸" } else { " " };
         ListItem::new(format!("{}{} {}", sel_prefix, item.status_icon(), item.title)).style(style)
     }).collect();
+    // Slice to visible window
+    let visible_roadmap: Vec<ListItem> = all_roadmap_items.into_iter().skip(scroll_offset).collect();
     let roadmap_border = if in_roadmap {
         Style::default().fg(ACCENT)
     } else {
         Style::default().fg(TEXT_DIM)
     };
-    let roadmap = List::new(roadmap_items)
+    let scroll_hint = if scroll_offset > 0 { format!(" Roadmap ↑{scroll_offset} ") } else { " Roadmap ".to_string() };
+    let roadmap = List::new(visible_roadmap)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Roadmap ").borders(Borders::ALL).style(roadmap_border));
+        .block(Block::default().title(scroll_hint).borders(Borders::ALL).style(roadmap_border));
     frame.render_widget(roadmap, layout[1]);
 
     // Sessions — selectable, shows managed + external, with duplicate-goal badges
@@ -1653,11 +1644,6 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         .highlight_symbol("▶ ");
         let mut state = TableState::default().with_selected(if in_sessions { Some(app.session_selected) } else { None });
         frame.render_stateful_widget(table, layout[2], &mut state);
-    }
-
-    // Dev map — interactive feature tree from Plan.md
-    if has_devmap {
-        draw_dev_map(frame, app, layout[devmap_slot], proj_idx, in_devmap);
     }
 
     // File browser — single tree column + preview pane
