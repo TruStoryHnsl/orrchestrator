@@ -342,11 +342,11 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 84. [x] **OPT-004: Fix navigation traps across all pages** — Project menu (and potentially other pages) traps the user — Up/Back/Esc does not exit. Audit every page/panel/sub-view for navigation traps. Every view must be exitable via Left-arrow, Esc, or Up (vertical focus navigation model). Fix all instances.
 
-85. [ ] **OPT-005: Fix right-arrow project navigation to show project details** — Right-arrow on a project in Oversee should drill into project detail view. Audit `key_oversee` handler.
+85. [x] **OPT-005: Fix right-arrow project navigation to show project details** — Right-arrow on a project in Oversee should drill into project detail view. Audit `key_oversee` handler.
 
-86. [ ] **OPT-006: Track all projects including newly created ones** — Projects without tracked tasks (e.g., borrk) don't show dev completion in Oversee. Fix: project discovery must include all projects under `~/projects/` with any trackable state (PLAN.md, active sessions, recent git activity). Projects with no PLAN.md show "no plan" indicator.
+86. [x] **OPT-006: Track all projects including newly created ones** — Projects without tracked tasks (e.g., borrk) don't show dev completion in Oversee. Fix: project discovery must include all projects under `~/projects/` with any trackable state (PLAN.md, active sessions, recent git activity). Projects with no PLAN.md show "no plan" indicator.
 
-87. [ ] **OPT-007: Dynamic tip line based on project completion state** — When a project has 100% roadmap complete, tip/action line displays "submit feedback" and "construct packages" instead of default actions. Conditional in smart default actions logic (item 27): `project.roadmap_complete() -> bool` overrides tip text.
+87. [x] **OPT-007: Dynamic tip line based on project completion state** — When a project has 100% roadmap complete, tip/action line displays "submit feedback" and "construct packages" instead of default actions. Conditional in smart default actions logic (item 27): `project.roadmap_complete() -> bool` overrides tip text.
 
 88. [x] **OPT-008: Write platform porting workflow** — Create `operations/platform_port.md` — multi-step workflow for porting to any target platform (PyPI, crates.io, npm, Docker Hub, Flathub, AUR, Homebrew, apt/deb, etc.). Pipe-delimited step table format. Agents: Researcher, Developer, Repo Manager, Licensing Auditor, Feature Tester, Beta Tester.
 
@@ -368,7 +368,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 97. [ ] **OPT-017: Hypervise panel feature expansion** — Session list: rename inline, expand for 2 most recent messages, show host + cwd. Session detail: live message stream, prompt input, workflow dashboard, interrupt/pause.
 
-98. [ ] **Publish panel skeleton** — Add `Publish` as a top-level panel. Sub-tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab.
+98. [x] **Publish panel skeleton** — Add `Publish` as a top-level panel. Sub-tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab.
 
 99. [ ] **Release packaging engine** — Build artifacts for the selected project: cargo build, pip wheel, npm pack, Docker image, platform-specific archives. Configurable per-project build matrix in `.orrch/publish.toml`.
 
