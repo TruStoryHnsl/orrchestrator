@@ -21,6 +21,10 @@ pub struct Config {
     /// Root directory for projects.
     #[serde(default = "default_projects_dir")]
     pub projects_dir: PathBuf,
+    /// Hostname of the primary workstation. Sessions on this host show [P] badge; others show [C].
+    /// Defaults to "orrion" if not set.
+    #[serde(default)]
+    pub primary_hostname: Option<String>,
 }
 
 impl Default for Config {
@@ -31,6 +35,7 @@ impl Default for Config {
             library_dir: default_library_dir(),
             library_repo_url: None,
             projects_dir: default_projects_dir(),
+            primary_hostname: None,
         }
     }
 }

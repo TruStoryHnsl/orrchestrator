@@ -492,7 +492,17 @@ fn infer_session_status(tmux_session: &str, window_index: u32) -> (SessionStatus
         SessionStatus::Working
     };
 
-    let display = last_line.chars().take(60).collect();
+    // Collect up to 2 recent non-empty, non-decoration lines for display.
+    let recent_lines: Vec<String> = text.lines().rev()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with("───") && !t.starts_with("⏵")
+        })
+        .take(2)
+        .map(|l| l.trim().chars().take(80).collect())
+        .collect();
+    // Reverse so earlier line comes first (chronological order).
+    let display = recent_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
     (status, display)
 }
 

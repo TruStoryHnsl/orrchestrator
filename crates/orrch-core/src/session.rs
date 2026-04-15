@@ -3,6 +3,37 @@ use std::time::Instant;
 
 use crate::backend::BackendKind;
 
+/// Device classification: Primary is the configured main workstation; all others are Compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceClass {
+    Primary,
+    Compatibility,
+}
+
+impl DeviceClass {
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::Primary => "[P]",
+            Self::Compatibility => "[C]",
+        }
+    }
+}
+
+/// Detect device class by comparing current hostname to the configured primary hostname.
+/// Defaults to "orrion" if not configured.
+pub fn device_class(primary_hostname: Option<&str>) -> DeviceClass {
+    let primary = primary_hostname.unwrap_or("orrion");
+    let hostname = std::fs::read_to_string("/etc/hostname")
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    if hostname == primary.to_lowercase() {
+        DeviceClass::Primary
+    } else {
+        DeviceClass::Compatibility
+    }
+}
+
 /// State of a managed Claude Code session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
