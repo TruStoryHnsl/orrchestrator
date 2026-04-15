@@ -374,7 +374,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 100. [x] **Version tagging and changelog generation** — Integrate with `/release` flow: bump version (SemVer), generate CHANGELOG.md entries from conventional commits since last tag, create annotated git tag. Preview changelog in TUI before confirming.
 
-101. [ ] **Platform distribution** — Publish to target platforms: crates.io, PyPI, npm, Docker Hub, GitHub Releases, AUR, Homebrew, Flathub. Distribution tab shows per-platform publish status.
+101. [x] **Platform distribution** — Publish to target platforms: crates.io, PyPI, npm, Docker Hub, GitHub Releases, AUR, Homebrew, Flathub. Distribution tab shows per-platform publish status.
 
 102. [x] **License compliance audit** — Invoke Licensing Auditor agent. Report: dependency tree with license per dep, flagged conflicts, missing licenses, SPDX identifiers. Display in Compliance tab. Block publish if critical conflicts detected.
 
@@ -382,11 +382,11 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 104. [x] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type. Displayed in Publish > Packaging tab.
 
-105. [ ] **Marketing material generation** — Invoke Market Researcher + UX Specialist agents. Generate: project description, feature highlights, README badges, social media announcement draft. Display in Marketing tab.
+105. [x] **Marketing material generation** — Invoke Market Researcher + UX Specialist agents. Generate: project description, feature highlights, README badges, social media announcement draft. Display in Marketing tab.
 
 106. [x] **Pre-release checklist enforcement** — 4-item automated checklist (CHANGELOG exists, no .env files, Cargo version present, git clean). Displayed in Publish > Packaging tab with pass/fail icons.
 
-107. [ ] **Post-release monitoring** — Track download counts, new issue reports, GitHub release engagement. Display in History tab. Alert on post-release issue spike.
+107. [x] **Post-release monitoring** — Track download counts, new issue reports, GitHub release engagement. Display in History tab. Alert on post-release issue spike.
 
 108. [ ] **Rollback capability** — Yank/unpublish from platforms that support it. Revert git tag. Generate rollback advisory. Confirmation required.
 
