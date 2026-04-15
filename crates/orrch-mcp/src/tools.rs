@@ -369,6 +369,54 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["host", "session_name"]
             }
         }),
+        serde_json::json!({
+            "name": "create_agent",
+            "description": "Create a new agent profile .md file in the agents/ directory from the standard template. Returns the path of the created file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Agent name (used as the filename stem, e.g. 'my_agent')"},
+                    "description": {"type": "string", "description": "Optional one-line description to inject into the template"}
+                },
+                "required": ["name"]
+            }
+        }),
+        serde_json::json!({
+            "name": "create_skill",
+            "description": "Create a new skill .md file in library/skills/ from the standard template. Returns the path of the created file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill name (used as the filename stem)"},
+                    "description": {"type": "string", "description": "Optional one-line description to inject into the template"}
+                },
+                "required": ["name"]
+            }
+        }),
+        serde_json::json!({
+            "name": "create_tool",
+            "description": "Create a new tool .md file in library/tools/ from the standard template. Returns the path of the created file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Tool name (used as the filename stem)"},
+                    "description": {"type": "string", "description": "Optional one-line description to inject into the template"}
+                },
+                "required": ["name"]
+            }
+        }),
+        serde_json::json!({
+            "name": "create_workflow",
+            "description": "Create a new workforce/workflow .md file in workforces/ from the standard template. Returns the path of the created file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Workflow name (used as the filename stem)"},
+                    "description": {"type": "string", "description": "Optional one-line description to inject into the template"}
+                },
+                "required": ["name"]
+            }
+        }),
     ]
 }
 
@@ -397,6 +445,10 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "remote_list_sessions" => remote_list_sessions(args).await,
         "remote_spawn_session" => remote_spawn_session(args).await,
         "remote_kill_session" => remote_kill_session(args).await,
+        "create_agent" => create_library_entry(server, args, "agent"),
+        "create_skill" => create_library_entry(server, args, "skill"),
+        "create_tool" => create_library_entry(server, args, "tool"),
+        "create_workflow" => create_library_entry(server, args, "workflow"),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -2093,6 +2145,62 @@ fn is_leap(year: u64) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+// ─── Library creation tools ─────────────────────────────────────────────────
+
+// Minimal templates for the create_* tools. Kept in sync with
+// orrch-library/src/templates.rs — if those change, update here too.
+const CRT_AGENT_TEMPLATE: &str = "---\nname:\ndepartment: development/engineering\nrole:\ndescription: >\n\ncapabilities:\n  -\npreferred_backend: claude\n---\n\n# [Agent Name]\n\nYou are the [Role] — [one sentence describing this agent's purpose].\n\n## Core Behavior\n\n1.\n2.\n3.\n\n## What You Never Do\n\n-\n";
+const CRT_SKILL_TEMPLATE: &str = "---\nname:\ndescription: >\n\ntype: skill\ndomain:\nusage: >\n\n---\n\n# [Skill Name]\n\n## Purpose\n\n\n\n## When to Use\n\n\n\n## Implementation\n\n```\n[Skill logic or instructions for the agent using this skill]\n```\n";
+const CRT_TOOL_TEMPLATE: &str = "---\nname:\ndescription: >\n\ntype: tool\ncommand:\nargs:\n  -\nrequires:\n  -\n---\n\n# [Tool Name]\n\n## Purpose\n\n\n\n## Usage\n\n```bash\n[command example]\n```\n\n## Output Format\n\n\n";
+const CRT_WORKFORCE_TEMPLATE: &str = "---\nname:\ndescription:\noperations:\n  -\n---\n\n## Agents\n\n| ID | Agent Profile | User-Facing |\n|----|---------------|-------------|\n|  |  | no |\n|  |  | yes |\n\n## Connections\n\n| From | To | Data Type |\n|------|----|----------|\n|  |  | instructions |\n";
+
+/// Shared implementation for create_agent / create_skill / create_tool / create_workflow.
+/// `kind` is one of "agent", "skill", "tool", "workflow".
+fn create_library_entry(server: &OrrchMcpServer, args: &Value, kind: &str) -> String {
+    let name = match args.get("name").and_then(|v| v.as_str()) {
+        Some(n) if !n.is_empty() => n,
+        _ => return "Error: 'name' parameter is required".into(),
+    };
+    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Sanitize name for use as a filename stem.
+    let safe_name: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+
+    let (template, subdir): (&str, &str) = match kind {
+        "agent"    => (CRT_AGENT_TEMPLATE, "agents"),
+        "skill"    => (CRT_SKILL_TEMPLATE, "library/skills"),
+        "tool"     => (CRT_TOOL_TEMPLATE, "library/tools"),
+        "workflow" => (CRT_WORKFORCE_TEMPLATE, "workforces"),
+        other      => return format!("Error: unknown kind '{other}'"),
+    };
+
+    // Inject name and optional description into the template.
+    let mut content = template.replacen("name:", &format!("name: {safe_name}"), 1);
+    if !description.is_empty() {
+        content = content.replacen("description: >", &format!("description: {description}"), 1);
+    }
+
+    let dir = server.agents_dir.parent()
+        .unwrap_or(&server.agents_dir)
+        .join(subdir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return format!("Error: could not create directory {}: {e}", dir.display());
+    }
+
+    let filename = format!("{safe_name}.md");
+    let path = dir.join(&filename);
+    if path.exists() {
+        return format!("Error: file already exists: {}", path.display());
+    }
+    match std::fs::write(&path, &content) {
+        Ok(_) => format!("Created: {}", path.display()),
+        Err(e) => format!("Error: could not write {}: {e}", path.display()),
+    }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2145,8 +2253,8 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        // 15 base tools + skill_invoke + 5 remote_* tools = 21.
-        assert_eq!(tool_definitions().len(), 21);
+        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools = 25.
+        assert_eq!(tool_definitions().len(), 25);
     }
 
     #[test]
