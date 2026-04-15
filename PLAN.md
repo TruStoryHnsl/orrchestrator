@@ -362,7 +362,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 94. [ ] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files, projects, intentions, plans, agents, skills, tools, workflows.
 
-95. [ ] **OPT-015: Publish page plan** — Detailed plan for Phase 9 (Publish panel). Covers: release packaging, version tagging, changelog, platform distribution, license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback.
+95. [x] **OPT-015: Publish page plan** — Detailed plan for Phase 9 (Publish panel). Covers: release packaging, version tagging, changelog, platform distribution, license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback.
 
 96. [x] **OPT-016: Expand the Analyze page with comprehensive metrics** — Token usage per project/session/step/agent, cost breakdown, session throughput, agent performance, error frequency, workflow efficiency, project velocity, historical trends.
 
@@ -370,15 +370,15 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 98. [x] **Publish panel skeleton** — Add `Publish` as a top-level panel. Sub-tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab.
 
-99. [ ] **Release packaging engine** — Build artifacts for the selected project: cargo build, pip wheel, npm pack, Docker image, platform-specific archives. Configurable per-project build matrix in `.orrch/publish.toml`.
+99. [x] **Release packaging engine** — Build artifacts for the selected project: cargo build, pip wheel, npm pack, Docker image, platform-specific archives. Configurable per-project build matrix in `.orrch/publish.toml`.
 
-100. [ ] **Version tagging and changelog generation** — Integrate with `/release` flow: bump version (SemVer), generate CHANGELOG.md entries from conventional commits since last tag, create annotated git tag. Preview changelog in TUI before confirming.
+100. [x] **Version tagging and changelog generation** — Integrate with `/release` flow: bump version (SemVer), generate CHANGELOG.md entries from conventional commits since last tag, create annotated git tag. Preview changelog in TUI before confirming.
 
 101. [ ] **Platform distribution** — Publish to target platforms: crates.io, PyPI, npm, Docker Hub, GitHub Releases, AUR, Homebrew, Flathub. Distribution tab shows per-platform publish status.
 
-102. [ ] **License compliance audit** — Invoke Licensing Auditor agent. Report: dependency tree with license per dep, flagged conflicts, missing licenses, SPDX identifiers. Display in Compliance tab. Block publish if critical conflicts detected.
+102. [x] **License compliance audit** — Invoke Licensing Auditor agent. Report: dependency tree with license per dep, flagged conflicts, missing licenses, SPDX identifiers. Display in Compliance tab. Block publish if critical conflicts detected.
 
-103. [ ] **Copyright verification** — Invoke Copyright Investigator agent. Verify source file headers, attribution, trademark conflicts. Report in Compliance tab.
+103. [x] **Copyright verification** — Invoke Copyright Investigator agent. Verify source file headers, attribution, trademark conflicts. Report in Compliance tab.
 
 104. [x] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type. Displayed in Publish > Packaging tab.
 
