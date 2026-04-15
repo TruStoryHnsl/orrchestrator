@@ -317,6 +317,11 @@ impl Project {
         self.roadmap.iter().filter(|r| !r.done()).collect()
     }
 
+    /// OPT-007: True when the project has a non-empty roadmap and every item is done.
+    pub fn roadmap_complete(&self) -> bool {
+        !self.roadmap.is_empty() && self.roadmap.iter().all(|r| r.done())
+    }
+
     pub fn next_priority(&self) -> Option<&RoadmapItem> {
         self.roadmap.iter().find(|r| !r.done())
     }

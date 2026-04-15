@@ -178,7 +178,7 @@ pub fn spawn_tmux_session(
     spawn_in_category(SessionCategory::Dev, session_name, &shell_cmd)
 }
 
-/// Spawn a vim editing session in the Edit category.
+/// Spawn an nvim editing session in the Edit category.
 pub fn spawn_vim_in_tmux(file_path: &Path, window_name: &str) -> anyhow::Result<String> {
     let cmd = format!("nvim {}", shell_escape(&file_path.to_string_lossy()));
     spawn_in_category(SessionCategory::Edit, window_name, &cmd)

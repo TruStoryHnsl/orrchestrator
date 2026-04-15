@@ -38,7 +38,7 @@ pub struct IntakeReview {
     /// idea's pipeline progress when the user confirms/rejects.
     pub source_idea: Option<String>,
     /// Directory containing the review.json file. The TUI writes scratch
-    /// files (e.g. the vim edit buffer) here, never into the project tree.
+    /// files (e.g. the nvim edit buffer) here, never into the project tree.
     pub workspace: PathBuf,
     /// Path to the review.json file itself.
     pub source_path: PathBuf,
