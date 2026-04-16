@@ -398,6 +398,22 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 ---
 
+### UI/UX Optimization Sprint (from Instruction Inbox — 2026-04-16)
+
+_OPT items queued from inbox. Source: plans/2026-04-30-07-05.md. Formally incorporated 2026-04-16._
+
+115. [ ] **OPT-001: Fix plan detection and progress ratio display** — Audit and fix the plan detection protocol in the Oversee panel. For every project, scan its PLAN.md (and any other recognized plan files) to count total planned features vs completed features. Display as a ratio (e.g. "12/34") on the project row. Ensure detection runs for ALL projects — current implementation is inconsistent and misses most projects.
+
+116. [ ] **OPT-002: Fix or remove the "Q: #" counter display** — Investigate what the gold "Q: #" value in the Oversee panel represents (queued prompts? sessions? inbox items?). If it maps to something meaningful, make the label self-explanatory (e.g. "Queued: 3 tasks"). If it cannot be made clearly meaningful, remove it entirely.
+
+117. [ ] **OPT-003: Make project details roadmap list scrollable** — In the Oversee > project details panel, the roadmap list must scroll when content exceeds the visible area. Currently the cursor moves off-screen without the list scrolling. Fix scroll so the selected item is always visible.
+
+118. [ ] **OPT-004: Add section-level focus control to project details panel** — Restructure project details panel navigation. Default focus moves between the three top-level sections (Roadmap, Sessions, Files) via Up/Down. Right arrow drills into the focused section for item-level navigation. Left arrow or Escape exits back to section-level. All sections and items reachable via arrow keys only — no mouse required.
+
+119. [ ] **OPT-005: Add project logo management** — Allow the user to assign an image file as a project's logo. Store the logo path in orrchestrator's project config. Display the logo on the project details page in Oversee. Provide a way to set/change the logo from within the UI.
+
+---
+
 ### Phase 9+: PI Harness Integration
 
 112. [x] **PI-001: PI harness library entry + BackendKind** — Add `library/harnesses/pi.md` with full capabilities (multi-provider: Anthropic/Google/Mistral, RPC mode, SDK embedding, extensions, skills, custom tools, thinking levels). Add `BackendKind::Pi` to `crates/orrch-core/src/backend.rs`. Auto-detect via `which pi`. Wire into `is_provider_available()` and `send_api_message()`. `BackendConfig` command = `pi`, flags include `--no-session --mode rpc` for pipeline use and bare `pi` for interactive. Update harness loader to surface it in Design > Library > Harnesses.
@@ -598,6 +614,7 @@ _Model hierarchy, harness management, and cost-optimized workforce assignment._
 | `q` | Global | Quit |
 
 ## Recent Changes
+- 2026-04-16: **Instruction inbox refreshed — 5 new items (OPT-001 through OPT-005) routed from idea 2026-04-30-07-05 and incorporated as roadmap items 115-119.** Focus: Oversee panel plan detection ratio display, "Q: #" counter audit/removal, project details roadmap scroll, section-level focus navigation (Up/Down selects section, Right drills in), project logo management.
 - 2026-04-09: **Instruction inbox refreshed — 7 new items (INS-001 through INS-007) routed from idea 2026-04-23-20-34 and incorporated as roadmap items 74-80.** Focus: Design > Plans panel, dynamic Library/Workforce views, foundational scroll architecture, dead-keybind audit, human-readable workflow edit mode. Hard dependency flagged: INS-001 (Plans panel) requires INS-005 (automatic scroll architecture). Cross-references added: INS-005 to item 65 (responsive tab bar), INS-007 to items 21/33/34/37 (workforce editors). No structural conflicts with existing roadmap.
 - 2026-04-09: **2.0.0 roadmap closure sprint.** Closed the last 6 unchecked items on the 2.0.0 roadmap (11, 12, 15, 16, 20, 21) — all were architecturally superseded by completed Critical Path / Phase 5 / Phase 6 work. No code changes required: items 11/15/16 superseded by CP-1/CP-4/CP-5/CP-6, item 12 by item 32 (mentor_review_profile + Library wiring), item 20 by CP-5 (live agent tree polling .orrch/workflow.json), item 21 by items 34 + 37 (Workforce > Teams tab in TUI + web node editor). 2.0.0 roadmap is now 100% complete pending Phase 8 acceptance.
 - 2026-04-09: **Instruction inbox migration complete.** `crates/orrch-core/src/feedback.rs` now writes per-project `instructions_inbox.md` instead of `fb2p.md`. `append_to_fb2p` and `append_to_fb2p_direct` retained as `#[deprecated]` wrappers forwarding to `append_to_inbox`/`append_to_inbox_direct`. TUI call sites in `app.rs` (5 filesystem literals + 2 function calls + 6 comments) and `ui.rs` (1 user-visible message) updated. All 90 orrch-core tests pass; cargo build clean with no new warnings.
