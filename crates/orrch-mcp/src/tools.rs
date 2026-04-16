@@ -435,6 +435,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["workspace"]
             }
         }),
+        serde_json::json!({
+            "name": "incorporate_inbox",
+            "description": "Return a prompt for a PM agent to incorporate all pending INS-NNN / OPT-NNN items from a project's instructions_inbox.md into PLAN.md, then clear the incorporated sections and commit both files.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_dir": {
+                        "type": "string",
+                        "description": "Absolute path to the project directory containing instructions_inbox.md and PLAN.md"
+                    }
+                },
+                "required": ["project_dir"]
+            }
+        }),
     ]
 }
 
@@ -468,6 +482,7 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "create_tool" => create_library_entry(server, args, "tool"),
         "create_workflow" => create_library_entry(server, args, "workflow"),
         "continue_intake" => continue_intake(server, args),
+        "incorporate_inbox" => incorporate_inbox(args),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -785,6 +800,39 @@ fn continue_intake(server: &OrrchMcpServer, args: &Value) -> String {
          {optimized}\n\n\
          ---\n\n\
          {resolved_skill}"
+    )
+}
+
+fn incorporate_inbox(args: &Value) -> String {
+    let project_dir = match args.get("project_dir").and_then(|v| v.as_str()) {
+        Some(d) => d,
+        None => return "Error: 'project_dir' parameter is required".into(),
+    };
+
+    let inbox_path = std::path::Path::new(project_dir).join("instructions_inbox.md");
+    let inbox_content = match std::fs::read_to_string(&inbox_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read instructions_inbox.md at {}: {e}", inbox_path.display()),
+    };
+
+    // Require at least one INS- or OPT- header
+    if !inbox_content.contains("### INS-") && !inbox_content.contains("### OPT-") {
+        return "Error: instructions_inbox.md contains no pending ### INS- or ### OPT- items".into();
+    }
+
+    format!(
+        "## Incorporate inbox into plan\n\n\
+         Project: {project_dir}\n\n\
+         ## Pending inbox items\n\n\
+         {inbox_content}\n\n\
+         ## Instructions\n\n\
+         You are the Project Manager. Read PLAN.md at {project_dir}/PLAN.md.\n\
+         For each inbox item above, determine whether it extends an existing planned\n\
+         feature, modifies a prior decision, or adds something new. Update PLAN.md\n\
+         accordingly ([ ] status). Then clear the incorporated sections from\n\
+         instructions_inbox.md, leaving any un-incorporated items. Commit both files.",
+        project_dir = project_dir,
+        inbox_content = inbox_content,
     )
 }
 
@@ -2330,8 +2378,8 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools + continue_intake = 26.
-        assert_eq!(tool_definitions().len(), 26);
+        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools + continue_intake + incorporate_inbox = 27.
+        assert_eq!(tool_definitions().len(), 27);
     }
 
     #[test]
@@ -2348,6 +2396,7 @@ mod tests {
             "remote_spawn_session",
             "remote_kill_session",
             "continue_intake",
+            "incorporate_inbox",
         ] {
             assert!(
                 names.iter().any(|n| n == expected),

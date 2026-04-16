@@ -527,6 +527,7 @@ pub enum ActionKind {
     ReloadProjects,
     GitCommit,     // commit+push selected project via Claude
     GitCommitAll,  // commit+push all dirty projects via Claude
+    IntegrateInbox(usize), // integrate instructions_inbox.md into PLAN.md
     KillSession(String),
     SubmitFeedback(String),  // filename
     ResumeFeedback(String),
@@ -5032,6 +5033,8 @@ impl App {
                 items.push(ActionItem { key: 'r', label: "Reload project list".into(), action: ActionKind::ReloadProjects });
                 items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
                 items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
+                items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(self.project_selected) });
+                items.push(ActionItem { key: 'F', label: "Write project feedback".into(), action: ActionKind::WriteProjectFeedback(self.project_selected) });
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
@@ -5041,6 +5044,7 @@ impl App {
                 items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
                 items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
                 items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
+                items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(idx) });
             }
             (Panel::Design, SubView::List) => {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
@@ -5226,6 +5230,20 @@ impl App {
                 } else {
                     let names: Vec<_> = spawned.iter().map(|(n, _)| n.as_str()).collect();
                     self.notify(format!("Committing {} projects: {}", spawned.len(), names.join(", ")));
+                }
+            }
+            ActionKind::IntegrateInbox(idx) => {
+                if let Some(proj) = self.projects.get(idx) {
+                    let path = proj.path.clone();
+                    let name = proj.name.clone();
+                    let goal = format!(
+                        "Call MCP tool `mcp__orrchestrator__incorporate_inbox` with project_dir=\"{}\" to incorporate pending inbox items into PLAN.md.",
+                        path.display()
+                    );
+                    match orrch_core::git::spawn_goal_session(&path, &name, &goal) {
+                        Ok(_) => self.notify("Inbox integration session spawned".into()),
+                        Err(e) => self.notify(format!("{name}: inbox integration failed — {e}")),
+                    }
                 }
             }
             ActionKind::KillSession(sid) => { self.pm.kill_session(&sid); }

@@ -107,6 +107,52 @@ If there are no changes to commit, just say so and exit.",
     }
 }
 
+/// Spawn a Claude tmux session with an arbitrary goal string (not a git commit).
+///
+/// Used for MCP-dispatch sessions like inbox integration.
+pub fn spawn_goal_session(
+    project_dir: &Path,
+    project_name: &str,
+    goal: &str,
+) -> anyhow::Result<String> {
+    let session_name = format!("orrch-goal-{}", project_name);
+    let projects_dir = project_dir.parent().unwrap_or(project_dir);
+    let feedback_dir = projects_dir.join(".feedback");
+    std::fs::create_dir_all(&feedback_dir)?;
+
+    let prompt_path = feedback_dir.join(format!(".goal-{}.md", project_name));
+    std::fs::write(&prompt_path, goal)?;
+
+    let runner_path = feedback_dir.join(format!(".goal-{}.sh", project_name));
+    let runner = format!(
+        "#!/bin/bash\ncd {dir}\nprompt=$(cat {prompt})\nclaude --dangerously-skip-permissions \"$prompt\"\nrm -f {prompt} {runner}\n",
+        dir = project_dir.display(),
+        prompt = prompt_path.display(),
+        runner = runner_path.display(),
+    );
+    std::fs::write(&runner_path, &runner)?;
+
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", &session_name])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    let status = Command::new("tmux")
+        .args(["new-session", "-d", "-s", &session_name])
+        .arg("bash")
+        .arg(runner_path.to_string_lossy().as_ref())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(session_name),
+        Ok(s) => anyhow::bail!("tmux exited with {}", s),
+        Err(e) => anyhow::bail!("Failed to run tmux: {e}"),
+    }
+}
+
 /// Spawn commit sessions for ALL projects that have dirty git repos with remotes.
 /// Returns the list of (project_name, session_name) pairs spawned.
 pub fn spawn_commit_all(projects_dir: &Path) -> Vec<(String, String)> {
