@@ -1835,8 +1835,18 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             orrch_core::ColorTag::Green => Color::Green,
             orrch_core::ColorTag::None => TEXT_MUTED,
         };
-        let done = proj.done_count();
-        let total = proj.roadmap.len();
+        // OPT-001: prefer plan_phases counts when flat roadmap is absent
+        let (done, total) = {
+            let rd = proj.done_count();
+            let rt = proj.roadmap.len();
+            if rt > 0 {
+                (rd, rt)
+            } else {
+                let pd: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
+                let pt: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
+                (pd, pt)
+            }
+        };
         // OPT-006: show "no plan" indicator for projects without PLAN.md
         let goals_str = if total > 0 {
             format!(" {done}/{total}")
@@ -1855,7 +1865,8 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
                 if waiting > 0 { format!(" {session_count}/{max_sess}⚠") } else { format!(" {session_count}/{max_sess}▶") }
             }
         } else { String::new() };
-        let queued_str = if proj.queued_prompts > 0 { format!(" Q:{}", proj.queued_prompts) } else { String::new() };
+        // OPT-002: self-explanatory label for inbox queue count
+        let queued_str = if proj.queued_prompts > 0 { format!(" Inbox:{}", proj.queued_prompts) } else { String::new() };
 
         // OPT-013: lifecycle badge color
         let lifecycle_color = match proj.lifecycle_stage {
@@ -2180,8 +2191,9 @@ fn draw_production(frame: &mut Frame, app: &App, area: Rect) {
 // ─── Project Detail ───────────────────────────────────────────────────
 
 fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize) {
-    use crate::app::DetailFocus;
+    use crate::app::{DetailFocus, SectionCursor};
     let Some(proj) = app.projects.get(proj_idx) else { return; };
+    let in_section_select = app.detail_focus == DetailFocus::SectionSelect;
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
     let in_browser = app.detail_focus == DetailFocus::Browser;
 
@@ -2207,15 +2219,24 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     } else {
         String::new()
     };
+    // OPT-004: show nav hint in SectionSelect mode
+    let nav_hint = if in_section_select {
+        Span::styled("  ↑↓ section  → drill in", Style::default().fg(TEXT_MUTED))
+    } else {
+        Span::raw("")
+    };
     let header = Paragraph::new(Line::from(vec![
         Span::styled(&proj.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(format!("  [{}] {}/{} goals", proj.scope.badge(), proj.done_count(), proj.roadmap.len()), Style::default().fg(TEXT_DIM)),
         Span::styled(lifecycle_detail, Style::default().fg(Color::Rgb(200, 200, 100))),
+        nav_hint,
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
     // Roadmap — color-coded by feature status, scrollable via PgUp/PgDn
     let in_roadmap = app.detail_focus == crate::app::DetailFocus::Roadmap;
+    // OPT-004: highlight section header when section_cursor points here in SectionSelect mode
+    let roadmap_section_hover = in_section_select && app.section_cursor == SectionCursor::Roadmap;
     let scroll_offset = app.roadmap_scroll;
     let all_roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
         let style = feature_status_style(item.status);
@@ -2226,6 +2247,8 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     let visible_roadmap: Vec<ListItem> = all_roadmap_items.into_iter().skip(scroll_offset).collect();
     let roadmap_border = if in_roadmap {
         Style::default().fg(ACCENT)
+    } else if roadmap_section_hover {
+        Style::default().fg(CYAN)
     } else {
         Style::default().fg(TEXT_DIM)
     };
@@ -2264,7 +2287,15 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         ));
     }
 
-    let sess_border = if in_sessions { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    // OPT-004: highlight sessions section header when hovered in SectionSelect mode
+    let sess_section_hover = in_section_select && app.section_cursor == SectionCursor::Sessions;
+    let sess_border = if in_sessions {
+        Style::default().fg(ACCENT)
+    } else if sess_section_hover {
+        Style::default().fg(CYAN)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
     let sess_title = if in_sessions {
         " Sessions (Enter:brief  x:kill) "
     } else {
@@ -2351,7 +2382,15 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     }
 
     // File browser — single tree column + preview pane
-    let browser_border = if in_browser { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    // OPT-004: highlight browser section header when hovered in SectionSelect mode
+    let browser_section_hover = in_section_select && app.section_cursor == SectionCursor::Browser;
+    let browser_border = if in_browser {
+        Style::default().fg(ACCENT)
+    } else if browser_section_hover {
+        Style::default().fg(CYAN)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
     let unfocused_border = Style::default().fg(TEXT_MUTED);
 
     // Two-column split: tree (35%) | preview (65%)

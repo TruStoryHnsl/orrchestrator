@@ -396,6 +396,17 @@ impl LibrarySub {
 /// Focus within the project detail view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetailFocus {
+    /// Section-level cursor: Up/Down cycle between Roadmap/Sessions/Files headers.
+    /// Right or Enter drills into the highlighted section.
+    SectionSelect,
+    Roadmap,
+    Sessions,
+    Browser,
+}
+
+/// Which section header is highlighted in SectionSelect mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionCursor {
     Roadmap,
     Sessions,
     Browser,
@@ -612,8 +623,10 @@ pub struct App {
     pub browser_root: PathBuf,
     pub browser_preview: String,
 
-    // Detail view focus: sessions / dev map / browser
+    // Detail view focus: section-select / roadmap / sessions / browser
     pub detail_focus: DetailFocus,
+    /// Which section is highlighted when detail_focus == SectionSelect
+    pub section_cursor: SectionCursor,
 
     // Dev map (parsed Plan.md feature tree)
     pub devmap_phase_idx: usize,    // which phase is expanded (or usize::MAX for none)
@@ -928,7 +941,8 @@ impl App {
             browser_path: PathBuf::new(),
             browser_root: PathBuf::new(),
             browser_preview: String::new(),
-            detail_focus: DetailFocus::Sessions,
+            detail_focus: DetailFocus::SectionSelect,
+            section_cursor: SectionCursor::Roadmap,
             devmap_phase_idx: usize::MAX,
             devmap_selected: 0,
             dep_parent_entries: orrch_core::list_directory(&deprecated_path),
@@ -1651,6 +1665,17 @@ impl App {
             }
             SubView::ProjectDetail(pidx) => {
                 match self.detail_focus {
+                    DetailFocus::SectionSelect => {
+                        // Mouse scroll in SectionSelect: move section cursor
+                        let sections: Vec<SectionCursor> = vec![SectionCursor::Roadmap, SectionCursor::Sessions, SectionCursor::Browser];
+                        if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
+                            if delta < 0 && pos > 0 {
+                                self.section_cursor = sections[pos - 1];
+                            } else if delta > 0 && pos + 1 < sections.len() {
+                                self.section_cursor = sections[pos + 1];
+                            }
+                        }
+                    }
                     DetailFocus::Roadmap => {
                         if delta < 0 {
                             self.roadmap_selected = self.roadmap_selected.saturating_sub((-delta) as usize);
@@ -3492,11 +3517,12 @@ impl App {
                             self.session_selected = 0;
                             self.roadmap_selected = 0;
                             self.roadmap_scroll = 0;
-                            // Default focus to roadmap if it has items, else sessions
-                            self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
-                                DetailFocus::Roadmap
+                            // OPT-004: always enter SectionSelect mode
+                            self.detail_focus = DetailFocus::SectionSelect;
+                            self.section_cursor = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                                SectionCursor::Roadmap
                             } else {
-                                DetailFocus::Sessions
+                                SectionCursor::Sessions
                             };
                             if let Some(proj) = self.projects.get(idx) {
                                 self.browser_open(&proj.path.clone());
@@ -3541,10 +3567,12 @@ impl App {
                 if let Some(entry) = map.get(self.project_selected) {
                     if let ListEntry::Project(idx) = entry {
                         let idx = *idx;
-                        self.detail_focus = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
-                            DetailFocus::Roadmap
+                        // OPT-004: always enter SectionSelect mode
+                        self.detail_focus = DetailFocus::SectionSelect;
+                        self.section_cursor = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                            SectionCursor::Roadmap
                         } else {
-                            DetailFocus::Sessions
+                            SectionCursor::Sessions
                         };
                         if let Some(proj) = self.projects.get(idx) {
                             self.browser_open(&proj.path.clone());
@@ -3753,10 +3781,23 @@ impl App {
 
         // Global commands always available
         match key {
-            KeyCode::Esc => { self.sub = SubView::List; return Ok(()); }
-            // Left exits project detail when not in the file browser (where Left navigates up)
-            KeyCode::Left if self.detail_focus != DetailFocus::Browser => {
+            KeyCode::Esc => {
+                // OPT-004: Esc exits item-nav back to SectionSelect, or leaves detail entirely
+                if self.detail_focus != DetailFocus::SectionSelect {
+                    self.detail_focus = DetailFocus::SectionSelect;
+                } else {
+                    self.sub = SubView::List;
+                }
+                return Ok(());
+            }
+            // Left: from item-level nav → SectionSelect; from SectionSelect → back to list
+            KeyCode::Left if self.detail_focus == DetailFocus::SectionSelect => {
                 self.sub = SubView::List; return Ok(());
+            }
+            KeyCode::Left if self.detail_focus != DetailFocus::Browser => {
+                // Exit item-level nav back to section-select
+                self.detail_focus = DetailFocus::SectionSelect;
+                return Ok(());
             }
             KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
             KeyCode::Char('f') | KeyCode::Char('e') => {
@@ -3804,14 +3845,15 @@ impl App {
                 return Ok(());
             }
             KeyCode::Tab => {
-                // Cycle focus: Roadmap → Sessions → Browser → Roadmap
+                // Cycle focus: SectionSelect → Roadmap → Sessions → Browser → SectionSelect
                 let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
-                    DetailFocus::Roadmap => DetailFocus::Sessions,
-                    DetailFocus::Sessions => DetailFocus::Browser,
-                    DetailFocus::Browser => {
+                    DetailFocus::SectionSelect => {
                         if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
                     }
+                    DetailFocus::Roadmap => DetailFocus::Sessions,
+                    DetailFocus::Sessions => DetailFocus::Browser,
+                    DetailFocus::Browser => DetailFocus::SectionSelect,
                 };
                 return Ok(());
             }
@@ -3819,13 +3861,15 @@ impl App {
         }
 
         match self.detail_focus {
+            DetailFocus::SectionSelect => self.key_section_select(key, proj_idx),
             DetailFocus::Roadmap => self.key_detail_roadmap(key, proj_idx),
             DetailFocus::Sessions => self.key_detail_sessions(key, proj_idx),
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
-                // Up at top of browser: switch to sessions
+                // Up at top of browser: switch to SectionSelect
                 if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
-                    self.detail_focus = DetailFocus::Sessions;
+                    self.detail_focus = DetailFocus::SectionSelect;
+                    self.section_cursor = SectionCursor::Browser;
                     return Ok(());
                 }
                 self.key_browser_in_detail(key, proj_idx)
@@ -3833,17 +3877,56 @@ impl App {
         }
     }
 
+    /// OPT-004: Section-level cursor navigation in project detail.
+    fn key_section_select(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
+        let sections: Vec<SectionCursor> = if has_roadmap {
+            vec![SectionCursor::Roadmap, SectionCursor::Sessions, SectionCursor::Browser]
+        } else {
+            vec![SectionCursor::Sessions, SectionCursor::Browser]
+        };
+        match key {
+            KeyCode::Up => {
+                if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
+                    if pos > 0 {
+                        self.section_cursor = sections[pos - 1];
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
+                    if pos + 1 < sections.len() {
+                        self.section_cursor = sections[pos + 1];
+                    }
+                }
+            }
+            KeyCode::Right | KeyCode::Enter => {
+                // Drill into the highlighted section
+                self.detail_focus = match self.section_cursor {
+                    SectionCursor::Roadmap => DetailFocus::Roadmap,
+                    SectionCursor::Sessions => DetailFocus::Sessions,
+                    SectionCursor::Browser => DetailFocus::Browser,
+                };
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn key_detail_roadmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         let roadmap_len = self.projects.get(proj_idx).map(|p| p.roadmap.len()).unwrap_or(0);
         if roadmap_len == 0 {
-            self.detail_focus = DetailFocus::Sessions;
+            self.detail_focus = DetailFocus::SectionSelect;
+            self.section_cursor = SectionCursor::Sessions;
             return Ok(());
         }
 
         match key {
             KeyCode::Up => {
                 if self.roadmap_selected == 0 {
-                    // Already at top — stay
+                    // At top of roadmap → back to SectionSelect
+                    self.detail_focus = DetailFocus::SectionSelect;
+                    self.section_cursor = SectionCursor::Roadmap;
                 } else {
                     self.roadmap_selected = self.roadmap_selected.saturating_sub(1);
                 }
@@ -3852,8 +3935,9 @@ impl App {
                 if self.roadmap_selected + 1 < roadmap_len {
                     self.roadmap_selected += 1;
                 } else {
-                    // Past last roadmap item → move to sessions
-                    self.detail_focus = DetailFocus::Sessions;
+                    // Past last roadmap item → back to SectionSelect (OPT-004)
+                    self.detail_focus = DetailFocus::SectionSelect;
+                    self.section_cursor = SectionCursor::Roadmap;
                 }
             }
             KeyCode::Char('s') => {
@@ -3918,9 +4002,18 @@ impl App {
             }
             _ => {}
         }
-        // Keep scroll in sync with selection
+        // OPT-003: keep scroll in sync with selection (both directions)
+        // Visible height = min(roadmap_len, 12) - 2 border rows, minimum 1
+        let visible_height = roadmap_len.min(12).saturating_sub(2).max(1);
         if self.roadmap_selected < self.roadmap_scroll {
             self.roadmap_scroll = self.roadmap_selected;
+        } else if self.roadmap_selected >= self.roadmap_scroll + visible_height {
+            self.roadmap_scroll = self.roadmap_selected + 1 - visible_height;
+        }
+        // Clamp scroll
+        let max_scroll = roadmap_len.saturating_sub(1);
+        if self.roadmap_scroll > max_scroll {
+            self.roadmap_scroll = max_scroll;
         }
         Ok(())
     }
@@ -3934,8 +4027,9 @@ impl App {
         match key {
             KeyCode::Up => {
                 if self.session_selected == 0 {
-                    // At top of sessions → move to roadmap
-                    self.detail_focus = DetailFocus::Roadmap;
+                    // At top of sessions → back to SectionSelect (OPT-004)
+                    self.detail_focus = DetailFocus::SectionSelect;
+                    self.section_cursor = SectionCursor::Sessions;
                     self.session_detail_expanded = false;
                 } else {
                     self.session_selected = self.session_selected.saturating_sub(1);
