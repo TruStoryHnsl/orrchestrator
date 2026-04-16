@@ -1,9 +1,6 @@
 {
-  "progress": 55,
-  "targets": ["borrk"],
+  "progress": 30,
+  "targets": [],
   "package_name": null,
-  "submitted_at": 1775817091,
-  "routed_at": 1775820000,
-  "routed_to": "borrk/instructions_inbox.md",
-  "plan_created": "borrk/PLAN.md"
+  "submitted_at": 1776303556
 }

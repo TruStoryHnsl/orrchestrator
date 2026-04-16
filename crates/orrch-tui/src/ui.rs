@@ -91,6 +91,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         SubView::RenameProject(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Project"); }
         SubView::RenamePlanFeature { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Plan Feature"); }
+        SubView::SteerSession(idx) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_steer_session_input(frame, app, idx);
+        }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -1853,16 +1857,9 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         } else { String::new() };
         let queued_str = if proj.queued_prompts > 0 { format!(" Q:{}", proj.queued_prompts) } else { String::new() };
 
-        // 90c: temperature badge
-        let (temp_badge, temp_color) = match proj.temperature {
-            orrch_core::Temperature::Hot => ("[H]", Color::Rgb(255, 120, 60)),
-            orrch_core::Temperature::Cold => ("[C]", Color::Rgb(80, 140, 220)),
-            orrch_core::Temperature::Ignored => ("[I]", TEXT_MUTED),
-        };
         let mut lines = vec![Line::from(vec![
             Span::styled(proj.color_tag.icon(), Style::default().fg(tag_color)),
             Span::styled(format!(" {}", proj.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" {}", temp_badge), Style::default().fg(temp_color)),
             Span::styled(format!(" [{}]", proj.scope.badge()), Style::default().fg(CYAN)),
             Span::styled(goals_str, Style::default().fg(
                 if done == total && total > 0 { GREEN }
@@ -2679,11 +2676,19 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
 
-            // Show up to 2 recent output lines underneath
+            // Show recent output lines with line-wrapping so text is not cut off
+            let indent = "      ";
+            let wrap_width = (area.width as usize).saturating_sub(indent.len() + 2).max(20);
             for output_line in s.last_output.lines().take(2) {
-                if !output_line.trim().is_empty() {
+                let trimmed = output_line.trim();
+                if trimmed.is_empty() { continue; }
+                // Wrap the line at wrap_width
+                let mut remaining = trimmed;
+                while !remaining.is_empty() {
+                    let chunk: String = remaining.chars().take(wrap_width).collect();
+                    remaining = &remaining[chunk.len().min(remaining.len())..];
                     lines.push(Line::styled(
-                        format!("      {}", output_line),
+                        format!("{indent}{chunk}"),
                         Style::default().fg(TEXT_MUTED),
                     ));
                 }
@@ -3426,6 +3431,34 @@ fn draw_confirm_kill_session(frame: &mut Frame, name: &str) {
     );
 }
 
+// ─── Steer session input popup ───────────────────────────────────────
+
+fn draw_steer_session_input(frame: &mut Frame, app: &App, session_idx: usize) {
+    let session_name = app.managed_sessions.get(session_idx)
+        .map(|s| s.name.as_str())
+        .unwrap_or("session");
+    let popup = centered_popup(frame.area(), 70, 5);
+    frame.render_widget(Clear, popup);
+    let cursor_buf = format!("{}_", app.steer_buf);
+    let lines = vec![
+        Line::styled(
+            format!("Send to '{session_name}'"),
+            Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+        Line::styled(cursor_buf, Style::default().fg(TEXT)),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .title(" Send Input ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
+        ),
+        popup,
+    );
+}
+
 // ─── Status Bar ───────────────────────────────────────────────────────
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -3509,7 +3542,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             let has_sessions = !app.managed_sessions.is_empty();
             if has_sessions {
                 hint_line(&[
-                    ("Enter", "focus"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
+                    ("Enter", "focus"), ("i", "send input"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
                 ])
             } else {
                 hint_line(&[
@@ -3517,6 +3550,9 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 ])
             }
         }
+        (_, SubView::SteerSession(_)) => hint_line(&[
+            ("Enter", "send"), ("Esc", "cancel"),
+        ]),
         // Feedback hints are now part of the Design panel
         (_, SubView::ProjectDetail(_)) => hint_line(&[
             ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
