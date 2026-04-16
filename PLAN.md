@@ -402,13 +402,13 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 _OPT items queued from inbox. Source: plans/2026-04-30-07-05.md. Formally incorporated 2026-04-16._
 
-115. [ ] **OPT-001: Fix plan detection and progress ratio display** — Audit and fix the plan detection protocol in the Oversee panel. For every project, scan its PLAN.md (and any other recognized plan files) to count total planned features vs completed features. Display as a ratio (e.g. "12/34") on the project row. Ensure detection runs for ALL projects — current implementation is inconsistent and misses most projects.
+115. [x] **OPT-001: Fix plan detection and progress ratio display** — Audit and fix the plan detection protocol in the Oversee panel. For every project, scan its PLAN.md (and any other recognized plan files) to count total planned features vs completed features. Display as a ratio (e.g. "12/34") on the project row. Ensure detection runs for ALL projects — current implementation is inconsistent and misses most projects.
 
-116. [ ] **OPT-002: Fix or remove the "Q: #" counter display** — Investigate what the gold "Q: #" value in the Oversee panel represents (queued prompts? sessions? inbox items?). If it maps to something meaningful, make the label self-explanatory (e.g. "Queued: 3 tasks"). If it cannot be made clearly meaningful, remove it entirely.
+116. [x] **OPT-002: Fix or remove the "Q: #" counter display** — Investigate what the gold "Q: #" value in the Oversee panel represents (queued prompts? sessions? inbox items?). If it maps to something meaningful, make the label self-explanatory (e.g. "Queued: 3 tasks"). If it cannot be made clearly meaningful, remove it entirely.
 
-117. [ ] **OPT-003: Make project details roadmap list scrollable** — In the Oversee > project details panel, the roadmap list must scroll when content exceeds the visible area. Currently the cursor moves off-screen without the list scrolling. Fix scroll so the selected item is always visible.
+117. [x] **OPT-003: Make project details roadmap list scrollable** — In the Oversee > project details panel, the roadmap list must scroll when content exceeds the visible area. Currently the cursor moves off-screen without the list scrolling. Fix scroll so the selected item is always visible.
 
-118. [ ] **OPT-004: Add section-level focus control to project details panel** — Restructure project details panel navigation. Default focus moves between the three top-level sections (Roadmap, Sessions, Files) via Up/Down. Right arrow drills into the focused section for item-level navigation. Left arrow or Escape exits back to section-level. All sections and items reachable via arrow keys only — no mouse required.
+118. [x] **OPT-004: Add section-level focus control to project details panel** — Restructure project details panel navigation. Default focus moves between the three top-level sections (Roadmap, Sessions, Files) via Up/Down. Right arrow drills into the focused section for item-level navigation. Left arrow or Escape exits back to section-level. All sections and items reachable via arrow keys only — no mouse required.
 
 119. [ ] **OPT-005: Add project logo management** — Allow the user to assign an image file as a project's logo. Store the logo path in orrchestrator's project config. Display the logo on the project details page in Oversee. Provide a way to set/change the logo from within the UI.
 
