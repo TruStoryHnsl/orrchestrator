@@ -77,28 +77,19 @@ impl PipelineState {
 
     /// Compute the display color as (r, g, b) based on the 100-step gradient.
     ///
-    /// 0-4: default text color (no change)
-    /// 5: harsh transition to maximum yellow
-    /// 5-50: gradient from yellow back to default
-    /// 50: default (instructions in inboxes)
-    /// 50-100: gradient from default to green
+    /// 0-4: default text color (unsubmitted)
+    /// 5-99: linear gradient from yellow (submitted, nothing implemented) to green (fully implemented)
     /// 100: maximum green
     pub fn gradient_color(&self, default: (u8, u8, u8), yellow: (u8, u8, u8), green: (u8, u8, u8)) -> (u8, u8, u8) {
         let p = self.progress;
         if p < 5 {
             default
-        } else if p == 5 {
-            yellow
-        } else if p <= 50 {
-            // Gradient from yellow (5) to default (50)
-            let t = (p - 5) as f64 / 45.0; // 0.0 at p=5, 1.0 at p=50
-            lerp_color(yellow, default, t)
-        } else if p < 100 {
-            // Gradient from default (50) to green (100)
-            let t = (p - 50) as f64 / 50.0; // 0.0 at p=50, 1.0 at p=100
-            lerp_color(default, green, t)
-        } else {
+        } else if p >= 100 {
             green
+        } else {
+            // 5-99: linear yellow→green
+            let t = (p - 5) as f64 / 95.0; // 0.0 at p=5, ~1.0 at p=100
+            lerp_color(yellow, green, t)
         }
     }
 }
@@ -418,10 +409,12 @@ mod tests {
     }
 
     #[test]
-    fn test_gradient_back_to_default_at_50() {
+    fn test_gradient_yellow_at_50() {
+        // p=50 = intake complete, nothing implemented yet — should still be yellow-ish
         let state = PipelineState { progress: 50, ..Default::default() };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
-        assert_eq!(color, (200, 200, 220));
+        // Roughly halfway yellow→green: r between yellow(255) and green(80), but closer to yellow
+        assert!(color.0 > 150, "r={} should be closer to yellow", color.0);
     }
 
     #[test]
@@ -432,11 +425,11 @@ mod tests {
     }
 
     #[test]
-    fn test_gradient_midpoint_yellow_to_default() {
-        let state = PipelineState { progress: 27, ..Default::default() }; // ~halfway 5-50
+    fn test_gradient_midpoint_yellow_to_green() {
+        let state = PipelineState { progress: 52, ..Default::default() }; // ~halfway 5-100
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
-        // Should be roughly between yellow and default
-        assert!(color.0 > 200 && color.0 < 255);
+        // Should be between yellow and green
+        assert!(color.0 > 80 && color.0 < 255);
     }
 
     #[test]
