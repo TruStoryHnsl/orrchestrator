@@ -279,6 +279,8 @@ pub struct Project {
     pub max_sessions: usize,
     /// OPT-013: lifecycle stage. Persisted as `.orrlifecycle`.
     pub lifecycle_stage: LifecycleStage,
+    /// OPT-005: optional logo file path. Persisted as `.orrlogo`.
+    pub logo_path: Option<String>,
 }
 
 impl Project {
@@ -315,6 +317,7 @@ impl Project {
         let agent_profile = load_agent_profile(path);
         let max_sessions = load_max_sessions(path);
         let lifecycle_stage = load_lifecycle_stage(path);
+        let logo_path = load_logo_path(path);
         let is_hyperfolder = name == "admin";
 
         let sub_projects = if is_hyperfolder {
@@ -341,6 +344,7 @@ impl Project {
             agent_profile,
             max_sessions,
             lifecycle_stage,
+            logo_path,
         }
     }
 
@@ -438,6 +442,15 @@ impl Project {
             let _ = std::fs::remove_file(path);
         } else {
             let _ = std::fs::write(path, self.lifecycle_stage.label());
+        }
+    }
+
+    /// OPT-005: Persist logo_path to `.orrlogo`. None removes the file.
+    pub fn save_logo_path(&self) {
+        let path = self.path.join(".orrlogo");
+        match self.logo_path.as_deref() {
+            None => { let _ = std::fs::remove_file(path); }
+            Some(p) => { let _ = std::fs::write(path, p.trim()); }
         }
     }
 
@@ -703,6 +716,14 @@ fn load_lifecycle_stage(path: &Path) -> LifecycleStage {
     } else {
         LifecycleStage::Active
     }
+}
+
+/// OPT-005: read `.orrlogo` at the project root. Returns None when absent.
+fn load_logo_path(path: &Path) -> Option<String> {
+    let file = path.join(".orrlogo");
+    let contents = std::fs::read_to_string(file).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
 }
 
 fn load_color_tag(path: &Path) -> ColorTag {
