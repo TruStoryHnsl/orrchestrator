@@ -264,9 +264,9 @@ pub enum DesignSub {
 impl DesignSub {
     pub const ALL: [DesignSub; 4] = [
         DesignSub::Intentions,
-        DesignSub::Plans,
         DesignSub::Workforce,
         DesignSub::Library,
+        DesignSub::Plans,
     ];
 
     pub fn label(&self) -> &'static str {
