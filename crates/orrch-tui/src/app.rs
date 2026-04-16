@@ -252,6 +252,8 @@ pub enum SubView {
     RenamePlanFeature { phase_idx: usize, feat_idx: usize },
     /// Text input to steer a session (send keys). Carries flat session index.
     SteerSession(usize),
+    /// OPT-005: text input for setting a project logo path. Carries project index.
+    SetLogoPath(usize),
 }
 
 /// Sub-panels within the Design panel.
@@ -822,6 +824,9 @@ pub struct App {
 
     // Steer input buffer — text typed into the Hypervise steer input box
     pub steer_buf: String,
+
+    /// OPT-005: input buffer for the SetLogoPath popup
+    pub logo_path_input: String,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1037,6 +1042,7 @@ impl App {
             rollback_advisory: None,
             session_detail_expanded: false,
             steer_buf: String::new(),
+            logo_path_input: String::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1817,7 +1823,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::SteerSession(_)) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -1950,6 +1956,7 @@ impl App {
                 self.key_rename_plan_feature(key, pi, fi)
             }
             SubView::SteerSession(idx) => { let idx = *idx; self.key_steer_session(key, idx) }
+            SubView::SetLogoPath(idx) => { let idx = *idx; self.key_set_logo_path(key, idx) }
         }
     }
 
@@ -3800,6 +3807,13 @@ impl App {
                 return Ok(());
             }
             KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
+            KeyCode::Char('L') => {
+                // OPT-005: open logo path input popup
+                let current = self.projects.get(proj_idx).and_then(|p| p.logo_path.clone()).unwrap_or_default();
+                self.logo_path_input = current;
+                self.sub = SubView::SetLogoPath(proj_idx);
+                return Ok(());
+            }
             KeyCode::Char('f') | KeyCode::Char('e') => {
                 self.request_vim(VimKind::ProjectFeedback(proj_idx));
                 return Ok(());
@@ -5463,6 +5477,35 @@ impl App {
             }
             KeyCode::Backspace => { self.steer_buf.pop(); }
             KeyCode::Char(c) => { self.steer_buf.push(c); }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ─── OPT-005: Set Logo Path ──────────────────────────────────
+
+    fn key_set_logo_path(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Esc => {
+                self.sub = SubView::ProjectDetail(proj_idx);
+            }
+            KeyCode::Enter => {
+                let input = self.logo_path_input.trim().to_string();
+                if let Some(proj) = self.projects.get_mut(proj_idx) {
+                    proj.logo_path = if input.is_empty() { None } else { Some(input.clone()) };
+                    proj.save_logo_path();
+                    let msg = if input.is_empty() {
+                        format!("{}: logo cleared", proj.name)
+                    } else {
+                        format!("{}: logo set", proj.name)
+                    };
+                    self.notify(msg);
+                }
+                self.logo_path_input.clear();
+                self.sub = SubView::ProjectDetail(proj_idx);
+            }
+            KeyCode::Backspace => { self.logo_path_input.pop(); }
+            KeyCode::Char(c) => { self.logo_path_input.push(c); }
             _ => {}
         }
         Ok(())
