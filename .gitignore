@@ -52,3 +52,10 @@ instructions_inbox.md
 .bugfix-analysis.md
 mempalace.yaml
 entities.json
+
+# Temp/generated files
+.orrtemp
+workforces/new_workforce_*.md
+plans/.pipeline/*.md.json
+plans/.pipeline/*/
+\
