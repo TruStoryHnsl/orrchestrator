@@ -358,7 +358,7 @@ _OPT and TOK items queued from inbox. Source: plans/2026-04-24-09-03.md and subs
 
 92. [x] **OPT-012: Tmux session management overhaul** — Tab naming: `<project>:<short-goal>`. Window splitting support. Custom tmux config shipped at `config/tmux.conf`. Do NOT use system tmux config.
 
-93. [ ] **OPT-013: Project classification and lifecycle tools** — Tools to classify projects by lifecycle stage (active, maintenance, archived, deprecated) and surface appropriate actions per stage.
+93. [x] **OPT-013: Project classification and lifecycle tools** — Tools to classify projects by lifecycle stage (active, maintenance, archived, deprecated) and surface appropriate actions per stage.
 
 94. [x] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files ✓, projects ✓, intentions ✓, plans ✓, agents ✓, skills ✓, tools ✓, workflows ✓.
 
