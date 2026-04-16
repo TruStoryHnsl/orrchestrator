@@ -250,6 +250,8 @@ pub enum SubView {
     RenameProject(usize),
     /// Inline rename for a plan feature (94d).
     RenamePlanFeature { phase_idx: usize, feat_idx: usize },
+    /// Text input to steer a session (send keys). Carries flat session index.
+    SteerSession(usize),
 }
 
 /// Sub-panels within the Design panel.
@@ -803,6 +805,9 @@ pub struct App {
 
     // 90e: whether the selected session row in ProjectDetail > Sessions is expanded
     pub session_detail_expanded: bool,
+
+    // Steer input buffer — text typed into the Hypervise steer input box
+    pub steer_buf: String,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1016,6 +1021,7 @@ impl App {
             rename_buffer: String::new(),
             rollback_advisory: None,
             session_detail_expanded: false,
+            steer_buf: String::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1785,7 +1791,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. }) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::SteerSession(_)) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -1917,6 +1923,7 @@ impl App {
                 let (pi, fi) = (*phase_idx, *feat_idx);
                 self.key_rename_plan_feature(key, pi, fi)
             }
+            SubView::SteerSession(idx) => { let idx = *idx; self.key_steer_session(key, idx) }
         }
     }
 
@@ -5309,6 +5316,36 @@ impl App {
                     self.sub = SubView::ConfirmKillSession(name);
                 }
             }
+            KeyCode::Char('i') => {
+                // Open steer input for the selected session
+                self.steer_buf.clear();
+                self.sub = SubView::SteerSession(self.session_tab_selected);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_steer_session(&mut self, key: KeyCode, session_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Enter => {
+                let text = self.steer_buf.trim().to_string();
+                if !text.is_empty() {
+                    if let Some(s) = self.managed_sessions.get(session_idx) {
+                        let cat = s.category;
+                        let idx = s.index;
+                        orrch_core::windows::send_keys_to_session(cat, idx, &text);
+                        self.notify(format!("Sent to {}: {}", s.name, text));
+                    }
+                }
+                self.steer_buf.clear();
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => { self.steer_buf.pop(); }
+            KeyCode::Char(c) => { self.steer_buf.push(c); }
             _ => {}
         }
         Ok(())

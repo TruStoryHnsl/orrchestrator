@@ -618,6 +618,18 @@ pub fn kill_session(cat: SessionCategory, window_name: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Send a line of text to a managed session's pane via tmux send-keys.
+/// The text is sent followed by Enter so the session receives it as a command/prompt.
+pub fn send_keys_to_session(cat: SessionCategory, window_index: u32, text: &str) -> bool {
+    let target = format!("{}:{}", cat.tmux_name(), window_index);
+    Command::new("tmux")
+        .args(["send-keys", "-t", &target, text, "Enter"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 // ─── Kill All Managed Sessions ──────────────────────────────────────
 
 /// Kill all managed tmux sessions. Best-effort — logs failures but does not panic.
