@@ -7,7 +7,7 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use orrch_core::{Project, SessionState, FeedbackStatus};
+use orrch_core::{LifecycleStage, Project, SessionState, FeedbackStatus};
 use crate::app::{App, IntakeReviewFocus, Panel, SubView};
 use crate::markdown::markdown_to_lines;
 
@@ -1857,10 +1857,25 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         } else { String::new() };
         let queued_str = if proj.queued_prompts > 0 { format!(" Q:{}", proj.queued_prompts) } else { String::new() };
 
+        // OPT-013: lifecycle badge color
+        let lifecycle_color = match proj.lifecycle_stage {
+            LifecycleStage::Active => GREEN,
+            LifecycleStage::Maintenance => WAITING_COLOR,
+            LifecycleStage::Archived => TEXT_MUTED,
+            LifecycleStage::Deprecated => Color::Rgb(200, 80, 80),
+        };
+        // Only show badge for non-active stages to avoid clutter
+        let lifecycle_span = if proj.lifecycle_stage != LifecycleStage::Active {
+            Span::styled(format!(" [{}]", proj.lifecycle_stage.badge()), Style::default().fg(lifecycle_color))
+        } else {
+            Span::raw("")
+        };
+
         let mut lines = vec![Line::from(vec![
             Span::styled(proj.color_tag.icon(), Style::default().fg(tag_color)),
             Span::styled(format!(" {}", proj.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
             Span::styled(format!(" [{}]", proj.scope.badge()), Style::default().fg(CYAN)),
+            lifecycle_span,
             Span::styled(goals_str, Style::default().fg(
                 if done == total && total > 0 { GREEN }
                 else if !proj.has_plan && total == 0 { TEXT_MUTED }
@@ -2186,10 +2201,16 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
 
     let browser_slot = 3;
 
-    // Header
+    // Header — OPT-013: show lifecycle stage when not Active
+    let lifecycle_detail = if proj.lifecycle_stage != LifecycleStage::Active {
+        format!("  [{}]", proj.lifecycle_stage.label())
+    } else {
+        String::new()
+    };
     let header = Paragraph::new(Line::from(vec![
         Span::styled(&proj.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(format!("  [{}] {}/{} goals", proj.scope.badge(), proj.done_count(), proj.roadmap.len()), Style::default().fg(TEXT_DIM)),
+        Span::styled(lifecycle_detail, Style::default().fg(Color::Rgb(200, 200, 100))),
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
@@ -3503,6 +3524,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             } else {
                 hint_line(&[
                     ("→/Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
+                    ("l", "lifecycle"),
                     ("|", ""),
                     ("↑↓", "select"), ("q", "quit"),
                 ])

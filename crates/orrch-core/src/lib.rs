@@ -33,7 +33,7 @@ pub use pi_rpc::{PiRpcSession, PiEvent};
 pub use process_manager::ProcessManager;
 pub use plan_parser::{parse_plan, parse_status_marker, PlanPhase, PlanFeature, FeatureStatus, RemovalContext, MoveDirection, move_feature_in_plan, append_feature_to_plan, mark_verified_in_plan, rename_feature_in_plan};
 pub use diff_log::{DiffEntry, diff_log_path, append_diff, load_diffs, load_all_diffs};
-pub use project::{list_directory, load_deprecated, load_projects, package_as_v1, update_feature_status_in_plan, ColorTag, DirEntry, Project, ProjectMeta, RoadmapItem, Scope, Temperature};
+pub use project::{list_directory, load_deprecated, load_projects, package_as_v1, update_feature_status_in_plan, ColorTag, DirEntry, LifecycleStage, Project, ProjectMeta, RoadmapItem, Scope, Temperature};
 pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_class};
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
