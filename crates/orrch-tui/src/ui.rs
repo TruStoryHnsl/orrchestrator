@@ -95,6 +95,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_panel_content(frame, app, layout[1]);
             draw_steer_session_input(frame, app, idx);
         }
+        SubView::SetLogoPath(idx) => {
+            draw_project_detail(frame, app, layout[1], idx);
+            draw_set_logo_path(frame, app);
+        }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -2225,10 +2229,17 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     } else {
         Span::raw("")
     };
+    // OPT-005: append logo path span when set
+    let logo_span = if let Some(ref lp) = proj.logo_path {
+        Span::styled(format!("  · logo:{lp}"), Style::default().fg(TEXT_MUTED))
+    } else {
+        Span::raw("")
+    };
     let header = Paragraph::new(Line::from(vec![
         Span::styled(&proj.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
         Span::styled(format!("  [{}] {}/{} goals", proj.scope.badge(), proj.done_count(), proj.roadmap.len()), Style::default().fg(TEXT_DIM)),
         Span::styled(lifecycle_detail, Style::default().fg(Color::Rgb(200, 200, 100))),
+        logo_span,
         nav_hint,
     ])).style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
@@ -3512,6 +3523,33 @@ fn draw_steer_session_input(frame: &mut Frame, app: &App, session_idx: usize) {
         Paragraph::new(lines).block(
             Block::default()
                 .title(" Send Input ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
+        ),
+        popup,
+    );
+}
+
+// ─── OPT-005: Set Logo Path Popup ─────────────────────────────────────
+
+fn draw_set_logo_path(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 70, 7);
+    frame.render_widget(Clear, popup);
+    let cursor_buf = format!("{}_", app.logo_path_input);
+    let lines = vec![
+        Line::styled("Enter file path for project logo:", Style::default().fg(TEXT_DIM)),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(ACCENT)),
+            Span::styled(&cursor_buf, Style::default().fg(TEXT)),
+        ]),
+        Line::raw(""),
+        Line::styled("Leave blank + Enter to clear.  Esc = cancel.", Style::default().fg(TEXT_MUTED)),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .title(" Set Logo Path (Enter=save  Esc=cancel) ")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
         ),

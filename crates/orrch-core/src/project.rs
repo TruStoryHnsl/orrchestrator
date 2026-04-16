@@ -1222,6 +1222,7 @@ mod tests {
             agent_profile: None,
             max_sessions: 3,
             lifecycle_stage: LifecycleStage::Active,
+            logo_path: None,
         }
     }
 
