@@ -3269,12 +3269,9 @@ impl App {
                                 // against the confirmed review.
                                 let project_dir = self.projects_dir.join("orrchestrator");
                                 let goal = format!(
-                                    "Continue intake from confirmed review at {}/review.json. \
-                                     Run skill steps 5-7: route the optimized instructions to projects, \
-                                     append them to instructions_inbox.md files, then have the PM \
-                                     incorporate them into PLAN.md. The optimized text is:\n\n{}",
+                                    "Call MCP tool `mcp__orrchestrator__continue_intake` with workspace=\"{}\" source_idea=\"{}\" to complete the instruction intake pipeline (steps 5-7: route to projects, append to inboxes, PM incorporates into PLAN.md).",
                                     workspace.display(),
-                                    optimized,
+                                    idea_filename
                                 );
                                 let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
                             }

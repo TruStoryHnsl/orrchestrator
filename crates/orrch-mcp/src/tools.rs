@@ -417,6 +417,24 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["name"]
             }
         }),
+        serde_json::json!({
+            "name": "continue_intake",
+            "description": "Continue a confirmed instruction intake session (steps 5-7): read the confirmed review.json from the workspace, embed the optimized instructions, and return the skill content for routing to projects, appending to instructions_inbox.md files, and PM incorporation into PLAN.md.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workspace": {
+                        "type": "string",
+                        "description": "Absolute path to the per-idea intake workspace directory containing review.json"
+                    },
+                    "source_idea": {
+                        "type": "string",
+                        "description": "Optional filename of the originating idea in the vault (e.g. '2026-04-21-00-14.md')"
+                    }
+                },
+                "required": ["workspace"]
+            }
+        }),
     ]
 }
 
@@ -449,6 +467,7 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "create_skill" => create_library_entry(server, args, "skill"),
         "create_tool" => create_library_entry(server, args, "tool"),
         "create_workflow" => create_library_entry(server, args, "workflow"),
+        "continue_intake" => continue_intake(server, args),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -709,6 +728,64 @@ fn instruction_intake(server: &OrrchMcpServer, args: &Value) -> String {
     );
 
     format!("{preamble}{resolved_skill}")
+}
+
+fn continue_intake(server: &OrrchMcpServer, args: &Value) -> String {
+    let workspace = match args.get("workspace").and_then(|v| v.as_str()) {
+        Some(w) => w,
+        None => return "Error: 'workspace' parameter is required".into(),
+    };
+    let source_idea = args
+        .get("source_idea")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Read and parse review.json
+    let review_path = std::path::Path::new(workspace).join("review.json");
+    let review_content = match std::fs::read_to_string(&review_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read {}: {e}", review_path.display()),
+    };
+    let review: Value = match serde_json::from_str(&review_content) {
+        Ok(v) => v,
+        Err(e) => return format!("Error: cannot parse review.json: {e}"),
+    };
+
+    // Verify confirmed status
+    let status = review.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "confirmed" {
+        return format!(
+            "Error: review.json status is '{}', expected 'confirmed'. Confirm the review in the TUI first.",
+            status
+        );
+    }
+
+    // Extract optimized instructions
+    let optimized = match review.get("optimized").and_then(|v| v.as_str()) {
+        Some(o) => o.to_string(),
+        None => return "Error: review.json missing 'optimized' field".into(),
+    };
+
+    // Load instruction-intake.md skill
+    let skill_path = server.skills_dir.join("instruction-intake.md");
+    let skill_content = match std::fs::read_to_string(&skill_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read instruction-intake.md: {e}"),
+    };
+
+    let resolved_skill = skill_content
+        .replace("{{WORKSPACE}}", workspace)
+        .replace("{{SOURCE_IDEA}}", source_idea);
+
+    format!(
+        "## Confirmed intake to distribute\n\n\
+         Workspace: {workspace}\n\
+         Source idea: {source_idea}\n\n\
+         ## Optimized instructions\n\n\
+         {optimized}\n\n\
+         ---\n\n\
+         {resolved_skill}"
+    )
 }
 
 fn workflow_status(args: &Value) -> String {
@@ -2253,8 +2330,8 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools = 25.
-        assert_eq!(tool_definitions().len(), 25);
+        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools + continue_intake = 26.
+        assert_eq!(tool_definitions().len(), 26);
     }
 
     #[test]
@@ -2270,6 +2347,7 @@ mod tests {
             "remote_list_sessions",
             "remote_spawn_session",
             "remote_kill_session",
+            "continue_intake",
         ] {
             assert!(
                 names.iter().any(|n| n == expected),
