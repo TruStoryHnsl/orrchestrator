@@ -170,6 +170,67 @@ impl ProjectMeta {
     }
 }
 
+/// OPT-013: Lifecycle stage of a project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifecycleStage {
+    /// Actively developed — new features, frequent commits.
+    Active,
+    /// Feature-complete; only bug fixes and dependency bumps.
+    Maintenance,
+    /// No longer receiving changes; preserved for reference or use.
+    Archived,
+    /// Superseded or abandoned; to be moved to deprecated/ on next cleanup.
+    Deprecated,
+}
+
+impl LifecycleStage {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Maintenance => "maintenance",
+            Self::Archived => "archived",
+            Self::Deprecated => "deprecated",
+        }
+    }
+
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::Active => "ACT",
+            Self::Maintenance => "MNT",
+            Self::Archived => "ARC",
+            Self::Deprecated => "DEP",
+        }
+    }
+
+    pub fn cycle(&self) -> Self {
+        match self {
+            Self::Active => Self::Maintenance,
+            Self::Maintenance => Self::Archived,
+            Self::Archived => Self::Deprecated,
+            Self::Deprecated => Self::Active,
+        }
+    }
+
+    /// Suggested actions appropriate for this lifecycle stage.
+    pub fn suggested_actions(&self) -> &'static [&'static str] {
+        match self {
+            Self::Active => &["continue dev", "run queued", "spawn session"],
+            Self::Maintenance => &["fix bugs", "bump deps", "review issues"],
+            Self::Archived => &["view history", "export package"],
+            Self::Deprecated => &["migrate users", "move to deprecated/"],
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "maintenance" => Self::Maintenance,
+            "archived" => Self::Archived,
+            "deprecated" => Self::Deprecated,
+            _ => Self::Active,
+        }
+    }
+}
+
 /// Whether a project is actively being worked on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Temperature {
@@ -216,6 +277,8 @@ pub struct Project {
     /// TOK-002: maximum concurrent sessions for this project.
     /// Persisted as `.max_sessions` at the project root. Defaults to 3.
     pub max_sessions: usize,
+    /// OPT-013: lifecycle stage. Persisted as `.orrlifecycle`.
+    pub lifecycle_stage: LifecycleStage,
 }
 
 impl Project {
@@ -251,6 +314,7 @@ impl Project {
         let temperature = load_temperature(path);
         let agent_profile = load_agent_profile(path);
         let max_sessions = load_max_sessions(path);
+        let lifecycle_stage = load_lifecycle_stage(path);
         let is_hyperfolder = name == "admin";
 
         let sub_projects = if is_hyperfolder {
@@ -276,6 +340,7 @@ impl Project {
             sub_projects,
             agent_profile,
             max_sessions,
+            lifecycle_stage,
         }
     }
 
@@ -332,6 +397,14 @@ impl Project {
     }
 
     pub fn default_action(&self) -> &'static str {
+        // OPT-013: lifecycle-gated actions override the roadmap-based defaults
+        match self.lifecycle_stage {
+            LifecycleStage::Maintenance => return "fix bugs",
+            LifecycleStage::Archived => return "view history",
+            LifecycleStage::Deprecated => return "migrate users",
+            LifecycleStage::Active => {} // fall through to roadmap-based logic
+        }
+
         if !self.has_plan && self.description.is_empty() {
             "create plan"
         } else if self.queued_prompts > 0 {
@@ -354,6 +427,17 @@ impl Project {
             let _ = std::fs::remove_file(path); // cold is default, no file needed
         } else {
             let _ = std::fs::write(path, self.temperature.label());
+        }
+    }
+
+    /// OPT-013: Persist the lifecycle stage to `.orrlifecycle`.
+    /// `Active` (the default) removes the file so clean projects have no extra dotfile.
+    pub fn save_lifecycle_stage(&self) {
+        let path = self.path.join(".orrlifecycle");
+        if self.lifecycle_stage == LifecycleStage::Active {
+            let _ = std::fs::remove_file(path);
+        } else {
+            let _ = std::fs::write(path, self.lifecycle_stage.label());
         }
     }
 
@@ -609,6 +693,16 @@ fn load_max_sessions(path: &Path) -> usize {
         .ok()
         .and_then(|s| s.trim().parse::<usize>().ok())
         .unwrap_or(3)
+}
+
+/// OPT-013: read `.orrlifecycle` at the project root. Defaults to Active.
+fn load_lifecycle_stage(path: &Path) -> LifecycleStage {
+    let file = path.join(".orrlifecycle");
+    if let Ok(contents) = std::fs::read_to_string(file) {
+        LifecycleStage::from_str(&contents)
+    } else {
+        LifecycleStage::Active
+    }
 }
 
 fn load_color_tag(path: &Path) -> ColorTag {

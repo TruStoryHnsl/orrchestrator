@@ -507,6 +507,7 @@ pub enum ActionKind {
     CycleTag,
     CycleScope,
     CycleTemp,      // hot/cold/ignored
+    CycleLifecycle, // OPT-013: active → maintenance → archived → deprecated
     IgnoreProject,
     DeprecateProject,
     CompleteProject,
@@ -3457,6 +3458,17 @@ impl App {
                     if let Some(m) = msg { self.notify(m); }
                 }
             }
+            KeyCode::Char('l') => {
+                // OPT-013: Cycle lifecycle stage: active → maintenance → archived → deprecated → active
+                if let Some(pidx) = self.selected_project_index() {
+                    let msg = if let Some(proj) = self.projects.get_mut(pidx) {
+                        proj.lifecycle_stage = proj.lifecycle_stage.cycle();
+                        proj.save_lifecycle_stage();
+                        Some(format!("{}: lifecycle={}", proj.name, proj.lifecycle_stage.label()))
+                    } else { None };
+                    if let Some(m) = msg { self.notify(m); }
+                }
+            }
             KeyCode::Char('i') => {
                 // Ignore (only for cold projects)
                 if let Some(pidx) = self.selected_project_index() {
@@ -4909,6 +4921,7 @@ impl App {
                 items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
                 items.push(ActionItem { key: 's', label: "Toggle hot/cold".into(), action: ActionKind::CycleTemp });
                 items.push(ActionItem { key: 'i', label: "Toggle ignored".into(), action: ActionKind::IgnoreProject });
+                items.push(ActionItem { key: 'l', label: "Cycle lifecycle stage".into(), action: ActionKind::CycleLifecycle });
                 items.push(ActionItem { key: 'D', label: "Deprecate project".into(), action: ActionKind::DeprecateProject });
                 items.push(ActionItem { key: 'C', label: "Mark complete (v1)".into(), action: ActionKind::CompleteProject });
                 items.push(ActionItem { key: 'r', label: "Reload project list".into(), action: ActionKind::ReloadProjects });
@@ -5052,6 +5065,16 @@ impl App {
                     proj.save_temperature();
                     let msg = format!("{}: {}", proj.name, proj.temperature.label());
                     self.categorize_projects();
+                    self.notify(msg);
+                }
+            }
+            ActionKind::CycleLifecycle => {
+                // OPT-013: cycle lifecycle stage for selected project
+                if let Some(pidx) = pidx {
+                    let proj = &mut self.projects[pidx];
+                    proj.lifecycle_stage = proj.lifecycle_stage.cycle();
+                    proj.save_lifecycle_stage();
+                    let msg = format!("{}: lifecycle={}", proj.name, proj.lifecycle_stage.label());
                     self.notify(msg);
                 }
             }
