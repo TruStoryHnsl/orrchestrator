@@ -410,7 +410,7 @@ _OPT items queued from inbox. Source: plans/2026-04-30-07-05.md. Formally incorp
 
 118. [x] **OPT-004: Add section-level focus control to project details panel** — Restructure project details panel navigation. Default focus moves between the three top-level sections (Roadmap, Sessions, Files) via Up/Down. Right arrow drills into the focused section for item-level navigation. Left arrow or Escape exits back to section-level. All sections and items reachable via arrow keys only — no mouse required.
 
-119. [ ] **OPT-005: Add project logo management** — Allow the user to assign an image file as a project's logo. Store the logo path in orrchestrator's project config. Display the logo on the project details page in Oversee. Provide a way to set/change the logo from within the UI.
+119. [x] **OPT-005: Add project logo management** — Allow the user to assign an image file as a project's logo. Store the logo path in orrchestrator's project config. Display the logo on the project details page in Oversee. Provide a way to set/change the logo from within the UI.
 
 ---
 
