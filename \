@@ -1,0 +1,13 @@
+BORRK - Plan Additions
+
+- The point here is to be a banking app for smart people. 
+- I want full stripe integration
+- I want interest reports and projections on credit lines
+- Configurable graphs and charts
+- stock portfolio tracking
+- Crypto tracking and wallet management
+- wallet management
+- Privacy.com integrations to create and track temporary limited cards
+- Automated insurance appraisal. I want to integrate an SMTP server that can send emails to insurance brokers inquiring about prices. Then theyll report the reponses, and Ill get the best price. 
+- The same should go for all bills like phone bill, internet, gas, electricity, entertainment, rent, whatever. 
+- proactive problem solving. Can be configured to use an llm to analyze the situation and reccomend a pathway forward
