@@ -3180,6 +3180,18 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('c') => {
+                // Mark selected idea as fully implemented (manual override for
+                // ideas whose instructions landed without tracked targets).
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
+                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 100);
+                        self.ideas = orrch_core::vault::load_ideas(&vault);
+                        self.notify("Marked complete".into());
+                    }
+                }
+            }
             KeyCode::Char('i') => {
                 // Toggle audit trail expansion for the selected idea
                 if self.ideas_audit_expanded == Some(self.idea_selected) {

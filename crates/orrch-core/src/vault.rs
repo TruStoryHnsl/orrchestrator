@@ -26,6 +26,10 @@ pub struct PipelineTarget {
     pub project: String,
     pub instruction_count: u32,
     pub implemented_count: u32,
+    /// Specific INS codes routed to this project (e.g. ["INS-011", "INS-012"]).
+    /// Empty means the codes aren't tracked — fall back to inbox scanning.
+    #[serde(default)]
+    pub codes: Vec<String>,
 }
 
 impl PipelineState {
@@ -338,10 +342,69 @@ pub fn set_pipeline_targets(vault_dir: &Path, filename: &str, package_name: &str
     save_pipeline_state(vault_dir, filename, &state)
 }
 
+/// Backfill pipeline targets from workflow.json's `routed` field.
+/// Called when targets are empty but the idea has already been processed.
+/// Returns true if targets were populated.
+pub fn sync_targets_from_workflow(vault_dir: &Path, idea_filename: &str) -> bool {
+    let workspace = intake_workspace(vault_dir, idea_filename);
+    let workflow_path = workspace.join("workflow.json");
+    let bytes = match fs::read(&workflow_path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct WorkflowRouted {
+        #[serde(default)]
+        routed: std::collections::HashMap<String, Vec<String>>,
+    }
+    let parsed: WorkflowRouted = match serde_json::from_slice(&bytes) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    if parsed.routed.is_empty() { return false; }
+
+    let pipeline_dir = vault_dir.join(".pipeline");
+    let mut state = load_pipeline_state(&pipeline_dir, idea_filename);
+    if !state.targets.is_empty() { return false; } // already set
+
+    let targets: Vec<PipelineTarget> = parsed.routed.into_iter().map(|(project, codes)| {
+        let instruction_count = codes.len() as u32;
+        PipelineTarget { project, instruction_count, implemented_count: 0, codes }
+    }).collect();
+
+    state.targets = targets;
+    if state.progress < 50 { state.progress = 50; }
+    let _ = save_pipeline_state(vault_dir, idea_filename, &state);
+    true
+}
+
 /// Scan a project's instructions_inbox.md and PLAN.md to count implemented instructions,
 /// then update the pipeline state for the source idea. Returns true if progress changed.
 pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea) -> bool {
     let pipeline_dir = vault_dir.join(".pipeline");
+
+    // Backfill targets from workflow.json if missing
+    if idea.pipeline.targets.is_empty() && idea.pipeline.progress >= 50 {
+        sync_targets_from_workflow(vault_dir, &idea.filename);
+    }
+
+    // Auto-advance: if the idea file itself has an "incorporated" or "complete" marker
+    // and is not yet at 100, set it to 100 (manual annotation takes precedence).
+    if idea.pipeline.progress < 100 && idea.pipeline.progress >= 50 {
+        let file_text = fs::read_to_string(&idea.path).unwrap_or_default();
+        let lower = file_text.to_ascii_lowercase();
+        if lower.contains("<!-- status: incorporated")
+            || lower.contains("<!-- status: complete")
+            || lower.contains("> **batch complete:")
+        {
+            let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
+            state.progress = 100;
+            let _ = save_pipeline_state(vault_dir, &idea.filename, &state);
+            return true;
+        }
+    }
+
     let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
     if state.targets.is_empty() || state.progress < 50 { return false; }
 
@@ -364,12 +427,20 @@ pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea
             }
         }
 
-        // Also check PLAN.md for [x] items matching INS- numbers from this package
+        // Check PLAN.md — count only the specific INS codes routed to this target
         let plan_path = project_dir.join("PLAN.md");
         if let Ok(plan) = fs::read_to_string(&plan_path) {
-            for line in plan.lines() {
-                if line.contains("[x]") && line.contains("INS-") {
-                    implemented += 1;
+            if target.codes.is_empty() {
+                // No specific codes — fall back to any [x] INS- line capped at instruction_count
+                let plan_count = plan.lines()
+                    .filter(|l| l.contains("[x]") && l.contains("INS-"))
+                    .count() as u32;
+                implemented = implemented.max(plan_count);
+            } else {
+                for line in plan.lines() {
+                    if line.contains("[x]") && target.codes.iter().any(|c| line.contains(c.as_str())) {
+                        implemented += 1;
+                    }
                 }
             }
         }
@@ -568,8 +639,8 @@ mod tests {
         let state = PipelineState {
             progress: 75,
             targets: vec![
-                PipelineTarget { project: "foo".into(), instruction_count: 10, implemented_count: 5 },
-                PipelineTarget { project: "bar".into(), instruction_count: 10, implemented_count: 10 },
+                PipelineTarget { project: "foo".into(), instruction_count: 10, implemented_count: 5, codes: vec![] },
+                PipelineTarget { project: "bar".into(), instruction_count: 10, implemented_count: 10, codes: vec![] },
             ],
             ..Default::default()
         };
