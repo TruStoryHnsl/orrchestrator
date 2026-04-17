@@ -5046,7 +5046,7 @@ impl App {
                 items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
                 items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
                 items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(self.selected_project_index().unwrap_or(self.project_selected)) });
-                items.push(ActionItem { key: 'F', label: "Write project feedback".into(), action: ActionKind::WriteProjectFeedback(self.selected_project_index().unwrap_or(self.project_selected)) });
+
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
