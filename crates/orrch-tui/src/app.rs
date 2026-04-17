@@ -5946,7 +5946,11 @@ impl App {
     /// Request an external vim session. Creates the temp file and sets vim_request.
     fn request_vim(&mut self, kind: VimKind) {
         let file = match &kind {
-            VimKind::GlobalFeedback | VimKind::ProjectFeedback(_) => {
+            VimKind::GlobalFeedback => {
+                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                orrch_core::vault::save_idea(&vault, "").ok()
+            }
+            VimKind::ProjectFeedback(_) => {
                 orrch_core::create_draft(&self.projects_dir).ok()
             }
             VimKind::MasterPlanAppend(_) => {
@@ -5979,10 +5983,12 @@ impl App {
 
         match kind {
             VimKind::GlobalFeedback => {
-                // Save as draft — user submits from Feedback tab
-                self.reload_feedback();
-                self.notify("Feedback saved as draft".into());
+                // Saved to vault — appears in Intentions list
+                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                self.ideas = orrch_core::vault::load_ideas(&vault);
+                self.notify("Saved to Intentions".into());
                 self.panel = Panel::Design;
+                self.design_sub = DesignSub::Intentions;
                 self.sub = SubView::List;
             }
             VimKind::ProjectFeedback(proj_idx) => {
