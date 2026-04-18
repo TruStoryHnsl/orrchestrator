@@ -2268,7 +2268,16 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     } else {
         Style::default().fg(TEXT_DIM)
     };
-    let scroll_hint = if scroll_offset > 0 { format!(" Roadmap ↑{scroll_offset} ") } else { " Roadmap ".to_string() };
+    // OPT-003: show both up and down scroll indicators when content overflows.
+    // Visible capacity = roadmap_height - 2 border rows.
+    let visible_capacity = (roadmap_height as usize).saturating_sub(2).max(1);
+    let items_below = proj.roadmap.len().saturating_sub(scroll_offset + visible_capacity);
+    let scroll_hint = match (scroll_offset > 0, items_below > 0) {
+        (true, true) => format!(" Roadmap ↑{scroll_offset} ↓{items_below} "),
+        (true, false) => format!(" Roadmap ↑{scroll_offset} "),
+        (false, true) => format!(" Roadmap ↓{items_below} "),
+        (false, false) => " Roadmap ".to_string(),
+    };
     let roadmap = List::new(visible_roadmap)
         .scroll_padding(SCROLL_PAD)
         .block(Block::default().title(scroll_hint).borders(Borders::ALL).style(roadmap_border));

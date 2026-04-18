@@ -4101,7 +4101,13 @@ KeyCode::Char('i') => {
                 if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
                     if pos > 0 {
                         self.section_cursor = sections[pos - 1];
+                    } else {
+                        // OPT-004: Up at top section → exit project detail
+                        self.sub = SubView::List;
                     }
+                } else {
+                    // cursor fell off the list — also exit
+                    self.sub = SubView::List;
                 }
             }
             KeyCode::Down => {
@@ -4122,6 +4128,13 @@ KeyCode::Char('i') => {
             _ => {}
         }
         Ok(())
+    }
+
+    /// OPT-003: Visible row count for the roadmap panel in project detail.
+    /// Must stay in sync with the layout in `draw_project_detail`
+    /// (`roadmap_height = roadmap_len.min(12) + 3`, minus 2 border rows).
+    fn roadmap_visible_height(roadmap_len: usize) -> usize {
+        roadmap_len.min(12).saturating_add(1).max(1)
     }
 
     fn key_detail_roadmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
@@ -4194,28 +4207,28 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::PageDown => {
-                // Scroll roadmap view down
+                // Scroll roadmap view down by the visible page.
+                let page = Self::roadmap_visible_height(roadmap_len);
                 let max_scroll = roadmap_len.saturating_sub(1);
-                self.roadmap_scroll = (self.roadmap_scroll + 5).min(max_scroll);
+                self.roadmap_scroll = (self.roadmap_scroll + page).min(max_scroll);
                 // Keep selection in visible range
                 if self.roadmap_selected < self.roadmap_scroll {
                     self.roadmap_selected = self.roadmap_scroll;
                 }
             }
             KeyCode::PageUp => {
-                // Scroll roadmap view up
-                self.roadmap_scroll = self.roadmap_scroll.saturating_sub(5);
+                // Scroll roadmap view up by the visible page.
+                let page = Self::roadmap_visible_height(roadmap_len);
+                self.roadmap_scroll = self.roadmap_scroll.saturating_sub(page);
                 // Keep selection in visible range
-                let visible_height = 9usize; // approximate
-                if self.roadmap_selected >= self.roadmap_scroll + visible_height {
-                    self.roadmap_selected = self.roadmap_scroll + visible_height - 1;
+                if self.roadmap_selected >= self.roadmap_scroll + page {
+                    self.roadmap_selected = self.roadmap_scroll + page - 1;
                 }
             }
             _ => {}
         }
         // OPT-003: keep scroll in sync with selection (both directions)
-        // Visible height = min(roadmap_len, 12) - 2 border rows, minimum 1
-        let visible_height = roadmap_len.min(12).saturating_sub(2).max(1);
+        let visible_height = Self::roadmap_visible_height(roadmap_len);
         if self.roadmap_selected < self.roadmap_scroll {
             self.roadmap_scroll = self.roadmap_selected;
         } else if self.roadmap_selected >= self.roadmap_scroll + visible_height {
@@ -5367,7 +5380,9 @@ KeyCode::Char('i') => {
 
     fn key_action_menu(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Esc => {
+            // OPT-004: Left and Esc both exit the action menu. Up at top also
+            // exits so the user never gets trapped pressing vertical keys.
+            KeyCode::Esc | KeyCode::Left => {
                 if let Some(prev) = self.action_return_sub.take() {
                     self.sub = *prev;
                 } else {
@@ -5375,7 +5390,16 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Up => {
-                self.action_selected = self.action_selected.saturating_sub(1);
+                if self.action_selected == 0 {
+                    // OPT-004: Up at top → exit menu
+                    if let Some(prev) = self.action_return_sub.take() {
+                        self.sub = *prev;
+                    } else {
+                        self.sub = SubView::List;
+                    }
+                } else {
+                    self.action_selected -= 1;
+                }
             }
             KeyCode::Down => {
                 if self.action_selected + 1 < self.action_items.len() {
@@ -5684,9 +5708,14 @@ KeyCode::Char('i') => {
         ];
 
         match key {
-            KeyCode::Esc => { self.sub = SubView::List; }
+            KeyCode::Esc | KeyCode::Left => { self.sub = SubView::List; }
             KeyCode::Up => {
-                self.app_menu_selected = self.app_menu_selected.saturating_sub(1);
+                // OPT-004: Up at top → exit menu (never trap)
+                if self.app_menu_selected == 0 {
+                    self.sub = SubView::List;
+                } else {
+                    self.app_menu_selected -= 1;
+                }
             }
             KeyCode::Down => {
                 if self.app_menu_selected + 1 < ITEMS.len() {
@@ -6628,8 +6657,15 @@ KeyCode::Char('i') => {
 
     fn key_workflow_picker(&mut self, key: KeyCode) -> Result<()> {
         match key {
+            // OPT-004: Left also exits the picker.
+            KeyCode::Left => {
+                self.sub = SubView::List;
+            }
             KeyCode::Up => {
-                if self.workflow_picker_idx > 0 {
+                if self.workflow_picker_idx == 0 {
+                    // OPT-004: Up at top → exit picker
+                    self.sub = SubView::List;
+                } else {
                     self.workflow_picker_idx -= 1;
                 }
             }
