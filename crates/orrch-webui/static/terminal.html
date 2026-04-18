@@ -25,24 +25,24 @@ const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 const ws = new WebSocket(proto + '://' + location.host + '/pty');
 ws.binaryType = 'arraybuffer';
 
-ws.onopen = sendResize;
 ws.onmessage = function(e) {
   if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
 };
 ws.onclose = function() {
   term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n');
 };
+ws.onerror = function() {
+  try { ws.close(); } catch (_) {}
+};
 
+// Forward keystrokes to the server as raw binary. The server will parse
+// ANSI sequences and dispatch them into the TUI event loop. There is no
+// resize message anymore — the TUI's own terminal dictates the size.
 term.onData(function(data) {
   if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
 });
 
-function sendResize() {
-  if (ws.readyState === WebSocket.OPEN)
-    ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-}
-
-window.addEventListener('resize', function() { fit.fit(); sendResize(); });
+window.addEventListener('resize', function() { fit.fit(); });
 </script>
 </body>
 </html>

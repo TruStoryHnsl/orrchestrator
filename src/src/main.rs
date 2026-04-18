@@ -58,9 +58,7 @@ async fn main() -> Result<()> {
         println!("orrchestrator — AI development pipeline hypervisor");
         println!();
         println!("USAGE:");
-        println!("  orrchestrator            Launch the TUI (auto-wraps in tmux session 'orrchestrator')");
-        println!("  orrchestrator --no-wrap  Launch without tmux wrapping (for dev / cargo-watch)");
-        println!("  orrchestrator --resume   Attach to an existing tmux session");
+        println!("  orrchestrator            Launch the TUI. Terminal is mirrored to the WebUI.");
         println!("  orrchestrator --web      Open the WebUI in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
@@ -71,32 +69,6 @@ async fn main() -> Result<()> {
     // --web: open the WebUI in the browser.
     if args.iter().any(|a| a == "--web") {
         return open_webui_in_browser();
-    }
-
-    // Auto-wrap in tmux session "orrchestrator" so the WebUI PTY bridge can
-    // attach to the running TUI.
-    //
-    // Uses `tmux new-session -A -s orrchestrator`: if the session already
-    // exists, attach to it (cheap, safe, no spawn). If it doesn't, create
-    // it with this binary inside. Session name is stable — repeated calls
-    // never create a new session.
-    //
-    // Skipped when:
-    //   - Already inside tmux ($TMUX set) — already wrapped
-    //   - --no-wrap passed — dev / cargo-watch path
-    //   - stdout is not a TTY — non-interactive, nothing to wrap
-    let wrap_requested = !args.iter().any(|a| a == "--no-wrap");
-    if wrap_requested
-        && std::env::var("TMUX").is_err()
-        && io::stdout().is_terminal()
-    {
-        return wrap_in_tmux(&args);
-    }
-
-    // --resume: explicit attach (same as auto-wrap but without creating if
-    // none exists — errors out so it's clear no instance is running).
-    if args.iter().any(|a| a == "--resume") {
-        return attach_existing_session();
     }
 
     if !io::stdout().is_terminal() {
@@ -115,21 +87,14 @@ async fn main() -> Result<()> {
         default_hook(info);
     }));
 
-    enable_raw_mode().context("Failed to enable raw mode")?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).context("Failed to enter alternate screen")?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
     let mut app = App::new();
     let _ = app.pm.discover_external().await;
 
     // Task 28: initial-clone flow for the library repo.
-    // If a repo URL is configured and the library dir is missing/empty,
-    // clone it now so the Library panel has content on first launch.
     app.library_clone_if_missing();
 
-    // Start the WebUI companion server on the fixed port. Bookmarkable URL.
+    // Start the WebUI server FIRST so we can tap its terminal broadcast
+    // channel into the ratatui backend. Bookmarkable URL: localhost:8484.
     let webui = match orrch_webui::WebUiServer::start(orrch_webui::DEFAULT_PORT).await {
         Ok(srv) => {
             app.webui_port = Some(srv.port);
@@ -142,6 +107,20 @@ async fn main() -> Result<()> {
             None
         }
     };
+
+    // Build a writer that tees stdout → local terminal AND → WebUI broadcast.
+    // If the WebUI didn't start, the broadcast is a dangling channel with no
+    // receivers — sends are silently dropped, no-op.
+    let term_tx = webui.as_ref()
+        .map(|w| w.terminal_tx.clone())
+        .unwrap_or_else(|| tokio::sync::broadcast::channel::<Vec<u8>>(1).0);
+    let mut tee = orrch_webui::TeeWriter::new(io::stdout(), term_tx, 64 * 1024);
+
+    enable_raw_mode().context("Failed to enable raw mode")?;
+    execute!(tee, EnterAlternateScreen, EnableMouseCapture)
+        .context("Failed to enter alternate screen")?;
+    let backend = CrosstermBackend::new(tee);
+    let mut terminal = Terminal::new(backend)?;
 
     let result = run_loop(&mut terminal, &mut app, webui).await;
 
@@ -163,76 +142,6 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     }
     result
-}
-
-/// Auto-wrap entry point: ensures the TUI runs inside tmux session "orrchestrator".
-///
-/// Uses `tmux new-session -A -s orrchestrator <self> --no-wrap [args...]`:
-///   - `-A`: attach if exists, create if not — idempotent
-///   - `--no-wrap`: prevents the nested invocation from trying to wrap again
-///
-/// If tmux isn't installed, falls through to a direct launch by returning
-/// a sentinel value; the caller re-runs the binary with --no-wrap.
-fn wrap_in_tmux(args: &[String]) -> Result<()> {
-    let exe = std::env::current_exe()
-        .context("cannot resolve current executable path")?;
-
-    // Build nested-invocation args: self --no-wrap [original args without --wrap]
-    let mut tmux_args: Vec<std::ffi::OsString> = vec![
-        "new-session".into(),
-        "-A".into(),
-        "-s".into(), "orrchestrator".into(),
-        exe.into(),
-        "--no-wrap".into(),
-    ];
-    for a in args {
-        if a != "--wrap" && a != "--no-wrap" {
-            tmux_args.push(a.into());
-        }
-    }
-
-    let status = std::process::Command::new("tmux").args(&tmux_args).status();
-    match status {
-        Ok(s) => std::process::exit(s.code().unwrap_or(0)),
-        Err(e) => {
-            eprintln!("tmux unavailable ({e}); launching orrchestrator directly.");
-            eprintln!("Install tmux to enable WebUI TUI mirroring and remote SSH attach.");
-            // Re-exec self with --no-wrap so we fall through to the normal TUI path
-            let mut rerun_args: Vec<std::ffi::OsString> = vec!["--no-wrap".into()];
-            for a in args {
-                if a != "--wrap" && a != "--no-wrap" {
-                    rerun_args.push(a.into());
-                }
-            }
-            let status = std::process::Command::new(std::env::current_exe()?)
-                .args(&rerun_args)
-                .status()?;
-            std::process::exit(status.code().unwrap_or(0));
-        }
-    }
-}
-
-/// `--resume`: attach to an existing session, error if none.
-fn attach_existing_session() -> Result<()> {
-    let exists = std::process::Command::new("tmux")
-        .args(["has-session", "-t", "orrchestrator"])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if !exists {
-        eprintln!("No running orrchestrator tmux session named 'orrchestrator'.");
-        eprintln!("Start one with: orrchestrator");
-        std::process::exit(1);
-    }
-
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", "orrchestrator"])
-        .status();
-    match status {
-        Ok(s) => std::process::exit(s.code().unwrap_or(0)),
-        Err(e) => bail!("tmux attach failed: {e}"),
-    }
 }
 
 /// `--web` entry point: find a running instance's WebUI port and open it.
@@ -266,6 +175,55 @@ fn webedit_workforces_dir() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from("workforces"))
 }
 
+/// Translate a byte slice from an xterm.js client into crossterm KeyCode
+/// events and dispatch them to the TUI. Handles the common cases:
+/// printable ASCII, Enter, Tab, Backspace, Esc, and ANSI arrow sequences.
+fn dispatch_web_bytes(bytes: &[u8], app: &mut App) {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let (code, mods, advance) = match b {
+            b'\r' | b'\n' => (KeyCode::Enter, KeyModifiers::NONE, 1),
+            b'\t' => (KeyCode::Tab, KeyModifiers::NONE, 1),
+            0x7f | 0x08 => (KeyCode::Backspace, KeyModifiers::NONE, 1),
+            0x1b => {
+                // ESC alone, or ESC[<X> for arrows, or ESC followed by more.
+                if i + 2 < bytes.len() && bytes[i + 1] == b'[' {
+                    let arrow = match bytes[i + 2] {
+                        b'A' => Some(KeyCode::Up),
+                        b'B' => Some(KeyCode::Down),
+                        b'C' => Some(KeyCode::Right),
+                        b'D' => Some(KeyCode::Left),
+                        _ => None,
+                    };
+                    if let Some(code) = arrow {
+                        (code, KeyModifiers::NONE, 3)
+                    } else {
+                        (KeyCode::Esc, KeyModifiers::NONE, 1)
+                    }
+                } else {
+                    (KeyCode::Esc, KeyModifiers::NONE, 1)
+                }
+            }
+            0x01..=0x1a => {
+                // Ctrl+letter (0x01='a', 0x1a='z')
+                let letter = (b + b'a' - 1) as char;
+                (KeyCode::Char(letter), KeyModifiers::CONTROL, 1)
+            }
+            b if b.is_ascii() && !b.is_ascii_control() => {
+                (KeyCode::Char(b as char), KeyModifiers::NONE, 1)
+            }
+            _ => (KeyCode::Null, KeyModifiers::NONE, 1), // skip unknown
+        };
+        if !matches!(code, KeyCode::Null) {
+            let _ = app.handle_key(code, mods);
+        }
+        i += advance;
+    }
+}
+
 /// `--webedit` entry point (PLAN item 37).
 ///
 /// Launches the `orrch_webedit` HTTP server on an ephemeral port, prints
@@ -295,7 +253,7 @@ async fn run_webedit() -> Result<()> {
 }
 
 async fn run_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut Terminal<CrosstermBackend<orrch_webui::TeeWriter<io::Stdout>>>,
     app: &mut App,
     webui: Option<orrch_webui::WebUiServer>,
 ) -> Result<()> {
@@ -544,6 +502,15 @@ async fn run_loop(
                 .map(|s| std::path::PathBuf::from(&s.cwd));
             app.workflow_status = cwd.and_then(|p| orrch_core::load_workflow_status(&p));
             last_workflow_poll = Instant::now();
+        }
+
+        // Drain WebUI terminal keystrokes on every tick (not every second).
+        // Maps raw ANSI byte sequences from xterm.js into crossterm KeyCode
+        // events and dispatches to the TUI like local keypresses.
+        if let Some(ref srv) = webui {
+            for bytes in srv.drain_input() {
+                dispatch_web_bytes(&bytes, app);
+            }
         }
 
         // WebUI sync — push state and drain actions every ~1s
