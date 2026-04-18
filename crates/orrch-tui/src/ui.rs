@@ -91,6 +91,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         SubView::RenameProject(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Project"); }
         SubView::RenamePlanFeature { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Plan Feature"); }
+        SubView::RenameFile { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename File"); }
         SubView::SteerSession(idx) => {
             draw_panel_content(frame, app, layout[1]);
             draw_steer_session_input(frame, app, idx);
