@@ -23,9 +23,17 @@ impl<W: Write> TeeWriter<W> {
     }
 
     fn broadcast_bytes(&self, buf: &[u8]) {
-        // If no receivers, send() returns Err; that's fine, drop silently.
         for chunk in buf.chunks(self.chunk_size) {
-            let _ = self.tx.send(chunk.to_vec());
+            let receivers = self.tx.receiver_count();
+            let result = self.tx.send(chunk.to_vec());
+            if receivers > 0 {
+                tracing::info!(
+                    "TEE: {} bytes -> {} receivers, result={:?}",
+                    chunk.len(),
+                    receivers,
+                    result.as_ref().map(|n| *n).map_err(|_| "no receivers")
+                );
+            }
         }
     }
 }

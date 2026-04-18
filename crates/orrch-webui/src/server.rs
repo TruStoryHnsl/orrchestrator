@@ -70,24 +70,40 @@ async fn terminal_ws_handler(socket: WebSocket, srv: ServerState) {
     let mut term_rx = srv.terminal_tx.subscribe();
     let input_tx = Arc::clone(&srv.input_tx);
 
+    tracing::info!(
+        "Terminal WS client connected — {} total receivers now",
+        srv.terminal_tx.receiver_count()
+    );
+
     // Signal the main loop to emit a full redraw so this new client sees
     // the current screen rather than whatever partial diffs come next.
     srv.redraw_flag.store(true, std::sync::atomic::Ordering::Relaxed);
 
     // Outbound: TUI broadcast → WebSocket
     let send_task = tokio::spawn(async move {
+        let mut bytes_sent: usize = 0;
         loop {
             match term_rx.recv().await {
                 Ok(chunk) => {
+                    bytes_sent += chunk.len();
+                    tracing::info!(
+                        "WS send {} bytes (total {})",
+                        chunk.len(),
+                        bytes_sent
+                    );
                     if ws_sink.send(Message::Binary(chunk.into())).await.is_err() {
+                        tracing::warn!("WS send failed, disconnecting");
                         break;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Dropped frames; continue — the TUI will paint again
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("WS lagged by {n} chunks");
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
+                Err(broadcast::error::RecvError::Closed) => {
+                    tracing::info!("terminal_tx closed, disconnecting ws");
+                    break;
+                }
             }
         }
     });
