@@ -1,0 +1,9 @@
+pub const INDEX_HTML: &str = include_str!("../static/index.html");
+pub const TERMINAL_HTML: &str = include_str!("../static/terminal.html");
+pub const UI_HTML: &str = include_str!("../static/ui.html");
+pub const MAIN_CSS: &str = include_str!("../static/css/main.css");
+pub const WS_JS: &str = include_str!("../static/js/ws.js");
+pub const LAYOUT_JS: &str = include_str!("../static/js/layout.js");
+pub const INTENTIONS_JS: &str = include_str!("../static/js/intentions.js");
+pub const SESSIONS_JS: &str = include_str!("../static/js/sessions.js");
+pub const MOBILE_JS: &str = include_str!("../static/js/mobile.js");
