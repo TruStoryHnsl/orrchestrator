@@ -175,11 +175,29 @@ async fn handle_action(State(srv): State<ServerState>, Json(body): Json<Value>) 
 }
 
 fn html(s: &'static str) -> Response {
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], s).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
+        ],
+        s,
+    ).into_response()
 }
 fn css(s: &'static str) -> Response {
-    ([(header::CONTENT_TYPE, "text/css")], s).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "text/css"),
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
+        ],
+        s,
+    ).into_response()
 }
 fn js(s: &'static str) -> Response {
-    ([(header::CONTENT_TYPE, "application/javascript")], s).into_response()
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
+        ],
+        s,
+    ).into_response()
 }

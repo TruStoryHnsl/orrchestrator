@@ -6,10 +6,51 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>orrchestrator</title>
-<link rel="stylesheet" href="/static/css/main.css">
+<link rel="stylesheet" href="/static/css/main.css?v=2">
 </head>
 <body class="ui-body">
-<nav class="top-nav" id="top-nav"></nav>
+
+<!-- Diagnostic: BIG red bar at the top. Tap to scan for overflow. -->
+<div id="diag-badge" style="position:fixed;top:0;left:0;right:0;background:#c00;color:#fff;font:bold 13px monospace;padding:8px 10px;text-align:center;z-index:99999;cursor:pointer">
+  TAP HERE TO SCAN FOR OVERFLOW — V3
+</div>
+<script>
+(function() {
+  var badge = document.getElementById('diag-badge');
+  function scan() {
+    var vw = window.innerWidth;
+    var dw = document.documentElement.scrollWidth;
+    var bw = document.body.scrollWidth;
+    var offenders = [];
+    document.querySelectorAll('*').forEach(function(el) {
+      var r = el.getBoundingClientRect();
+      if (r.width > vw + 1 || r.right > vw + 1) {
+        offenders.push({
+          tag: el.tagName,
+          cls: (el.className || '').toString().slice(0, 40),
+          id: el.id,
+          w: Math.round(r.width),
+          left: Math.round(r.left),
+          right: Math.round(r.right)
+        });
+      }
+    });
+    return { vw: vw, docW: dw, bodyW: bw, offenders: offenders };
+  }
+  badge.addEventListener('click', function() {
+    var r = scan();
+    var msg = 'viewport=' + r.vw + 'px  docW=' + r.docW + '  bodyW=' + r.bodyW + '\n\n';
+    msg += r.offenders.length + ' elements overflowing:\n\n';
+    msg += r.offenders.slice(0, 8).map(function(o) {
+      var sel = '<' + o.tag.toLowerCase() + (o.id ? '#' + o.id : '') + (o.cls ? '.' + o.cls.split(' ')[0] : '') + '>';
+      return 'left=' + o.left + ' right=' + o.right + ' w=' + o.w + ' ' + sel;
+    }).join('\n');
+    alert(msg);
+  });
+})();
+</script>
+
+<nav class="top-nav" id="top-nav" style="margin-top:36px"></nav>
 <main id="main-panel">
   <div id="panel-design" class="panel active"></div>
   <div id="panel-oversee" class="panel"></div>
@@ -24,47 +65,15 @@
 </div>
 <div id="mobile-pad" class="mobile-pad"></div>
 
-<script src="/static/js/ws.js"></script>
-<script src="/static/js/layout.js"></script>
-<script src="/static/js/intentions.js"></script>
-<script src="/static/js/sessions.js"></script>
-<script src="/static/js/mobile.js"></script>
+<script src="/static/js/ws.js?v=2"></script>
+<script src="/static/js/layout.js?v=2"></script>
+<script src="/static/js/intentions.js?v=2"></script>
+<script src="/static/js/sessions.js?v=2"></script>
+<script src="/static/js/mobile.js?v=2"></script>
 <script>
-WS.connect();
-Layout.init();
-Mobile.init();
-
-// Overflow diagnostic — tap the badge to see which elements are wider
-// than the viewport. Tap-hold 1s to toggle red outlines on offenders.
-(function() {
-  var badge = document.createElement('div');
-  badge.style.cssText = 'position:fixed;top:4px;right:4px;background:#a30;color:#fff;font:11px monospace;padding:3px 6px;border-radius:3px;z-index:99999;opacity:0.85';
-  badge.textContent = 'scan';
-  document.body.appendChild(badge);
-
-  function scan() {
-    var vw = window.innerWidth;
-    var offenders = [];
-    document.querySelectorAll('*').forEach(function(el) {
-      var w = el.getBoundingClientRect().width;
-      if (w > vw + 1) offenders.push({ tag: el.tagName, cls: el.className, id: el.id, w: Math.round(w) });
-    });
-    return { vw: vw, offenders: offenders };
-  }
-
-  badge.addEventListener('click', function() {
-    var r = scan();
-    badge.textContent = r.offenders.length + ' > vw ' + r.vw;
-    if (r.offenders.length) {
-      var lines = r.offenders.slice(0, 5).map(function(o) {
-        return o.w + 'px: <' + o.tag.toLowerCase() + (o.id ? '#' + o.id : '') + (o.cls ? '.' + String(o.cls).split(' ')[0] : '') + '>';
-      });
-      alert('viewport=' + r.vw + 'px, ' + r.offenders.length + ' overflowing:\n\n' + lines.join('\n'));
-    } else {
-      alert('no overflowing elements');
-    }
-  });
-})();
+try { WS.connect(); } catch (e) { console.error('WS.connect:', e); }
+try { Layout.init(); } catch (e) { console.error('Layout.init:', e); }
+try { Mobile.init(); } catch (e) { console.error('Mobile.init:', e); }
 </script>
 </body>
 </html>
