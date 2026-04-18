@@ -6,11 +6,9 @@
 //! - Global `~/projects/.troubleshooting-global.md` — cross-project patterns
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use crate::analyzer::{EcosystemAnalysis, ErrorClass, ProjectAnalysis};
-use crate::error_parser::ErrorCategory;
 
 /// Generate all troubleshooting protocols from an ecosystem analysis.
 pub fn generate_protocols(analysis: &EcosystemAnalysis, projects_dir: &Path) {

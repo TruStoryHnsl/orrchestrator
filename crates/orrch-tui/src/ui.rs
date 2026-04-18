@@ -1,4 +1,4 @@
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -233,6 +233,7 @@ fn draw_deprecated_browser(frame: &mut Frame, app: &App, area: Rect) {
 
 // ─── Design Panel ────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
     let msg = Paragraph::new(message)
         .style(Style::default().fg(TEXT_DIM))
@@ -1923,7 +1924,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             let mut item_idx: usize = 0;
 
             // Sessions section (selectable)
-            let pipelines = app.pipelines_for_project(&proj.path);
+            let _pipelines = app.pipelines_for_project(&proj.path);
             for s in &managed_sessions {
                 let sc = match s.state {
                     SessionState::Working => GREEN, SessionState::Waiting => WAITING_COLOR,
@@ -2163,6 +2164,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 
 // ─── Production Panel ─────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn draw_production(frame: &mut Frame, app: &App, area: Rect) {
     if app.production_versions.is_empty() {
         let msg = Paragraph::new("No versioned releases found.\nProjects with v1/, v2/ directories appear here.")
@@ -2415,7 +2417,7 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
 
     // Build tree items: current directory entries, with child entries expanded inline
     let mut tree_items: Vec<ListItem> = Vec::new();
-    let mut tree_index: usize = 0; // tracks which item is the "real" selected one
+    let _tree_index: usize = 0; // tracks which item is the "real" selected one
     let selected_entry = if app.browser_in_child {
         // In child: parent entry at parent_selected, then child entries
         // Selected is parent_selected + 1 + child_selected
@@ -2469,8 +2471,9 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
 
 // ─── Dev Map ─────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, focused: bool) {
-    use orrch_core::FeatureStatus;
+    
 
     let Some(proj) = app.projects.get(proj_idx) else { return; };
     let border_style = if focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
@@ -2923,6 +2926,7 @@ fn draw_session_log_browser(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(viewer, chunks[1]);
 }
 
+#[allow(dead_code)]
 fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     let drafts: Vec<(usize, &orrch_core::FeedbackItem)> = app.feedback_items.iter().enumerate()

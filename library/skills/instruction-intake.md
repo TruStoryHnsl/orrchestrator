@@ -321,3 +321,4 @@ Report to the user:
 3. Any conflicts detected during plan incorporation
 4. Any instructions routed to scratchpad (unattached ideas)
 5. Suggest: "Run `/develop-feature` in a project directory to execute queued instructions."
+# test
