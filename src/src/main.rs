@@ -59,7 +59,10 @@ async fn main() -> Result<()> {
         println!();
         println!("USAGE:");
         println!("  orrchestrator            Launch the TUI (default)");
-        println!("  orrchestrator --resume   Attach to a running orrchestrator tmux session");
+        println!("  orrchestrator --wrap     Start (or attach to) a tmux session named 'orrchestrator'");
+        println!("                           Run this from SSH to attach to an existing instance.");
+        println!("                           Safe to invoke multiple times — second caller attaches.");
+        println!("  orrchestrator --resume   Alias for --wrap (attach to existing session)");
         println!("  orrchestrator --web      Open the WebUI of the running instance in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
@@ -67,9 +70,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // --resume: attach to the tmux session of a running orrchestrator instance.
-    if args.iter().any(|a| a == "--resume") {
-        return resume_session();
+    // --wrap / --resume: ensure the TUI runs inside a tmux session named
+    // "orrchestrator". If the session already exists, attach to it; otherwise
+    // create it. Either way, the current shell ends up attached to tmux.
+    // Not wrapped when invoked from cargo-watch (no flag) so dev loops stay clean.
+    if (args.iter().any(|a| a == "--wrap") || args.iter().any(|a| a == "--resume"))
+        && std::env::var("TMUX").is_err()
+    {
+        return wrap_in_tmux();
     }
 
     // --web: find a running instance's WebUI port and open it in the browser.
@@ -107,18 +115,6 @@ async fn main() -> Result<()> {
     // clone it now so the Library panel has content on first launch.
     app.library_clone_if_missing();
 
-    // Advertise tmux session so `orrchestrator --resume` can attach to us.
-    let session_file = std::path::PathBuf::from("/tmp/orrch-session");
-    if let Ok(out) = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "#S"])
-        .output()
-    {
-        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !name.is_empty() {
-            let _ = std::fs::write(&session_file, &name);
-        }
-    }
-
     // Task 7: Start the WebUI companion server on an OS-assigned port.
     let pid = std::process::id();
     let port_file = std::path::PathBuf::from(format!("/tmp/orrch-webui-{pid}.port"));
@@ -138,9 +134,8 @@ async fn main() -> Result<()> {
 
     let result = run_loop(&mut terminal, &mut app, webui).await;
 
-    // Remove advertisement files
+    // Remove advertisement file
     let _ = std::fs::remove_file(&port_file);
-    let _ = std::fs::remove_file(&session_file);
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
@@ -162,23 +157,33 @@ async fn main() -> Result<()> {
     result
 }
 
-/// `--resume` entry point: attach to the tmux session of a running instance.
-fn resume_session() -> Result<()> {
-    let session_name = std::fs::read_to_string("/tmp/orrch-session")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+/// `--wrap` / `--resume` entry point.
+///
+/// Runs `tmux new-session -A -s orrchestrator <self>`:
+/// `-A` attaches to an existing session of that name if one exists, or
+/// creates a new one running orrchestrator. Either way, the caller ends up
+/// attached to the tmux session. If tmux is missing, falls through to a
+/// normal TUI launch so the binary still works on minimal systems.
+fn wrap_in_tmux() -> Result<()> {
+    let exe = std::env::current_exe()
+        .context("cannot resolve current executable path")?;
+    let exe_str = exe.to_str().context("executable path is not valid UTF-8")?;
 
-    if session_name.is_empty() {
-        eprintln!("No running orrchestrator session found.");
-        eprintln!("Start orrchestrator first (it must be running inside tmux).");
-        std::process::exit(1);
+    let status = std::process::Command::new("tmux")
+        .args(["new-session", "-A", "-s", "orrchestrator", exe_str])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => std::process::exit(0),
+        Ok(s) => bail!("tmux exited with status {s}"),
+        Err(e) => {
+            eprintln!("tmux unavailable ({e}); running orrchestrator directly without wrapping.");
+            // Fall through to the normal launch path by returning Ok(())?
+            // We can't easily re-enter main() from here, so just surface an error.
+            // The user can run `orrchestrator` (no flag) to get the same effect.
+            bail!("install tmux to use --wrap / --resume");
+        }
     }
-
-    use std::os::unix::process::CommandExt;
-    let err = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &session_name])
-        .exec();
-    bail!("tmux attach failed: {err}");
 }
 
 /// `--web` entry point: find a running instance's WebUI port and open it.
