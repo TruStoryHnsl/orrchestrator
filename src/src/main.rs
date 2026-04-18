@@ -453,13 +453,7 @@ async fn run_loop(
                         }
                         WebAction::Retract { ref filename } => {
                             let vault = orrch_core::vault::vault_dir(&app.projects_dir);
-                            if let Some(idea) = app.ideas.iter().find(|i| &i.filename == filename) {
-                                let mut state = idea.pipeline.clone();
-                                state.progress = 0;
-                                state.targets.clear();
-                                state.submitted_at = None;
-                                let _ = orrch_core::vault::save_pipeline_state(&vault, filename, &state);
-                            }
+                            let _ = orrch_core::vault::update_pipeline_progress(&vault, filename, 0);
                             app.ideas = orrch_core::vault::load_ideas(&vault);
                         }
                     }
