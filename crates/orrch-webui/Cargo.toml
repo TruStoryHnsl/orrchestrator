@@ -1,0 +1,17 @@
+[package]
+name = "orrch-webui"
+description = "Always-on browser UI (xterm.js PTY bridge + native Vanilla JS)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orrch-core = { path = "../orrch-core" }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+portable-pty = "0.8"
+sha2 = { workspace = true }
+tower = { version = "0.4", features = ["util"] }
