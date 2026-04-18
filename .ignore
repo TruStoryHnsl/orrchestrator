@@ -1,10 +1,23 @@
 # cargo-watch: ignore non-source files that change during runtime
 *.md
+*.json
 plans/
+plans/**
 .feedback/
+.feedback/**
 .retrospect/
+.retrospect/**
+.session-logs/
+.session-logs/**
+.superpowers/
+.superpowers/**
 .orrtag
 .orrtemp
 .scope
 fb2p.md
-.session-logs/
+instructions_inbox.md
+entities.json
+ORRBEAM_FEEDBACK
+DEVLOG.md
+HANDOFF.md
+PLAN.md
