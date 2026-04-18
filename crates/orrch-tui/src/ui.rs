@@ -1859,6 +1859,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             String::new()
         };
+        let plan_str = String::new(); // covered by goals_str above
         let pipeline_count = app.pipelines_for_project(&proj.path).len();
         let max_sess = proj.max_sessions;
         let sess_str = if session_count > 0 {
@@ -1898,6 +1899,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             )),
             Span::styled(sess_str, Style::default().fg(if waiting > 0 { WAITING_COLOR } else { GREEN })),
             Span::styled(queued_str, Style::default().fg(WAITING_COLOR)),
+            Span::styled(plan_str, Style::default().fg(WAITING_COLOR)),
             Span::styled(format!("  [{}]", proj.default_action()), Style::default().fg(TEXT_MUTED)),
             if proj.meta.apple_target { Span::styled(" 🍎", Style::default()) } else { Span::raw("") },
         ])];
@@ -2392,6 +2394,7 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         }
     }
 
+
     // File browser — single tree column + preview pane
     // OPT-004: highlight browser section header when hovered in SectionSelect mode
     let browser_section_hover = in_section_select && app.section_cursor == SectionCursor::Browser;
@@ -2408,7 +2411,7 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(layout[browser_slot]);
+        .split(layout[3]);
 
     // Build tree items: current directory entries, with child entries expanded inline
     let mut tree_items: Vec<ListItem> = Vec::new();
