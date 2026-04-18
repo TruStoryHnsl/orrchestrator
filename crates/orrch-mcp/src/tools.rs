@@ -2302,10 +2302,20 @@ fn create_library_entry(server: &OrrchMcpServer, args: &Value, kind: &str) -> St
         other      => return format!("Error: unknown kind '{other}'"),
     };
 
-    // Inject name and optional description into the template.
+    // Inject name and optional description into the template. Templates
+    // use either `description: >` (folded) or a bare `description:` — try
+    // the folded form first, fall back to bare so the workforce template
+    // (which has no `>`) still picks up the injected value.
     let mut content = template.replacen("name:", &format!("name: {safe_name}"), 1);
     if !description.is_empty() {
-        content = content.replacen("description: >", &format!("description: {description}"), 1);
+        let folded = "description: >";
+        let bare = "description:";
+        let replacement = format!("description: {description}");
+        if content.contains(folded) {
+            content = content.replacen(folded, &replacement, 1);
+        } else {
+            content = content.replacen(bare, &replacement, 1);
+        }
     }
 
     let dir = server.agents_dir.parent()
@@ -2669,5 +2679,121 @@ pub mod inner;
         assert!(deps.contains(&"serde_json".to_string()), "deps: {deps:?}");
         // dev-dependencies should not be included.
         assert!(!deps.contains(&"tempfile".to_string()), "deps: {deps:?}");
+    }
+
+    // ─── create_agent / create_skill / create_tool / create_workflow ────────
+
+    /// Build an `OrrchMcpServer` whose paths all live under a unique temp
+    /// directory so tests can write files without touching the real project.
+    fn test_server_in_tempdir(tag: &str) -> (OrrchMcpServer, std::path::PathBuf) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("orrch-mcp-test-{tag}-{nonce}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let library_dir = root.join("library");
+        let server = OrrchMcpServer {
+            agents_dir: root.join("agents"),
+            skills_dir: library_dir.join("skills"),
+            library_dir,
+            projects_dir: root.join("projects"),
+        };
+        (server, root)
+    }
+
+    #[test]
+    fn test_create_library_entry_all_kinds_dispatch() {
+        let (server, root) = test_server_in_tempdir("all");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let cases = [
+            ("create_agent",    "my_agent",    "agents/my_agent.md"),
+            ("create_skill",    "my_skill",    "library/skills/my_skill.md"),
+            ("create_tool",     "my_tool",     "library/tools/my_tool.md"),
+            ("create_workflow", "my_workflow", "workforces/my_workflow.md"),
+        ];
+
+        for (tool, name, rel) in cases {
+            let args = serde_json::json!({"name": name, "description": "test desc"});
+            let result = rt.block_on(dispatch(&server, tool, &args));
+            assert!(result.starts_with("Created:"), "{tool}: {result}");
+
+            let path = root.join(rel);
+            assert!(path.exists(), "{tool}: expected file {}", path.display());
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.starts_with("---\n"), "{tool}: missing frontmatter");
+            assert!(content.contains(&format!("name: {name}")), "{tool}: name not injected: {content}");
+            assert!(content.contains("description: test desc"), "{tool}: description not injected: {content}");
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_create_library_entry_missing_name() {
+        let (server, root) = test_server_in_tempdir("missing-name");
+        let args = serde_json::json!({"description": "nope"});
+        let result = create_library_entry(&server, &args, "agent");
+        assert!(result.starts_with("Error:"), "result: {result}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_create_library_entry_sanitizes_filename() {
+        let (server, root) = test_server_in_tempdir("sanitize");
+        // Slashes and spaces should collapse to underscores.
+        let args = serde_json::json!({"name": "evil/../name with space"});
+        let result = create_library_entry(&server, &args, "skill");
+        assert!(result.starts_with("Created:"), "result: {result}");
+        // No file should exist outside the expected skills dir.
+        let expected = root.join("library/skills");
+        let mut entries: Vec<_> = std::fs::read_dir(&expected)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        entries.sort();
+        assert_eq!(entries.len(), 1, "unexpected files: {entries:?}");
+        let fname = &entries[0];
+        assert!(fname.ends_with(".md"));
+        assert!(!fname.contains('/'), "filename escaped: {fname}");
+        assert!(!fname.contains(' '), "filename has space: {fname}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_create_library_entry_refuses_overwrite() {
+        let (server, root) = test_server_in_tempdir("overwrite");
+        let args = serde_json::json!({"name": "dupe"});
+        let first = create_library_entry(&server, &args, "tool");
+        assert!(first.starts_with("Created:"), "first: {first}");
+        let second = create_library_entry(&server, &args, "tool");
+        assert!(second.starts_with("Error:"), "second should refuse overwrite: {second}");
+        assert!(second.contains("already exists"), "second: {second}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_create_library_entry_unknown_kind() {
+        let (server, root) = test_server_in_tempdir("unknown-kind");
+        let args = serde_json::json!({"name": "x"});
+        let result = create_library_entry(&server, &args, "bogus");
+        assert!(result.starts_with("Error:"), "result: {result}");
+        assert!(result.contains("unknown kind"), "result: {result}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_tool_definitions_include_create_tools() {
+        let names: Vec<String> = tool_definitions()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
+            .collect();
+        for expected in ["create_agent", "create_skill", "create_tool", "create_workflow"] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "missing tool '{expected}' in {names:?}"
+            );
+        }
     }
 }
