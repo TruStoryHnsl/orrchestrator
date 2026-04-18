@@ -95,7 +95,20 @@ async fn main() -> Result<()> {
     // clone it now so the Library panel has content on first launch.
     app.library_clone_if_missing();
 
-    let result = run_loop(&mut terminal, &mut app).await;
+    // Task 7: Start the WebUI companion server on an OS-assigned port.
+    let webui = match orrch_webui::WebUiServer::start(0).await {
+        Ok(srv) => {
+            app.webui_port = Some(srv.port);
+            tracing::info!("WebUI available at http://127.0.0.1:{}", srv.port);
+            Some(srv)
+        }
+        Err(e) => {
+            tracing::warn!("WebUI failed to start: {e}");
+            None
+        }
+    };
+
+    let result = run_loop(&mut terminal, &mut app, webui).await;
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
@@ -163,6 +176,7 @@ async fn run_webedit() -> Result<()> {
 async fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    webui: Option<orrch_webui::WebUiServer>,
 ) -> Result<()> {
     let mut last_discovery = Instant::now();
     let mut last_feedback_reload = Instant::now();
@@ -170,6 +184,7 @@ async fn run_loop(
     let mut last_workflow_poll = Instant::now();
     let mut last_intake_poll = Instant::now();
     let mut last_pipeline_sync = Instant::now();
+    let mut last_webui_sync = Instant::now();
 
     // Background remote tasks — discovery + capability probes, never blocks render
     let (remote_tx, mut remote_rx) = mpsc::channel::<RemoteUpdate>(4);
@@ -346,6 +361,14 @@ async fn run_loop(
         // Sync pipeline progress every 10s — scans instruction inboxes for implemented markers
         if last_pipeline_sync.elapsed() > Duration::from_secs(10) {
             let vault = orrch_core::vault::vault_dir(&app.projects_dir);
+
+            // Snapshot ideas that are mid-distribution (progress=50, targets empty)
+            // so we can detect when distribution completes and kill the continuation session.
+            let awaiting_distribution: Vec<String> = app.ideas.iter()
+                .filter(|i| i.pipeline.progress == 50 && i.pipeline.targets.is_empty())
+                .map(|i| i.filename.clone())
+                .collect();
+
             let mut any_changed = false;
             for idea in &app.ideas {
                 if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
@@ -354,9 +377,26 @@ async fn run_loop(
                     }
                 }
             }
+            // Also sweep for intentions whose inboxes have fully cleared
+            let swept = orrch_core::vault::refresh_implementation_from_inboxes(&app.projects_dir, &vault);
+            if swept > 0 { any_changed = true; }
             if any_changed {
                 app.ideas = orrch_core::vault::load_ideas(&vault);
             }
+
+            // Kill intake continuation sessions whose distribution is now done
+            // (targets populated since the snapshot above).
+            for filename in &awaiting_distribution {
+                let now_has_targets = app.ideas.iter()
+                    .find(|i| &i.filename == filename)
+                    .is_some_and(|i| !i.pipeline.targets.is_empty());
+                if now_has_targets {
+                    let stem = filename.trim_end_matches(".md");
+                    let cont_name = format!("intake-cont-{stem}");
+                    orrch_core::windows::kill_session(orrch_core::windows::SessionCategory::Dev, &cont_name);
+                }
+            }
+
             last_pipeline_sync = Instant::now();
         }
 
@@ -383,6 +423,49 @@ async fn run_loop(
                 .map(|s| std::path::PathBuf::from(&s.cwd));
             app.workflow_status = cwd.and_then(|p| orrch_core::load_workflow_status(&p));
             last_workflow_poll = Instant::now();
+        }
+
+        // WebUI sync — push state and drain actions every ~1s
+        if last_webui_sync.elapsed() > Duration::from_secs(1) {
+            if let Some(ref srv) = webui {
+                srv.update_state(app.web_snapshot());
+                for action in srv.drain_actions() {
+                    use orrch_webui::WebAction;
+                    match action {
+                        WebAction::Key { ref key } => {
+                            use crossterm::event::KeyCode;
+                            let code = match key.as_str() {
+                                "n" => KeyCode::Char('n'),
+                                "s" => KeyCode::Char('s'),
+                                "r" => KeyCode::Char('r'),
+                                "X" => KeyCode::Char('X'),
+                                "Enter" | "\n" | "\r" => KeyCode::Enter,
+                                "Escape" => KeyCode::Esc,
+                                "Tab" => KeyCode::Tab,
+                                "ArrowUp" => KeyCode::Up,
+                                "ArrowDown" => KeyCode::Down,
+                                "ArrowLeft" => KeyCode::Left,
+                                "ArrowRight" => KeyCode::Right,
+                                _ => continue,
+                            };
+                            use crossterm::event::KeyModifiers;
+                            let _ = app.handle_key(code, KeyModifiers::empty());
+                        }
+                        WebAction::Retract { ref filename } => {
+                            let vault = orrch_core::vault::vault_dir(&app.projects_dir);
+                            if let Some(idea) = app.ideas.iter().find(|i| &i.filename == filename) {
+                                let mut state = idea.pipeline.clone();
+                                state.progress = 0;
+                                state.targets.clear();
+                                state.submitted_at = None;
+                                let _ = orrch_core::vault::save_pipeline_state(&vault, filename, &state);
+                            }
+                            app.ideas = orrch_core::vault::load_ideas(&vault);
+                        }
+                    }
+                }
+            }
+            last_webui_sync = Instant::now();
         }
 
         terminal.draw(|frame| ui::draw(frame, app))?;
