@@ -1851,6 +1851,15 @@ impl App {
             return Ok(());
         }
 
+        // Ctrl+U: copy WebUI URL to clipboard (global, any panel)
+        if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('u') {
+            if let Some(port) = self.webui_port {
+                let url = format!("http://localhost:{port}");
+                crate::editor::clipboard_set(&url);
+            }
+            return Ok(());
+        }
+
         // Global Esc: from List views opens app menu, from app menu closes it
         if code == KeyCode::Esc {
             match &self.sub {

@@ -65,6 +65,28 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Auto-wrap in a tmux session for isolation. Each orrchestrator instance
+    // owns its own tmux session and its own WebUI port.
+    // --no-tmux skips the wrap (set by the wrapper itself to prevent loops).
+    if std::env::var("TMUX").is_err() && !args.iter().any(|a| a == "--no-tmux") {
+        if let Ok(exe) = std::env::current_exe() {
+            let pid = std::process::id();
+            let session_name = format!("orrchestrator-{pid}");
+            let mut tmux_cmd_args: Vec<std::ffi::OsString> = vec![
+                "new-session".into(),
+                "-s".into(), session_name.into(),
+                "-n".into(), "orrchestrator".into(),
+                exe.into(),
+            ];
+            for a in &args { tmux_cmd_args.push(a.into()); }
+            tmux_cmd_args.push("--no-tmux".into());
+            if std::process::Command::new("tmux").args(&tmux_cmd_args).spawn().is_ok() {
+                std::process::exit(0);
+            }
+            // tmux not found or spawn failed — continue and run the TUI directly
+        }
+    }
+
     if !io::stdout().is_terminal() {
         bail!(
             "orrchestrator requires a real terminal.\n\

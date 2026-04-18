@@ -3666,14 +3666,14 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
     if let Some(port) = app.webui_port {
-        let port_widget = Paragraph::new(Line::from(vec![
+        let url_widget = Paragraph::new(Line::from(vec![
             Span::styled(
-                format!("⬡ :{port} "),
+                format!("⬡ http://localhost:{port} "),
                 Style::default().fg(Color::Rgb(0x4a, 0xaa, 0x99)),
             ),
         ]))
         .alignment(Alignment::Right);
-        frame.render_widget(port_widget, area);
+        frame.render_widget(url_widget, area);
     }
 }
 
