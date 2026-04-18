@@ -700,7 +700,7 @@ pub struct App {
     pub production_versions: Vec<ProductionEntry>,
     pub production_selected: usize,
 
-    // Vim / external editor
+    // Nvim / external editor
     pub vim_request: Option<VimRequest>,
     pub pending_editors: Vec<PendingEditor>,
 
@@ -3654,9 +3654,6 @@ impl App {
                     }
                 }
             }
-            KeyCode::Left => {
-                // ← at project list level does nothing (already at top)
-            }
             _ => {}
         }
         Ok(())
@@ -6008,7 +6005,7 @@ impl App {
         }
     }
 
-    /// Request an external vim session. Creates the temp file and sets vim_request.
+    /// Request an external nvim session. Creates the temp file and sets vim_request.
     fn request_vim(&mut self, kind: VimKind) {
         let file = match &kind {
             VimKind::GlobalFeedback | VimKind::ProjectFeedback(_) => {

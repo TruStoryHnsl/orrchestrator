@@ -58,7 +58,7 @@ pub fn clipboard_set(text: &str) -> bool {
         .is_some()
 }
 
-// ─── External Nvim Spawning ──────────────────────────────────────────
+// ─── External Nvim Spawning ─────────────────────────────────────────
 
 /// What kind of editing session this is.
 #[derive(Debug, Clone)]
@@ -112,7 +112,7 @@ fn find_terminal() -> Option<String> {
     None
 }
 
-/// Build nvim -c args that brand the window as orrchestrator-owned.
+/// Build nvim `-c` args that brand the window as orrchestrator-owned.
 ///
 /// Sets three things:
 /// 1. Terminal title (visible in taskbar / alt-tab)
@@ -127,7 +127,7 @@ fn vim_title_args(title: &str) -> Vec<String> {
     ]
 }
 
-/// Get the nvim -c args for branding (used by the blocking fallback in main.rs).
+/// Get the nvim `-c` args for branding (used by the blocking fallback in main.rs).
 pub fn vim_title_args_pub(title: &str) -> Vec<String> {
     vim_title_args(title)
 }
