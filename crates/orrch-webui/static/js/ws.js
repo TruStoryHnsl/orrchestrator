@@ -11,6 +11,7 @@ var WS = (function() {
       for (var i = 0; i < listeners.length; i++) listeners[i](lastState);
     };
     socket.onclose = function() { setTimeout(connect, 2000); };
+    socket.onerror = function() { socket.close(); };
   }
 
   function onState(fn) {
@@ -28,5 +29,7 @@ var WS = (function() {
 
   function key(k) { action({ action: 'key', key: k }); }
 
-  return { connect: connect, onState: onState, action: action, key: key };
+  function getLastState() { return lastState; }
+
+  return { connect: connect, onState: onState, action: action, key: key, getLastState: getLastState };
 })();

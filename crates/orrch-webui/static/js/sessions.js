@@ -53,7 +53,7 @@ var Sessions = (function() {
       code.title = 'Click to copy';
       var cmd = s.attach_cmd;
       code.addEventListener('click', function() {
-        navigator.clipboard.writeText(cmd);
+        navigator.clipboard.writeText(cmd).catch(function() {});
       });
       attachDiv.appendChild(code);
       item.appendChild(attachDiv);
