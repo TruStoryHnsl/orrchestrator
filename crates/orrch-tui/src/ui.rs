@@ -3649,7 +3649,7 @@ fn draw_set_logo_path(frame: &mut Frame, app: &App) {
 
 // ─── Status Bar ───────────────────────────────────────────────────────
 
-fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     if let Some((ref msg, when)) = app.last_notification {
         if when.elapsed().as_secs() < 5 {
             frame.render_widget(
@@ -3666,14 +3666,27 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
     if let Some(port) = app.webui_port {
-        let url_widget = Paragraph::new(Line::from(vec![
+        let label = format!(" ⬡ http://localhost:{port} ");
+        let badge_width = label.len() as u16;
+        let badge_area = Rect {
+            x: area.x + area.width.saturating_sub(badge_width),
+            y: area.y,
+            width: badge_width.min(area.width),
+            height: 1,
+        };
+        app.webui_badge_area = Some(badge_area);
+        let badge = Paragraph::new(Line::from(vec![
             Span::styled(
-                format!("⬡ http://localhost:{port} "),
-                Style::default().fg(Color::Rgb(0x4a, 0xaa, 0x99)),
+                label,
+                Style::default()
+                    .fg(Color::Rgb(0x1a, 0x1a, 0x2e))
+                    .bg(Color::Rgb(0x4a, 0xaa, 0x99))
+                    .add_modifier(Modifier::BOLD),
             ),
-        ]))
-        .alignment(Alignment::Right);
-        frame.render_widget(url_widget, area);
+        ]));
+        frame.render_widget(badge, badge_area);
+    } else {
+        app.webui_badge_area = None;
     }
 }
 
