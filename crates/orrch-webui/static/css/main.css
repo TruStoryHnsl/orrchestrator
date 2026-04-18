@@ -6,7 +6,12 @@
   --radius: 4px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: monospace; font-size: 13px; }
+html, body {
+  background: var(--bg); color: var(--text);
+  font-family: monospace; font-size: 13px;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
 
 .index-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
 .index-card { text-align: center; border: 1px solid var(--border); border-radius: 8px; padding: 40px; }
@@ -20,9 +25,9 @@ body { background: var(--bg); color: var(--text); font-family: monospace; font-s
 .terminal-body { background: #000; }
 #terminal { width: 100vw; height: 100vh; }
 
-.ui-body { display: flex; flex-direction: column; height: 100vh; }
-.top-nav { display: flex; gap: 2px; padding: 4px; background: var(--bg2); border-bottom: 1px solid var(--border2); flex-shrink: 0; }
-.nav-tab { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text-dim); padding: 4px 14px; cursor: pointer; font-family: monospace; }
+.ui-body { display: flex; flex-direction: column; height: 100dvh; height: 100vh; padding-top: env(safe-area-inset-top); }
+.top-nav { display: flex; gap: 2px; padding: 4px; background: var(--bg2); border-bottom: 1px solid var(--border2); flex-shrink: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.nav-tab { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--radius); color: var(--text-dim); padding: 8px 14px; cursor: pointer; font-family: monospace; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
 .nav-tab.active { background: #0f2a3a; border-color: var(--border); color: var(--text-accent); }
 main { flex: 1; overflow: hidden; position: relative; }
 .panel { display: none; height: 100%; overflow: auto; }
@@ -52,7 +57,7 @@ main { flex: 1; overflow: hidden; position: relative; }
 .status-bar { background: var(--bg2); border-top: 1px solid var(--border2); padding: 3px 8px; color: var(--text-dim); font-size: 11px; display: flex; justify-content: space-between; flex-shrink: 0; }
 .port-badge { color: var(--green); }
 
-.mobile-pad { background: rgba(5,13,24,0.92); border-top: 1px solid rgba(26,58,90,0.5); backdrop-filter: blur(4px); padding: 8px 10px; flex-shrink: 0; }
+.mobile-pad { background: rgba(5,13,24,0.92); border-top: 1px solid rgba(26,58,90,0.5); backdrop-filter: blur(4px); padding: 8px 10px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); flex-shrink: 0; user-select: none; -webkit-user-select: none; }
 .hint-strip { display: flex; gap: 4px; margin-bottom: 8px; }
 .hint-btn { flex: 1; background: rgba(15,42,58,0.85); border: 1px solid rgba(26,74,106,0.6); border-radius: var(--radius); color: var(--text-accent); font-size: 11px; text-align: center; padding: 6px 2px; cursor: pointer; font-family: monospace; user-select: none; }
 .toggle-btn { flex: 0 0 auto; padding: 6px 10px; }
@@ -68,11 +73,23 @@ main { flex: 1; overflow: hidden; position: relative; }
 .dpad-btn { background: rgba(26,58,90,0.9); border: 1px solid rgba(42,90,138,0.8); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 20px; cursor: pointer; user-select: none; }
 .dpad-center { background: rgba(15,25,40,0.6); border: 1px solid rgba(30,50,70,0.4); }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) {
   .master-detail { flex-direction: column; }
-  .master { width: 100%; height: 200px; border-right: none; border-bottom: 1px solid var(--border2); }
+  .master { width: 100%; max-height: 40vh; height: auto; border-right: none; border-bottom: 1px solid var(--border2); flex-shrink: 0; }
+  .detail { padding: 10px 12px 20px; }
   .ui-body { overflow: hidden; }
+  .list-item { padding: 10px 12px; }
+  .item-name { font-size: 14px; }
+  .item-meta { font-size: 12px; }
+  .action-btn { padding: 12px; font-size: 14px; }
+  .detail-title { font-size: 17px; }
+  .dpad { width: 140px !important; height: 140px !important; }
+  .dpad-btn { font-size: 24px !important; }
+  .pad-btn { padding: 12px 4px !important; font-size: 13px !important; }
+  .pad-enter { padding: 16px 4px !important; font-size: 15px !important; }
+  .hint-btn { padding: 10px 4px !important; font-size: 12px !important; }
+  .action-cluster { width: 120px !important; }
 }
-@media (min-width: 769px) {
+@media (min-width: 769px) and (pointer: fine) {
   .mobile-pad { display: none; }
 }

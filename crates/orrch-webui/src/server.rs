@@ -32,6 +32,7 @@ pub struct ServerState {
 pub fn build_router(srv: ServerState) -> Router {
     Router::new()
         .route("/", get(serve_index))
+        .route("/landing", get(serve_landing))
         .route("/terminal", get(serve_terminal))
         .route("/ui", get(serve_ui))
         .route("/static/css/main.css", get(serve_main_css))
@@ -46,7 +47,12 @@ pub fn build_router(srv: ServerState) -> Router {
         .with_state(srv)
 }
 
-async fn serve_index() -> impl IntoResponse { html(assets::INDEX_HTML) }
+// `/` serves the native UI directly — that's the primary experience.
+// `/terminal` still serves the xterm mirror for anyone who wants it.
+// The old two-button landing page (assets::INDEX_HTML) is still available
+// at `/landing` for reference/debug.
+async fn serve_index() -> impl IntoResponse { html(assets::UI_HTML) }
+async fn serve_landing() -> impl IntoResponse { html(assets::INDEX_HTML) }
 async fn serve_terminal() -> impl IntoResponse { html(assets::TERMINAL_HTML) }
 async fn serve_ui() -> impl IntoResponse { html(assets::UI_HTML) }
 async fn serve_main_css() -> impl IntoResponse { css(assets::MAIN_CSS) }

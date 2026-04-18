@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>orrchestrator</title>
 <link rel="stylesheet" href="/static/css/main.css">
 </head>
@@ -14,7 +16,12 @@
   <div id="panel-hypervise" class="panel"></div>
   <div id="panel-analyze" class="panel"></div>
 </main>
-<div id="status-bar" class="status-bar"></div>
+<div id="status-bar" class="status-bar">
+  <span id="status-left"></span>
+  <span id="status-right">
+    <a href="/terminal" style="color:#4a9; text-decoration: none; margin-right: 8px;">terminal ⇗</a>
+  </span>
+</div>
 <div id="mobile-pad" class="mobile-pad"></div>
 
 <script src="/static/js/ws.js"></script>
