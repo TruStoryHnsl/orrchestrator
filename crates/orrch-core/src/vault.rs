@@ -3,6 +3,7 @@
 //! Stored in ~/projects/orrchestrator/plans/*.md
 //! Pipeline state stored in ~/projects/orrchestrator/plans/.pipeline/<filename>.json
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
@@ -245,6 +246,83 @@ pub fn update_pipeline_progress(vault_dir: &Path, filename: &str, progress: u8) 
         state.submitted_at = None;
     }
     save_pipeline_state(vault_dir, filename, &state)
+}
+
+/// Scan all project `instructions_inbox.md` files and advance any submitted
+/// intention that has no remaining pending instructions to 100%.
+///
+/// Logic:
+/// - Build a set of filenames and INS-NNN codes that still appear in any inbox.
+/// - For intentions at 50%+ with no targets: if no inbox references their file → 100%.
+/// - For intentions with coded targets: if all codes are gone from inboxes → 100%.
+///
+/// Returns the number of intentions updated.
+pub fn refresh_implementation_from_inboxes(projects_dir: &Path, vault_dir: &Path) -> usize {
+    let mut pending_sources: HashSet<String> = HashSet::new();
+    let mut pending_codes: HashSet<String> = HashSet::new();
+
+    if let Ok(entries) = fs::read_dir(projects_dir) {
+        for entry in entries.flatten() {
+            let inbox = entry.path().join("instructions_inbox.md");
+            if let Ok(content) = fs::read_to_string(&inbox) {
+                for line in content.lines() {
+                    if let Some(start) = line.find("(source: plans/") {
+                        let tail = &line[start + "(source: plans/".len()..];
+                        if let Some(end) = tail.find(')') {
+                            pending_sources.insert(tail[..end].to_string());
+                        }
+                    }
+                    if line.starts_with("### ") {
+                        if let Some(colon) = line.find(':') {
+                            let code = line[4..colon].trim();
+                            if code.starts_with("INS-") {
+                                pending_codes.insert(code.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let ideas = load_ideas(vault_dir);
+    let mut updated = 0;
+
+    for idea in &ideas {
+        let state = &idea.pipeline;
+        if state.is_complete() || !state.is_submitted() {
+            continue;
+        }
+
+        let source_pending = pending_sources.contains(&idea.filename);
+        let mut new_state = state.clone();
+
+        if !source_pending && state.progress >= 50 && state.targets.is_empty() {
+            new_state.progress = 100;
+        } else if !state.targets.is_empty() {
+            let mut changed = false;
+            for target in &mut new_state.targets {
+                if target.codes.is_empty() {
+                    continue;
+                }
+                let all_done = target.codes.iter().all(|c| !pending_codes.contains(c));
+                if all_done && target.implemented_count < target.instruction_count {
+                    target.implemented_count = target.instruction_count;
+                    changed = true;
+                }
+            }
+            if changed {
+                new_state.recompute_progress();
+            }
+        }
+
+        if new_state.progress != state.progress {
+            let _ = save_pipeline_state(vault_dir, &idea.filename, &new_state);
+            updated += 1;
+        }
+    }
+
+    updated
 }
 
 /// Per-idea intake workspace directory: `<vault>/.pipeline/<idea_stem>/`
