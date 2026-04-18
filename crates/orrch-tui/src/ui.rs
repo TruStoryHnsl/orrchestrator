@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -1736,7 +1736,7 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
         (area, None)
     };
 
-    let title = format!(" Intentions ({}) — n=new s=submit Enter=edit ", app.ideas.len());
+    let title = format!(" Intentions ({}) — n=new s=submit X=retract Enter=edit ", app.ideas.len());
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
         .block(Block::default().title(title).borders(Borders::ALL))
@@ -2664,6 +2664,10 @@ fn draw_external_session(frame: &mut Frame, app: &App, area: Rect, pid: u32) {
 // ─── Sessions Tab ────────────────────────────────────────────────────
 
 fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.session_log_view {
+        draw_session_log_browser(frame, app, area);
+        return;
+    }
     use orrch_core::windows::{SessionCategory, SessionStatus};
 
     // Refresh sessions on each render (fast — just reads tmux state)
@@ -2832,6 +2836,88 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             );
         frame.render_widget(tree_block, wf_area);
     }
+}
+
+fn draw_session_log_browser(frame: &mut Frame, app: &App, area: Rect) {
+    if app.session_logs.is_empty() {
+        let msg = Paragraph::new("No session logs found.\nSessions are logged to orrchestrator/.session-logs/ as they run.")
+            .block(Block::default().title(" Session Logs — Esc=close ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    // Split: left = log list, right = head+tail viewer
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(area);
+
+    // ── Left: log list ──
+    let list_items: Vec<ListItem> = app.session_logs.iter().enumerate().map(|(i, log)| {
+        let selected = i == app.session_logs_selected;
+        let age = {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let secs = now.saturating_sub(log.started);
+            if secs < 3600 { format!("{}m ago", secs / 60) }
+            else if secs < 86400 { format!("{}h ago", secs / 3600) }
+            else { format!("{}d ago", secs / 86400) }
+        };
+        let style = if selected {
+            Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_MUTED)
+        };
+        ListItem::new(Line::from(vec![
+            Span::styled(if selected { " ▶ " } else { "   " }, Style::default().fg(ACCENT)),
+            Span::styled(&log.name, style),
+            Span::styled(format!("  {age}"), Style::default().fg(TEXT_DIM)),
+        ]))
+    }).collect();
+
+    let list = List::new(list_items)
+        .block(Block::default().title(format!(" Session Logs ({}) — Esc=close ↑↓=select ", app.session_logs.len())).borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
+    frame.render_widget(list, chunks[0]);
+
+    // ── Right: head+tail viewer ──
+    let Some(log) = app.session_logs.get(app.session_logs_selected) else { return; };
+    let (head, tail) = orrch_core::windows::read_session_log_head_tail(&log.path, 50);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header block
+    lines.push(Line::styled(format!("Session:  {}", log.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)));
+    lines.push(Line::styled(format!("Category: {}", log.category), Style::default().fg(TEXT_MUTED)));
+    lines.push(Line::styled(format!("Attach:   {}", log.attach_cmd), Style::default().fg(CYAN)));
+    lines.push(Line::styled(format!("Goal:     {}", log.goal), Style::default().fg(TEXT_DIM)));
+    lines.push(Line::styled("─".repeat(60), Style::default().fg(TEXT_DIM)));
+
+    // Head
+    lines.push(Line::styled("── First 50 lines ─────────────────────────────────────────", Style::default().fg(ACCENT)));
+    for l in &head {
+        lines.push(Line::styled(l.clone(), Style::default().fg(TEXT)));
+    }
+    if head.is_empty() {
+        lines.push(Line::styled("  (no output yet)", Style::default().fg(TEXT_DIM)));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("── Last 50 lines ──────────────────────────────────────────", Style::default().fg(ACCENT)));
+    for l in &tail {
+        lines.push(Line::styled(l.clone(), Style::default().fg(TEXT)));
+    }
+
+    let total = lines.len();
+    let scroll = app.session_log_scroll.min(total.saturating_sub(1)) as u16;
+    let viewer = Paragraph::new(lines)
+        .scroll((scroll, 0))
+        .block(Block::default()
+            .title(format!(" Log Viewer — PgUp/PgDn=scroll ({} lines) ", total))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_DIM)));
+    frame.render_widget(viewer, chunks[1]);
 }
 
 fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
@@ -3575,6 +3661,16 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(line).style(Style::default().bg(BG_DARK)),
         area,
     );
+    if let Some(port) = app.webui_port {
+        let port_widget = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("⬡ :{port} "),
+                Style::default().fg(Color::Rgb(0x4a, 0xaa, 0x99)),
+            ),
+        ]))
+        .alignment(Alignment::Right);
+        frame.render_widget(port_widget, area);
+    }
 }
 
 /// Build a styled hint line with highlighted keys grouped by function.
@@ -3610,7 +3706,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
         (Panel::Design, SubView::List) => {
             match app.design_sub {
                 crate::app::DesignSub::Intentions => hint_line(&[
-                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("r", "rename"), ("R", "review"), ("d", "delete"),
+                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("r", "rename"), ("R", "review"), ("d", "delete"), ("X", "retract"),
                     ("|", ""),
                     ("↑↓", "select"), ("Tab", "sub-panel"),
                 ]),
@@ -3638,15 +3734,21 @@ fn build_hint_line(app: &App) -> Line<'static> {
             ("←→", "tabs"), ("v", "preview"), ("b", "build"), ("D", "rollback tag"), ("r", "refresh"), ("Esc", "menu"),
         ]),
         (Panel::Hypervise, SubView::List) => {
-            let has_sessions = !app.managed_sessions.is_empty();
-            if has_sessions {
+            if app.session_log_view {
                 hint_line(&[
-                    ("Enter", "focus"), ("i", "send input"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"),
+                    ("↑↓", "select"), ("PgUp/PgDn", "scroll log"), ("Esc", "close logs"),
                 ])
             } else {
-                hint_line(&[
-                    ("R", "refresh"), ("Esc", "menu"),
-                ])
+                let has_sessions = !app.managed_sessions.is_empty();
+                if has_sessions {
+                    hint_line(&[
+                        ("Enter", "focus"), ("i", "send input"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"), ("L", "logs"),
+                    ])
+                } else {
+                    hint_line(&[
+                        ("R", "refresh"), ("L", "logs"), ("Esc", "menu"),
+                    ])
+                }
             }
         }
         (_, SubView::SteerSession(_)) => hint_line(&[
