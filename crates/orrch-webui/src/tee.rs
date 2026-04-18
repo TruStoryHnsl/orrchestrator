@@ -1,10 +1,12 @@
 //! TeeWriter: writes bytes to a local sink (stdout) AND broadcasts them
-//! to a tokio broadcast channel for consumption by WebUI terminal clients.
+//! to a tokio broadcast channel for WebUI terminal clients.
 //!
-//! Failed broadcasts (no receivers, backpressure) are silently dropped.
-//! The local sink is the source of truth; if writing to it fails, the
-//! error is propagated — that's what the ratatui backend needs to stay
-//! in sync.
+//! Critically, broadcasts are deferred until `flush()` is called. This
+//! matters because ratatui emits ANSI sequences byte-by-byte via
+//! `queue!`, and many small WebSocket frames cause xterm.js's parser
+//! to choke on split escape sequences. By coalescing into one big
+//! broadcast per frame flush, we guarantee each broadcast is a coherent
+//! chunk of output.
 
 use std::io::{self, Write};
 
@@ -13,27 +15,32 @@ use tokio::sync::broadcast;
 pub struct TeeWriter<W: Write> {
     local: W,
     tx: broadcast::Sender<Vec<u8>>,
-    /// Max size of a single broadcast chunk. Large chunks are split.
-    chunk_size: usize,
+    /// Accumulator: bytes written since the last flush. Sent as a single
+    /// broadcast message on flush().
+    pending: Vec<u8>,
+    /// Soft cap for pending buffer — if we accumulate this many bytes
+    /// without a flush, broadcast anyway so we don't grow unbounded.
+    max_pending: usize,
 }
 
 impl<W: Write> TeeWriter<W> {
-    pub fn new(local: W, tx: broadcast::Sender<Vec<u8>>, chunk_size: usize) -> Self {
-        Self { local, tx, chunk_size }
+    pub fn new(local: W, tx: broadcast::Sender<Vec<u8>>, max_pending: usize) -> Self {
+        Self { local, tx, pending: Vec::with_capacity(4096), max_pending }
     }
 
-    fn broadcast_bytes(&self, buf: &[u8]) {
-        for chunk in buf.chunks(self.chunk_size) {
-            let receivers = self.tx.receiver_count();
-            let result = self.tx.send(chunk.to_vec());
-            if receivers > 0 {
-                tracing::info!(
-                    "TEE: {} bytes -> {} receivers, result={:?}",
-                    chunk.len(),
-                    receivers,
-                    result.as_ref().map(|n| *n).map_err(|_| "no receivers")
-                );
-            }
+    fn broadcast_pending(&mut self) {
+        if self.pending.is_empty() { return; }
+        let receivers = self.tx.receiver_count();
+        let len = self.pending.len();
+        let payload = std::mem::replace(&mut self.pending, Vec::with_capacity(4096));
+        let result = self.tx.send(payload);
+        if receivers > 0 {
+            tracing::info!(
+                "TEE flush: {} bytes -> {} receivers, result={:?}",
+                len,
+                receivers,
+                result.as_ref().map(|n| *n).map_err(|_| "no receivers")
+            );
         }
     }
 }
@@ -41,20 +48,27 @@ impl<W: Write> TeeWriter<W> {
 impl<W: Write> Write for TeeWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let n = self.local.write(buf)?;
-        // Broadcast only what was actually written to local.
         if n > 0 {
-            self.broadcast_bytes(&buf[..n]);
+            self.pending.extend_from_slice(&buf[..n]);
+            if self.pending.len() >= self.max_pending {
+                self.broadcast_pending();
+            }
         }
         Ok(n)
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.local.flush()
-    }
-
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         self.local.write_all(buf)?;
-        self.broadcast_bytes(buf);
+        self.pending.extend_from_slice(buf);
+        if self.pending.len() >= self.max_pending {
+            self.broadcast_pending();
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.local.flush()?;
+        self.broadcast_pending();
         Ok(())
     }
 }
