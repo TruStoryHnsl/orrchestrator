@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
 use orrch_core::process_manager::SessionEvent;
-use orrch_core::usage::{self, UsageRecord, UsageEvent, UsageTracker};
+use orrch_core::usage::{self, UsageRecord, UsageEvent};
 use orrch_core::{
     analyze_output, infer_state, load_projects, BackendKind, ColorTag,
     OutputSignal, ProcessManager, Project, SessionState, Temperature, CONTINUE_DEV_PROMPT,
@@ -855,7 +855,7 @@ impl App {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let projects_dir = default_projects_dir();
-        let mut all_projects = load_projects(&projects_dir);
+        let all_projects = load_projects(&projects_dir);
         let mut facilities = Vec::new();
         let mut regular = Vec::new();
         for p in all_projects {
@@ -1734,7 +1734,7 @@ impl App {
                     self.project_selected = (self.project_selected + delta as usize).min(max);
                 }
             }
-            SubView::ProjectDetail(pidx) => {
+            SubView::ProjectDetail(_pidx) => {
                 match self.detail_focus {
                     DetailFocus::SectionSelect => {
                         // Mouse scroll in SectionSelect: move section cursor
@@ -3419,7 +3419,7 @@ KeyCode::Char('i') => {
                                 // the Claude session knows about them when
                                 // routing.
                                 let project_dir = self.projects_dir.join("orrchestrator");
-                                let scaffolded_hint = if scaffolded.is_empty() {
+                                let _scaffolded_hint = if scaffolded.is_empty() {
                                     String::new()
                                 } else {
                                     format!(
@@ -3492,7 +3492,7 @@ KeyCode::Char('i') => {
             }
         }
 
-        let count = self.projects.len() + self.facilities.iter().map(|f| 1 + f.sub_projects.len()).sum::<usize>();
+        let _count = self.projects.len() + self.facilities.iter().map(|f| 1 + f.sub_projects.len()).sum::<usize>();
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
@@ -4272,6 +4272,7 @@ KeyCode::Char('i') => {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn key_detail_devmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         let total = self.devmap_flat_count(proj_idx);
         match key {
@@ -4356,6 +4357,7 @@ KeyCode::Char('i') => {
     }
 
     /// Move the currently selected feature in the dev map.
+    #[allow(dead_code)]
     fn devmap_move_feature(&mut self, proj_idx: usize, direction: orrch_core::MoveDirection) {
         let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) else {
             return;
@@ -6285,6 +6287,7 @@ KeyCode::Char('i') => {
 
     // ─── Feedback Tab ────────────────────────────────────────────
 
+    #[allow(dead_code)]
     fn key_feedback_tab(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
@@ -6615,6 +6618,7 @@ fn spawn_correction_processor(
 
 /// Kill an existing tmux session if it exists, then create a new one running a script.
 /// Returns Ok(()) on success.
+#[allow(dead_code)]
 fn tmux_spawn_session(session_name: &str, runner_path: &Path) -> anyhow::Result<()> {
     // Kill any existing session with this name (prevents "duplicate session" errors)
     let _ = std::process::Command::new("tmux")

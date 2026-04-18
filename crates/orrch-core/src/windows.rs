@@ -458,7 +458,7 @@ pub fn list_sessions_in(cat: SessionCategory) -> Vec<ManagedSession> {
         let win_name = parts[1].to_string();
         let cwd = parts[2].to_string();
         let active = parts[3] == "1";
-        let cmd = parts[4];
+        let _cmd = parts[4];
 
         // Skip the default "hub" placeholder window
         if win_name == "hub" { return None; }

@@ -513,7 +513,7 @@ impl DirEntry {
             "lock" => "Lock file",
             "txt" => "Text",
             "" => "File",
-            other => return "File", // can't return dynamic str, just "File"
+            _other => return "File", // can't return dynamic str, just "File"
         }
     }
 
@@ -586,15 +586,6 @@ pub fn load_deprecated(projects_dir: &Path) -> Vec<DirEntry> {
         return Vec::new();
     }
     list_directory(&deprecated_dir)
-}
-
-fn has_subdirectories(path: &Path) -> bool {
-    std::fs::read_dir(path).map(|entries| {
-        entries.flatten().any(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            e.path().is_dir() && !name.starts_with('.')
-        })
-    }).unwrap_or(false)
 }
 
 fn load_sub_projects(path: &Path) -> Vec<Project> {
