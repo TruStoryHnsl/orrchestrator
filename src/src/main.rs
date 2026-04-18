@@ -59,10 +59,17 @@ async fn main() -> Result<()> {
         println!();
         println!("USAGE:");
         println!("  orrchestrator            Launch the TUI (default)");
+        println!("  orrchestrator --web      Open the WebUI of the running instance in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
         println!("  orrchestrator --help     Show this help");
         return Ok(());
+    }
+
+    // --web: find a running instance's WebUI port and open it in the browser.
+    // Looks for /tmp/orrch-webui-*.port files written by running instances.
+    if args.iter().any(|a| a == "--web") {
+        return open_webui_in_browser();
     }
 
     // Auto-wrap in a tmux session for isolation. Each orrchestrator instance
@@ -118,10 +125,14 @@ async fn main() -> Result<()> {
     app.library_clone_if_missing();
 
     // Task 7: Start the WebUI companion server on an OS-assigned port.
+    let pid = std::process::id();
+    let port_file = std::path::PathBuf::from(format!("/tmp/orrch-webui-{pid}.port"));
     let webui = match orrch_webui::WebUiServer::start(0).await {
         Ok(srv) => {
             app.webui_port = Some(srv.port);
             tracing::info!("WebUI available at http://127.0.0.1:{}", srv.port);
+            // Advertise port so `orrchestrator --web` can find this instance
+            let _ = std::fs::write(&port_file, srv.port.to_string());
             Some(srv)
         }
         Err(e) => {
@@ -131,6 +142,9 @@ async fn main() -> Result<()> {
     };
 
     let result = run_loop(&mut terminal, &mut app, webui).await;
+
+    // Remove port advertisement file
+    let _ = std::fs::remove_file(&port_file);
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
@@ -150,6 +164,45 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     }
     result
+}
+
+/// `--web` entry point: find a running instance's WebUI port and open it.
+///
+/// Reads /tmp/orrch-webui-*.port files written by running TUI instances.
+/// If multiple files exist, picks the most recently modified one.
+/// Prints the URL and opens it with xdg-open.
+fn open_webui_in_browser() -> Result<()> {
+    let mut candidates: Vec<(std::time::SystemTime, std::path::PathBuf, u16)> = std::fs::read_dir("/tmp")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if !name.starts_with("orrch-webui-") || !name.ends_with(".port") { return None; }
+            let port_str = std::fs::read_to_string(&path).ok()?;
+            let port: u16 = port_str.trim().parse().ok()?;
+            let mtime = entry.metadata().ok()?.modified().ok()?;
+            Some((mtime, path, port))
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        eprintln!("No running orrchestrator instance found (no /tmp/orrch-webui-*.port files).");
+        eprintln!("Start orrchestrator first, then run `orrchestrator --web`.");
+        std::process::exit(1);
+    }
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    let port = candidates[0].2;
+    let url = format!("http://localhost:{port}");
+    println!("Opening {url}");
+    let _ = std::process::Command::new("xdg-open")
+        .arg(&url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    Ok(())
 }
 
 /// Resolve the workforces directory for the web editor.
@@ -500,6 +553,17 @@ async fn run_loop(
                         }
                         MouseEventKind::ScrollDown => {
                             app.handle_scroll(3);
+                        }
+                        MouseEventKind::Down(_) => {
+                            // Click on the WebUI URL badge → open browser + copy URL
+                            if let Some(badge) = app.webui_badge_area {
+                                let (cx, cy) = (mouse.column, mouse.row);
+                                if cy >= badge.y && cy < badge.y + badge.height
+                                    && cx >= badge.x && cx < badge.x + badge.width
+                                {
+                                    app.open_webui();
+                                }
+                            }
                         }
                         _ => {}
                     }

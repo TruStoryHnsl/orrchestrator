@@ -837,6 +837,9 @@ pub struct App {
 
     /// Port the WebUI server is listening on, or None if not started.
     pub webui_port: Option<u16>,
+
+    /// Screen area occupied by the WebUI URL badge (for mouse click detection).
+    pub webui_badge_area: Option<ratatui::layout::Rect>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1058,6 +1061,7 @@ impl App {
             session_log_view: false,
             session_log_scroll: 0,
             webui_port: None,
+            webui_badge_area: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1458,6 +1462,19 @@ impl App {
     /// already running it just re-notifies the URL.
     ///
     /// Wired to Ctrl+w in the Design > Workforce panel.
+    /// Copy WebUI URL to clipboard and open it in the system browser.
+    pub fn open_webui(&self) {
+        if let Some(port) = self.webui_port {
+            let url = format!("http://localhost:{port}");
+            crate::editor::clipboard_set(&url);
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&url)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    }
+
     pub fn launch_webedit(&mut self) {
         if let Some(handle) = &self.webedit_server {
             let url = handle.url();
@@ -1851,12 +1868,9 @@ impl App {
             return Ok(());
         }
 
-        // Ctrl+U: copy WebUI URL to clipboard (global, any panel)
+        // Ctrl+U: open WebUI in browser + copy URL to clipboard (global, any panel)
         if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('u') {
-            if let Some(port) = self.webui_port {
-                let url = format!("http://localhost:{port}");
-                crate::editor::clipboard_set(&url);
-            }
+            self.open_webui();
             return Ok(());
         }
 
