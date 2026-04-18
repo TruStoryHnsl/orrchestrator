@@ -20,7 +20,8 @@ pub async fn handle_pty_ws(mut socket: WebSocket) {
 
     let mut cmd = CommandBuilder::new("tmux");
     cmd.args(["attach-session", "-t", "orrchestrator"]);
-    let _child = match pair.slave.spawn_command(cmd) {
+    let _child;
+    _child = match pair.slave.spawn_command(cmd) {
         Ok(c) => c,
         Err(_) => {
             let mut sh = CommandBuilder::new("bash");
@@ -34,6 +35,7 @@ pub async fn handle_pty_ws(mut socket: WebSocket) {
             }
         }
     };
+    drop(pair.slave);
 
     let mut reader = match pair.master.try_clone_reader() {
         Ok(r) => r,
@@ -81,7 +83,10 @@ pub async fn handle_pty_ws(mut socket: WebSocket) {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
                         if let Ok(mut w) = writer2.lock() {
-                            let _ = w.write_all(&data);
+                            if w.write_all(&data).is_err() {
+                                tracing::warn!("PTY stdin write failed; process likely dead");
+                                break;
+                            }
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
