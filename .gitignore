@@ -58,4 +58,6 @@ entities.json
 workforces/new_workforce_*.md
 plans/.pipeline/*.md.json
 plans/.pipeline/*/
-\
+
+# Session logs (written continuously by tmux pipe-pane — must not trigger cargo watch)
+.session-logs/

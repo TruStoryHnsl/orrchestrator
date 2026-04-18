@@ -3,6 +3,7 @@
 //! Stored in ~/projects/orrchestrator/plans/*.md
 //! Pipeline state stored in ~/projects/orrchestrator/plans/.pipeline/<filename>.json
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,10 @@ pub struct PipelineTarget {
     pub project: String,
     pub instruction_count: u32,
     pub implemented_count: u32,
+    /// Specific INS codes routed to this project (e.g. ["INS-011", "INS-012"]).
+    /// Empty means the codes aren't tracked — fall back to inbox scanning.
+    #[serde(default)]
+    pub codes: Vec<String>,
 }
 
 impl PipelineState {
@@ -255,6 +260,83 @@ pub fn update_pipeline_progress(vault_dir: &Path, filename: &str, progress: u8) 
     save_pipeline_state(vault_dir, filename, &state)
 }
 
+/// Scan all project `instructions_inbox.md` files and advance any submitted
+/// intention that has no remaining pending instructions to 100%.
+///
+/// Logic:
+/// - Build a set of filenames and INS-NNN codes that still appear in any inbox.
+/// - For intentions at 50%+ with no targets: if no inbox references their file → 100%.
+/// - For intentions with coded targets: if all codes are gone from inboxes → 100%.
+///
+/// Returns the number of intentions updated.
+pub fn refresh_implementation_from_inboxes(projects_dir: &Path, vault_dir: &Path) -> usize {
+    let mut pending_sources: HashSet<String> = HashSet::new();
+    let mut pending_codes: HashSet<String> = HashSet::new();
+
+    if let Ok(entries) = fs::read_dir(projects_dir) {
+        for entry in entries.flatten() {
+            let inbox = entry.path().join("instructions_inbox.md");
+            if let Ok(content) = fs::read_to_string(&inbox) {
+                for line in content.lines() {
+                    if let Some(start) = line.find("(source: plans/") {
+                        let tail = &line[start + "(source: plans/".len()..];
+                        if let Some(end) = tail.find(')') {
+                            pending_sources.insert(tail[..end].to_string());
+                        }
+                    }
+                    if line.starts_with("### ") {
+                        if let Some(colon) = line.find(':') {
+                            let code = line[4..colon].trim();
+                            if code.starts_with("INS-") {
+                                pending_codes.insert(code.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let ideas = load_ideas(vault_dir);
+    let mut updated = 0;
+
+    for idea in &ideas {
+        let state = &idea.pipeline;
+        if state.is_complete() || !state.is_submitted() {
+            continue;
+        }
+
+        let source_pending = pending_sources.contains(&idea.filename);
+        let mut new_state = state.clone();
+
+        if !source_pending && state.progress >= 50 && state.targets.is_empty() {
+            new_state.progress = 100;
+        } else if !state.targets.is_empty() {
+            let mut changed = false;
+            for target in &mut new_state.targets {
+                if target.codes.is_empty() {
+                    continue;
+                }
+                let all_done = target.codes.iter().all(|c| !pending_codes.contains(c));
+                if all_done && target.implemented_count < target.instruction_count {
+                    target.implemented_count = target.instruction_count;
+                    changed = true;
+                }
+            }
+            if changed {
+                new_state.recompute_progress();
+            }
+        }
+
+        if new_state.progress != state.progress {
+            let _ = save_pipeline_state(vault_dir, &idea.filename, &new_state);
+            updated += 1;
+        }
+    }
+
+    updated
+}
+
 /// Per-idea intake workspace directory: `<vault>/.pipeline/<idea_stem>/`
 /// where idea_stem is the filename with the `.md` extension stripped.
 ///
@@ -350,10 +432,69 @@ pub fn set_pipeline_targets(vault_dir: &Path, filename: &str, package_name: &str
     save_pipeline_state(vault_dir, filename, &state)
 }
 
+/// Backfill pipeline targets from workflow.json's `routed` field.
+/// Called when targets are empty but the idea has already been processed.
+/// Returns true if targets were populated.
+pub fn sync_targets_from_workflow(vault_dir: &Path, idea_filename: &str) -> bool {
+    let workspace = intake_workspace(vault_dir, idea_filename);
+    let workflow_path = workspace.join("workflow.json");
+    let bytes = match fs::read(&workflow_path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct WorkflowRouted {
+        #[serde(default)]
+        routed: std::collections::HashMap<String, Vec<String>>,
+    }
+    let parsed: WorkflowRouted = match serde_json::from_slice(&bytes) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    if parsed.routed.is_empty() { return false; }
+
+    let pipeline_dir = vault_dir.join(".pipeline");
+    let mut state = load_pipeline_state(&pipeline_dir, idea_filename);
+    if !state.targets.is_empty() { return false; } // already set
+
+    let targets: Vec<PipelineTarget> = parsed.routed.into_iter().map(|(project, codes)| {
+        let instruction_count = codes.len() as u32;
+        PipelineTarget { project, instruction_count, implemented_count: 0, codes }
+    }).collect();
+
+    state.targets = targets;
+    if state.progress < 50 { state.progress = 50; }
+    let _ = save_pipeline_state(vault_dir, idea_filename, &state);
+    true
+}
+
 /// Scan a project's instructions_inbox.md and PLAN.md to count implemented instructions,
 /// then update the pipeline state for the source idea. Returns true if progress changed.
 pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea) -> bool {
     let pipeline_dir = vault_dir.join(".pipeline");
+
+    // Backfill targets from workflow.json if missing
+    if idea.pipeline.targets.is_empty() && idea.pipeline.progress >= 50 {
+        sync_targets_from_workflow(vault_dir, &idea.filename);
+    }
+
+    // Auto-advance: if the idea file itself has an "incorporated" or "complete" marker
+    // and is not yet at 100, set it to 100 (manual annotation takes precedence).
+    if idea.pipeline.progress < 100 && idea.pipeline.progress >= 50 {
+        let file_text = fs::read_to_string(&idea.path).unwrap_or_default();
+        let lower = file_text.to_ascii_lowercase();
+        if lower.contains("<!-- status: incorporated")
+            || lower.contains("<!-- status: complete")
+            || lower.contains("> **batch complete:")
+        {
+            let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
+            state.progress = 100;
+            let _ = save_pipeline_state(vault_dir, &idea.filename, &state);
+            return true;
+        }
+    }
+
     let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
     if state.targets.is_empty() || state.progress < 50 { return false; }
 
@@ -376,12 +517,20 @@ pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea
             }
         }
 
-        // Also check PLAN.md for [x] items matching INS- numbers from this package
+        // Check PLAN.md — count only the specific INS codes routed to this target
         let plan_path = project_dir.join("PLAN.md");
         if let Ok(plan) = fs::read_to_string(&plan_path) {
-            for line in plan.lines() {
-                if line.contains("[x]") && line.contains("INS-") {
-                    implemented += 1;
+            if target.codes.is_empty() {
+                // No specific codes — fall back to any [x] INS- line capped at instruction_count
+                let plan_count = plan.lines()
+                    .filter(|l| l.contains("[x]") && l.contains("INS-"))
+                    .count() as u32;
+                implemented = implemented.max(plan_count);
+            } else {
+                for line in plan.lines() {
+                    if line.contains("[x]") && target.codes.iter().any(|c| line.contains(c.as_str())) {
+                        implemented += 1;
+                    }
                 }
             }
         }
@@ -620,8 +769,8 @@ mod tests {
         let state = PipelineState {
             progress: 75,
             targets: vec![
-                PipelineTarget { project: "foo".into(), instruction_count: 10, implemented_count: 5 },
-                PipelineTarget { project: "bar".into(), instruction_count: 10, implemented_count: 10 },
+                PipelineTarget { project: "foo".into(), instruction_count: 10, implemented_count: 5, codes: vec![] },
+                PipelineTarget { project: "bar".into(), instruction_count: 10, implemented_count: 10, codes: vec![] },
             ],
             ..Default::default()
         };

@@ -1,0 +1,68 @@
+<h2>Mobile Control Pad — Revised Layout</h2>
+<p class="subtitle">D-pad on the right, action cluster on the left. Does this feel right?</p>
+
+<div style="max-width:380px;margin:0 auto">
+  <div class="mockup">
+    <div class="mockup-header">Mobile — Overlay mode (fullscreen TUI + floating controls)</div>
+    <div class="mockup-body" style="background:#050d18;border-radius:8px;padding:0;overflow:hidden;height:520px;display:flex;flex-direction:column;position:relative">
+
+      <!-- TUI fullscreen -->
+      <div style="flex:1;background:#080f1c;display:flex;flex-direction:column;font-family:monospace;font-size:9px;padding:6px;color:#4a8abf;overflow:hidden">
+        <div style="color:#2a5a8a;margin-bottom:4px">─── Design │ Oversee │ Hypervise │ Analyze │ Publish ───</div>
+        <div style="color:#4af;margin-bottom:2px">Intentions (17) ─────────────────────────</div>
+        <div style="color:#6a9">  ▶ 2026-05-01-08-11 <span style="color:#4af">████████░ 87%</span></div>
+        <div style="color:#556">    2026-04-30-23-02 <span style="color:#4af">██████████ 100%</span></div>
+        <div style="color:#556">    2026-04-30-07-05 <span style="color:#a84">████░░░░░░ 30%</span></div>
+        <div style="color:#556">    2026-04-24-09-03 ──</div>
+        <div style="color:#556">    2026-04-23-21-40 ──</div>
+        <div style="color:#556;margin-top:8px">─── n=new s=submit Enter=edit X=retract ───</div>
+      </div>
+
+      <!-- Overlay control pad -->
+      <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(5,13,24,0.82);border-top:1px solid rgba(26,58,90,0.5);backdrop-filter:blur(4px);padding:8px 10px">
+
+        <!-- Contextual hint strip -->
+        <div style="display:flex;gap:4px;margin-bottom:8px">
+          <div style="flex:1;background:rgba(15,42,58,0.85);border:1px solid rgba(26,74,106,0.6);border-radius:4px;color:#4af;font-size:9px;text-align:center;padding:5px 2px;font-family:monospace">n new</div>
+          <div style="flex:1;background:rgba(15,42,58,0.85);border:1px solid rgba(26,74,106,0.6);border-radius:4px;color:#4af;font-size:9px;text-align:center;padding:5px 2px;font-family:monospace">s submit</div>
+          <div style="flex:1;background:rgba(15,42,58,0.85);border:1px solid rgba(26,74,106,0.6);border-radius:4px;color:#4af;font-size:9px;text-align:center;padding:5px 2px;font-family:monospace">r rename</div>
+          <div style="flex:1;background:rgba(15,42,58,0.85);border:1px solid rgba(26,74,106,0.6);border-radius:4px;color:#4af;font-size:9px;text-align:center;padding:5px 2px;font-family:monospace">X retract</div>
+          <div style="flex:1;background:rgba(15,42,58,0.85);border:1px solid rgba(26,74,106,0.6);border-radius:4px;color:#4af;font-size:9px;text-align:center;padding:5px 2px;font-family:monospace">d del</div>
+          <!-- Split toggle -->
+          <div style="background:rgba(30,50,80,0.9);border:1px solid rgba(60,100,150,0.7);border-radius:4px;color:#6af;font-size:9px;text-align:center;padding:5px 6px;font-family:monospace">⊟</div>
+        </div>
+
+        <!-- Button row: action cluster LEFT, d-pad RIGHT -->
+        <div style="display:flex;gap:10px;align-items:center">
+
+          <!-- Action cluster — LEFT -->
+          <div style="display:flex;flex-direction:column;gap:5px;width:110px">
+            <div style="display:flex;gap:5px">
+              <div style="flex:1;background:rgba(26,58,42,0.9);border:1px solid rgba(42,106,74,0.7);border-radius:5px;color:#6a9;font-size:10px;text-align:center;padding:8px 4px;font-family:monospace">Tab</div>
+              <div style="flex:1;background:rgba(42,26,26,0.9);border:1px solid rgba(90,42,42,0.7);border-radius:5px;color:#c75;font-size:10px;text-align:center;padding:8px 4px;font-family:monospace">Esc</div>
+            </div>
+            <div style="background:rgba(20,50,90,0.95);border:1px solid rgba(42,106,154,0.8);border-radius:8px;color:#8fbfff;font-size:13px;text-align:center;padding:13px 4px;font-family:monospace;font-weight:bold;letter-spacing:1px">Enter</div>
+          </div>
+
+          <div style="flex:1"></div>
+
+          <!-- D-pad — RIGHT -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;gap:4px;width:110px;height:110px">
+            <div></div>
+            <div style="background:rgba(26,58,90,0.9);border:1px solid rgba(42,90,138,0.8);border-radius:6px;display:flex;align-items:center;justify-content:center;color:#8fbfff;font-size:18px">↑</div>
+            <div></div>
+            <div style="background:rgba(26,58,90,0.9);border:1px solid rgba(42,90,138,0.8);border-radius:6px;display:flex;align-items:center;justify-content:center;color:#8fbfff;font-size:18px">←</div>
+            <div style="background:rgba(15,25,40,0.6);border:1px solid rgba(30,50,70,0.4);border-radius:6px"></div>
+            <div style="background:rgba(26,58,90,0.9);border:1px solid rgba(42,90,138,0.8);border-radius:6px;display:flex;align-items:center;justify-content:center;color:#8fbfff;font-size:18px">→</div>
+            <div></div>
+            <div style="background:rgba(26,58,90,0.9);border:1px solid rgba(42,90,138,0.8);border-radius:6px;display:flex;align-items:center;justify-content:center;color:#8fbfff;font-size:18px">↓</div>
+            <div></div>
+          </div>
+
+        </div>
+      </div><!-- end overlay -->
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px;text-align:center">The <strong>⊟</strong> toggle in the hint strip slides the panel into dedicated split space. Context buttons auto-update from the TUI hint bar. Does this layout work?</p>

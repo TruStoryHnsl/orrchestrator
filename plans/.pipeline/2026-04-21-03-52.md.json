@@ -1,6 +1,18 @@
 {
-  "progress": 50,
-  "targets": [],
+  "progress": 75,
+  "targets": [
+    {
+      "project": "orrapus",
+      "instruction_count": 4,
+      "implemented_count": 2,
+      "codes": [
+        "INS-002",
+        "INS-003",
+        "INS-004",
+        "INS-005"
+      ]
+    }
+  ],
   "package_name": null,
   "submitted_at": 1776303553
 }

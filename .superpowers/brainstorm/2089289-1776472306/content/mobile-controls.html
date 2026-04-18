@@ -1,0 +1,107 @@
+<h2>Mobile Control Pad Layout</h2>
+<p class="subtitle">The bottom panel that maps to keyboard input. Pick the layout that feels right.</p>
+
+<div class="cards" style="grid-template-columns: 1fr 1fr; gap: 16px;">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#050d18;border-radius:8px;padding:10px;height:320px;display:flex;flex-direction:column;gap:6px">
+      <!-- TUI display area -->
+      <div style="flex:1;background:#080f1c;border:1px solid #1a3a5a;border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:monospace;font-size:9px;color:#4a8abf">
+        [ TUI display — 2/3 screen ]
+      </div>
+      <!-- Control panel -->
+      <div style="height:110px;background:#0a1520;border:1px solid #1a2a3a;border-radius:6px;padding:8px;display:flex;gap:8px">
+        <!-- Contextual row -->
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1">
+          <div style="display:flex;gap:3px">
+            <div style="flex:1;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">n new</div>
+            <div style="flex:1;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">s submit</div>
+            <div style="flex:1;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">r rename</div>
+            <div style="flex:1;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">d del</div>
+          </div>
+          <!-- D-pad -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;gap:2px;width:72px;height:72px;margin:0 auto">
+            <div></div>
+            <div style="background:#1a3a5a;border:1px solid #2a5a8a;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:12px">↑</div>
+            <div></div>
+            <div style="background:#1a3a5a;border:1px solid #2a5a8a;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:12px">←</div>
+            <div style="background:#1a2a3a;border:1px solid #234;border-radius:3px"></div>
+            <div style="background:#1a3a5a;border:1px solid #2a5a8a;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:12px">→</div>
+            <div></div>
+            <div style="background:#1a3a5a;border:1px solid #2a5a8a;border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:12px">↓</div>
+            <div></div>
+          </div>
+        </div>
+        <!-- Action cluster -->
+        <div style="display:flex;flex-direction:column;gap:4px;width:80px">
+          <div style="display:flex;gap:3px">
+            <div style="flex:1;background:#1a3a2a;border:1px solid #2a6a4a;border-radius:3px;color:#6a9;font-size:8px;text-align:center;padding:4px;font-family:monospace">Tab</div>
+            <div style="flex:1;background:#2a1a1a;border:1px solid #5a2a2a;border-radius:3px;color:#a64;font-size:8px;text-align:center;padding:4px;font-family:monospace">Esc</div>
+          </div>
+          <div style="background:#1a3a5a;border:1px solid #2a6a9a;border-radius:5px;color:#8fbfff;font-size:10px;text-align:center;padding:10px;font-family:monospace;font-weight:bold">Enter</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Split (2/3 TUI + 1/3 controls)</h3>
+      <p>Contextual hint buttons across the top of the pad, d-pad left, action cluster right. Contextual buttons update to match the TUI's hint bar automatically.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#050d18;border-radius:8px;padding:10px;height:320px;display:flex;flex-direction:column;gap:0">
+      <!-- TUI display area fullscreen -->
+      <div style="flex:1;background:#080f1c;border:1px solid #1a3a5a;border-radius:4px;display:flex;align-items:flex-end;justify-content:center;font-family:monospace;font-size:9px;color:#4a8abf;padding:8px;position:relative">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#4a8abf">[ TUI display — fullscreen ]</div>
+        <!-- Overlay controls, semi-transparent -->
+        <div style="position:relative;width:100%;background:rgba(5,13,24,0.75);border:1px solid rgba(26,58,90,0.6);border-radius:6px;padding:6px;backdrop-filter:blur(2px)">
+          <div style="display:flex;gap:4px;margin-bottom:4px">
+            <div style="flex:1;background:rgba(15,42,58,0.8);border:1px solid rgba(26,74,106,0.7);border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">n new</div>
+            <div style="flex:1;background:rgba(15,42,58,0.8);border:1px solid rgba(26,74,106,0.7);border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">s submit</div>
+            <div style="flex:1;background:rgba(15,42,58,0.8);border:1px solid rgba(26,74,106,0.7);border-radius:3px;color:#4af;font-size:7px;text-align:center;padding:3px;font-family:monospace">r rename</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;gap:2px;width:60px;height:60px">
+              <div></div>
+              <div style="background:rgba(26,58,90,0.85);border:1px solid rgba(42,90,138,0.7);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:11px">↑</div>
+              <div></div>
+              <div style="background:rgba(26,58,90,0.85);border:1px solid rgba(42,90,138,0.7);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:11px">←</div>
+              <div style="background:rgba(26,42,58,0.5);border:1px solid rgba(35,52,68,0.5);border-radius:3px"></div>
+              <div style="background:rgba(26,58,90,0.85);border:1px solid rgba(42,90,138,0.7);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:11px">→</div>
+              <div></div>
+              <div style="background:rgba(26,58,90,0.85);border:1px solid rgba(42,90,138,0.7);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#6af;font-size:11px">↓</div>
+              <div></div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;gap:3px">
+                <div style="flex:1;background:rgba(26,58,42,0.85);border:1px solid rgba(42,106,74,0.7);border-radius:3px;color:#6a9;font-size:8px;text-align:center;padding:3px;font-family:monospace">Tab</div>
+                <div style="flex:1;background:rgba(42,26,26,0.85);border:1px solid rgba(90,42,42,0.7);border-radius:3px;color:#a64;font-size:8px;text-align:center;padding:3px;font-family:monospace">Esc</div>
+              </div>
+              <div style="background:rgba(26,58,90,0.9);border:1px solid rgba(42,106,154,0.8);border-radius:5px;color:#8fbfff;font-size:9px;text-align:center;padding:7px;font-family:monospace;font-weight:bold">Enter</div>
+            </div>
+            <!-- Toggle button -->
+            <div style="background:rgba(20,30,50,0.9);border:1px solid rgba(40,70,100,0.8);border-radius:4px;width:20px;height:60px;display:flex;align-items:center;justify-content:center;color:#446;font-size:9px;writing-mode:vertical-lr">split</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Transparent overlay on fullscreen</h3>
+      <p>TUI fills 100% of screen. Control pad floats as a semi-transparent overlay at the bottom. A "split" toggle slides it into dedicated space when needed. Maximises TUI visibility.</p>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:16px;background:#0a1520;border:1px solid #1a3050;border-radius:6px;padding:12px">
+  <h3 style="margin:0 0 8px">Both layouts share:</h3>
+  <div style="display:flex;gap:24px;font-size:12px;color:#8fbfff">
+    <div>📱 <strong>D-pad</strong><br><span style="color:#556">↑↓←→ navigation</span></div>
+    <div>⏎ <strong>Enter</strong><br><span style="color:#556">Confirm / open</span></div>
+    <div>⎋ <strong>Esc</strong><br><span style="color:#556">Back / cancel</span></div>
+    <div>⇥ <strong>Tab</strong><br><span style="color:#556">Switch sub-panel</span></div>
+    <div>✦ <strong>Context strip</strong><br><span style="color:#556">Auto-mirrors TUI hint bar</span></div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:12px">My recommendation: <strong>B (overlay)</strong> — the toggle gives you both modes. Start fullscreen for maximum TUI real estate, pull up split when you need precise tapping.</p>

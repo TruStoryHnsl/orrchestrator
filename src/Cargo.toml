@@ -13,6 +13,7 @@ orrch-core = { path = "../crates/orrch-core" }
 orrch-retrospect = { path = "../crates/orrch-retrospect" }
 orrch-tui = { path = "../crates/orrch-tui" }
 orrch-webedit = { path = "../crates/orrch-webedit" }
+orrch-webui = { path = "../crates/orrch-webui" }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

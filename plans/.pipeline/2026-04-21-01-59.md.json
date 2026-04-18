@@ -1,6 +1,23 @@
 {
-  "progress": 50,
-  "targets": [],
+  "progress": 100,
+  "targets": [
+    {
+      "project": "concord",
+      "instruction_count": 9,
+      "implemented_count": 9,
+      "codes": [
+        "INS-011",
+        "INS-012",
+        "INS-013",
+        "INS-014",
+        "INS-015",
+        "INS-016",
+        "INS-017",
+        "INS-018",
+        "INS-019"
+      ]
+    }
+  ],
   "package_name": null,
   "submitted_at": 1775600885
 }

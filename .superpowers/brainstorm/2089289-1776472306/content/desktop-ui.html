@@ -1,0 +1,119 @@
+<h2>Desktop Web UI — Panel Design</h2>
+<p class="subtitle">Same 5-panel structure as the TUI. Which level of web-native treatment feels right?</p>
+
+<div class="cards" style="grid-template-columns:1fr 1fr;gap:16px">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#050d18;border-radius:6px;padding:8px;font-family:monospace;font-size:8px">
+      <!-- Top bar -->
+      <div style="display:flex;gap:2px;margin-bottom:6px">
+        <div style="padding:3px 8px;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af;cursor:pointer">Design</div>
+        <div style="padding:3px 8px;background:#080f1c;border:1px solid #123;border-radius:3px;color:#336">Oversee</div>
+        <div style="padding:3px 8px;background:#080f1c;border:1px solid #123;border-radius:3px;color:#336">Hypervise</div>
+        <div style="padding:3px 8px;background:#080f1c;border:1px solid #123;border-radius:3px;color:#336">Analyze</div>
+      </div>
+      <!-- Sub-bar -->
+      <div style="display:flex;gap:2px;margin-bottom:6px">
+        <div style="padding:2px 6px;color:#6a9;border-bottom:1px solid #6a9">Intentions</div>
+        <div style="padding:2px 6px;color:#336">Workforce</div>
+        <div style="padding:2px 6px;color:#336">Library</div>
+        <div style="padding:2px 6px;color:#336">Plans</div>
+      </div>
+      <!-- List items with hover state -->
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:4px 6px;background:#0f2030;border:1px solid #1a3a5a;border-radius:3px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <div style="width:40px;height:5px;background:linear-gradient(90deg,#4af 87%,#1a3a5a 87%);border-radius:2px"></div>
+          <div style="color:#8fbfff;flex:1">2026-05-01-08-11</div>
+          <div style="color:#4af;font-size:7px">87%</div>
+          <div style="color:#336;font-size:7px">↵ s r X</div>
+        </div>
+        <div style="padding:4px 6px;background:#080f1c;border:1px solid #123;border-radius:3px;display:flex;align-items:center;gap:6px;color:#556;cursor:pointer">
+          <div style="width:40px;height:5px;background:linear-gradient(90deg,#4a9 100%,#1a3a5a 0%);border-radius:2px"></div>
+          <div style="flex:1">2026-04-30-23-02</div>
+          <div style="font-size:7px;color:#4a9">100%</div>
+        </div>
+        <div style="padding:4px 6px;background:#080f1c;border:1px solid #123;border-radius:3px;display:flex;align-items:center;gap:6px;color:#556;cursor:pointer">
+          <div style="width:40px;height:5px;background:linear-gradient(90deg,#a84 30%,#1a2a1a 30%);border-radius:2px"></div>
+          <div style="flex:1">2026-04-30-07-05</div>
+          <div style="font-size:7px;color:#a84">30%</div>
+        </div>
+      </div>
+      <!-- Status bar -->
+      <div style="margin-top:6px;color:#334;border-top:1px solid #123;padding-top:4px">
+        ↑↓ select · Enter=edit · n=new · s=submit · r=rename · X=retract
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — TUI Faithful</h3>
+      <p>Exact TUI layout, keyboard shortcuts still work, click = same as pressing Enter. Progress bars render as actual bars. Minimal web additions — just makes it clickable.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#050d18;border-radius:6px;padding:8px;font-size:8px">
+      <!-- Top nav -->
+      <div style="display:flex;gap:2px;margin-bottom:6px;font-family:monospace">
+        <div style="padding:3px 8px;background:#0f2a3a;border:1px solid #1a4a6a;border-radius:3px;color:#4af">Design</div>
+        <div style="padding:3px 8px;color:#336">Oversee</div>
+        <div style="padding:3px 8px;color:#336">Hypervise</div>
+        <div style="padding:3px 8px;color:#336">Analyze</div>
+        <div style="margin-left:auto;padding:3px 8px;background:#0f2030;border:1px solid #1a3a5a;border-radius:3px;color:#4af;cursor:pointer">＋ New</div>
+      </div>
+      <!-- Two-column layout -->
+      <div style="display:flex;gap:6px">
+        <!-- List -->
+        <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+          <div style="padding:5px 6px;background:#0f2030;border:1px solid #1a3a5a;border-radius:4px;cursor:pointer">
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+              <div style="color:#8fbfff;font-family:monospace;font-size:7px;flex:1">2026-05-01-08-11</div>
+              <div style="background:#1a3a2a;color:#6a9;font-size:6px;padding:1px 4px;border-radius:2px">87%</div>
+            </div>
+            <div style="width:100%;height:3px;background:#0a1520;border-radius:2px">
+              <div style="width:87%;height:3px;background:linear-gradient(90deg,#4af,#6a9);border-radius:2px"></div>
+            </div>
+            <div style="color:#445;font-size:6px;margin-top:2px;font-family:monospace">concord mobile UI fixes</div>
+          </div>
+          <div style="padding:5px 6px;background:#080f1c;border:1px solid #123;border-radius:4px;cursor:pointer;opacity:0.7">
+            <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+              <div style="color:#667;font-family:monospace;font-size:7px;flex:1">2026-04-30-23-02</div>
+              <div style="background:#1a3a1a;color:#4a9;font-size:6px;padding:1px 4px;border-radius:2px">✓ done</div>
+            </div>
+          </div>
+        </div>
+        <!-- Detail panel -->
+        <div style="flex:1;background:#080f1c;border:1px solid #1a3a5a;border-radius:4px;padding:5px">
+          <div style="color:#8fbfff;font-family:monospace;font-size:7px;margin-bottom:3px">2026-05-01-08-11</div>
+          <div style="color:#445;font-size:6px;margin-bottom:4px">concord mobile UI — INS-038–054</div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <div style="color:#4af;font-size:6px;background:#0a1a2a;padding:2px 4px;border-radius:2px;cursor:pointer">📋 Submit to pipeline</div>
+            <div style="color:#6a9;font-size:6px;background:#0a1a0a;padding:2px 4px;border-radius:2px;cursor:pointer">✏️ Edit in editor</div>
+            <div style="color:#a84;font-size:6px;background:#1a1208;padding:2px 4px;border-radius:2px;cursor:pointer">↩ Retract</div>
+          </div>
+        </div>
+      </div>
+      <!-- Status -->
+      <div style="margin-top:5px;color:#334;border-top:1px solid #123;padding-top:4px;font-size:7px;font-family:monospace">
+        Click to select · Right-click for actions · Keyboard shortcuts still work
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Master/Detail</h3>
+      <p>Left pane = list, right pane = detail + actions as buttons. Selecting an item opens its context. Actions are visible buttons, not just keybinding hints. Richer than TUI but same structure.</p>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top:12px;background:#0a1520;border:1px solid #1a3050;border-radius:6px;padding:12px">
+  <h3 style="margin:0 0 8px">Either way, web adds these over TUI:</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:11px;color:#8fbfff">
+    <div>🖱️ <strong>Click navigation</strong><br><span style="color:#445">Click any item to select it</span></div>
+    <div>💬 <strong>Hover tooltips</strong><br><span style="color:#445">Key hints on hover, not just status bar</span></div>
+    <div>📊 <strong>Visual progress bars</strong><br><span style="color:#445">Gradient bars, not just % text</span></div>
+    <div>🔗 <strong>Clickable session logs</strong><br><span style="color:#445">Open log file inline in panel</span></div>
+    <div>⌨️ <strong>Keyboard still works</strong><br><span style="color:#445">All TUI shortcuts still function</span></div>
+    <div>📱 <strong>Responsive</strong><br><span style="color:#445">Adapts between desktop and mobile breakpoints</span></div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:12px">My recommendation: <strong>B (master/detail)</strong> — gives the web version a clear identity beyond "TUI in a browser", while staying structurally identical.</p>

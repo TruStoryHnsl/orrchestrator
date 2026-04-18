@@ -9,6 +9,7 @@ members = [
     "crates/orrch-retrospect",
     "crates/orrch-tui",
     "crates/orrch-webedit",
+    "crates/orrch-webui",
     "crates/orrch-workforce",
     "src",
 ]

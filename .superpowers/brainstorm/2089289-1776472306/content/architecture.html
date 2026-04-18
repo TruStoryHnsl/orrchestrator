@@ -1,0 +1,84 @@
+<h2>WebUI Architecture — Which approach?</h2>
+<p class="subtitle">This is the most consequential decision. Everything else follows from it.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0f1a;border-radius:6px;padding:12px;font-family:monospace;font-size:11px;color:#8fbfff;line-height:1.5">
+      <div style="color:#4af;margin-bottom:6px">● orrchestrator TUI — streaming</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;color:#6af;font-size:10px">
+        <div style="border:1px solid #234;padding:4px">[ Design ]</div>
+        <div style="border:1px solid #234;padding:4px">[ Oversee ]</div>
+        <div style="border:1px solid #234;padding:4px">Sessions: 3</div>
+        <div style="border:1px solid #234;padding:4px">intake-cont ●</div>
+      </div>
+      <div style="margin-top:8px;color:#6a9;font-size:10px">
+        ↑↓ navigate  s=submit  Enter=edit
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Terminal Stream (xterm.js)</h3>
+      <p>Pipe the actual TUI through a PTY → WebSocket → xterm.js in the browser. The web UI IS the TUI — pixel-perfect, instant feature parity, zero drift. Mobile adds a virtual keyboard overlay that sends key events.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>Pros</h4><ul><li>100% feature parity immediately</li><li>No separate UI to maintain</li><li>Every TUI update is free</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Browser renders terminal — not "web-native"</li><li>Mobile control pad sends key codes, not touch</li><li>No web-specific improvements (hyperlinks, rich media)</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0f1a;border-radius:6px;padding:12px">
+      <div style="display:flex;gap:8px;height:80px">
+        <div style="flex:1;background:#111;border:1px solid #2a4a6a;border-radius:4px;padding:6px">
+          <div style="color:#4af;font-size:9px;font-family:monospace">Design</div>
+          <div style="color:#6a9;font-size:9px;font-family:monospace;margin-top:4px">● Intentions</div>
+          <div style="color:#556;font-size:9px;font-family:monospace">  Workforce</div>
+          <div style="color:#556;font-size:9px;font-family:monospace">  Library</div>
+        </div>
+        <div style="flex:2;background:#0d1520;border:1px solid #234;border-radius:4px;padding:6px">
+          <div style="color:#8fbfff;font-size:9px;font-family:monospace">2026-05-01-08-11.md</div>
+          <div style="background:#1a2a1a;color:#6a9;font-size:8px;padding:2px 4px;border-radius:2px;margin-top:3px;display:inline-block">87% ████████░</div>
+          <div style="color:#556;font-size:8px;margin-top:3px">concord mobile UI fixes</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Native Web UI (React + WebSocket)</h3>
+      <p>Rebuild the TUI as a proper web app. Rust backend exposes a WebSocket API that streams app state as JSON. React frontend renders it natively — clickable items, hover states, rich text, drag-and-drop.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>Pros</h4><ul><li>True web interactions (click, hover, drag)</li><li>Mobile-native touch controls</li><li>Can add features TUI can't do</li></ul></div>
+        <div class="cons"><h4>Cons</h4>
+          <ul>
+            <li>Significant build — recreate all TUI panels</li>
+            <li>State sync complexity</li>
+            <li>Two UIs to maintain</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0a0f1a;border-radius:6px;padding:12px;position:relative">
+      <div style="font-family:monospace;font-size:10px;color:#8fbfff;border:1px solid #234;padding:6px;border-radius:4px">
+        <span style="color:#4af">Design</span> | Oversee | Hypervise
+        <div style="color:#6a9;margin-top:4px">● 2026-05-01 <span style="background:#1a2a1a;color:#6a9;padding:0 4px;border-radius:2px">87%</span></div>
+        <div style="color:#556;margin-top:2px">  2026-04-30 <span style="color:#aaa">100%</span></div>
+      </div>
+      <div style="margin-top:6px;background:#0d1a2a;border:1px solid #2a5a2a;border-radius:4px;padding:6px;font-family:monospace;font-size:9px;color:#6a9">
+        ✦ Click to open · Drag to reorder · Right-click for actions
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Hybrid (xterm.js shell + web overlays)</h3>
+      <p>Start with xterm.js streaming for immediate parity. Add a thin web layer on top: clickable hit regions mapped to key presses, hover tooltips, and progressive web enhancements panel by panel over time.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>Pros</h4><ul><li>Ships fast with full parity</li><li>Web improvements are additive</li><li>Best of both</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Two rendering systems to sync</li><li>Overlay hit-region mapping is fiddly</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">My recommendation: <strong>A (terminal stream)</strong> — feature parity is the stated goal, and the mobile control pad maps perfectly to keyboard events. Native web improvements can be layered in later if wanted.</p>

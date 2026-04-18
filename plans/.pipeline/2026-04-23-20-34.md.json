@@ -1,6 +1,21 @@
 {
-  "progress": 50,
-  "targets": [],
+  "progress": 100,
+  "targets": [
+    {
+      "project": "orrchestrator",
+      "instruction_count": 7,
+      "implemented_count": 7,
+      "codes": [
+        "INS-001",
+        "INS-002",
+        "INS-003",
+        "INS-004",
+        "INS-005",
+        "INS-006",
+        "INS-007"
+      ]
+    }
+  ],
   "package_name": null,
   "submitted_at": 1775767779
 }
