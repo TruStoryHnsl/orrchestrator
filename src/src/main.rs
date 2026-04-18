@@ -59,6 +59,7 @@ async fn main() -> Result<()> {
         println!();
         println!("USAGE:");
         println!("  orrchestrator            Launch the TUI (default)");
+        println!("  orrchestrator --resume   Attach to a running orrchestrator tmux session");
         println!("  orrchestrator --web      Open the WebUI of the running instance in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
@@ -66,8 +67,12 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // --resume: attach to the tmux session of a running orrchestrator instance.
+    if args.iter().any(|a| a == "--resume") {
+        return resume_session();
+    }
+
     // --web: find a running instance's WebUI port and open it in the browser.
-    // Looks for /tmp/orrch-webui-*.port files written by running instances.
     if args.iter().any(|a| a == "--web") {
         return open_webui_in_browser();
     }
@@ -102,6 +107,18 @@ async fn main() -> Result<()> {
     // clone it now so the Library panel has content on first launch.
     app.library_clone_if_missing();
 
+    // Advertise tmux session so `orrchestrator --resume` can attach to us.
+    let session_file = std::path::PathBuf::from("/tmp/orrch-session");
+    if let Ok(out) = std::process::Command::new("tmux")
+        .args(["display-message", "-p", "#S"])
+        .output()
+    {
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !name.is_empty() {
+            let _ = std::fs::write(&session_file, &name);
+        }
+    }
+
     // Task 7: Start the WebUI companion server on an OS-assigned port.
     let pid = std::process::id();
     let port_file = std::path::PathBuf::from(format!("/tmp/orrch-webui-{pid}.port"));
@@ -121,8 +138,9 @@ async fn main() -> Result<()> {
 
     let result = run_loop(&mut terminal, &mut app, webui).await;
 
-    // Remove port advertisement file
+    // Remove advertisement files
     let _ = std::fs::remove_file(&port_file);
+    let _ = std::fs::remove_file(&session_file);
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
@@ -142,6 +160,25 @@ async fn main() -> Result<()> {
         std::process::exit(0);
     }
     result
+}
+
+/// `--resume` entry point: attach to the tmux session of a running instance.
+fn resume_session() -> Result<()> {
+    let session_name = std::fs::read_to_string("/tmp/orrch-session")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    if session_name.is_empty() {
+        eprintln!("No running orrchestrator session found.");
+        eprintln!("Start orrchestrator first (it must be running inside tmux).");
+        std::process::exit(1);
+    }
+
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new("tmux")
+        .args(["attach-session", "-t", &session_name])
+        .exec();
+    bail!("tmux attach failed: {err}");
 }
 
 /// `--web` entry point: find a running instance's WebUI port and open it.
