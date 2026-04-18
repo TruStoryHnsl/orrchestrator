@@ -19,7 +19,8 @@ pub async fn handle_pty_ws(mut socket: WebSocket) {
     };
 
     let mut cmd = CommandBuilder::new("tmux");
-    cmd.args(["attach-session", "-t", "orrchestrator"]);
+    // -A: attach if session exists, create it if not
+    cmd.args(["new-session", "-A", "-s", "orrchestrator"]);
     let _child;
     _child = match pair.slave.spawn_command(cmd) {
         Ok(c) => c,
