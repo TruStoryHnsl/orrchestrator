@@ -1,6 +1,6 @@
 [package]
 name = "orrch-webui"
-description = "Always-on browser UI (xterm.js PTY bridge + native Vanilla JS)"
+description = "Always-on browser UI with live xterm.js mirror of the TUI"
 version.workspace = true
 edition.workspace = true
 
@@ -12,5 +12,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-portable-pty = "0.8"
 sha2 = { workspace = true }
+futures-util = "0.3"
