@@ -250,6 +250,9 @@ pub enum SubView {
     RenameProject(usize),
     /// Inline rename for a plan feature (94d).
     RenamePlanFeature { phase_idx: usize, feat_idx: usize },
+    /// Inline rename for a file in the Oversee file tree (OPT-014).
+    /// Carries (project index, tree_nodes index).
+    RenameFile { proj_idx: usize, tree_idx: usize },
     /// Text input to steer a session (send keys). Carries flat session index.
     SteerSession(usize),
     /// OPT-005: text input for setting a project logo path. Carries project index.
@@ -1894,7 +1897,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -2031,6 +2034,10 @@ impl App {
             SubView::RenamePlanFeature { phase_idx, feat_idx } => {
                 let (pi, fi) = (*phase_idx, *feat_idx);
                 self.key_rename_plan_feature(key, pi, fi)
+            }
+            SubView::RenameFile { proj_idx, tree_idx } => {
+                let (pi, ti) = (*proj_idx, *tree_idx);
+                self.key_rename_file(key, pi, ti)
             }
             SubView::SteerSession(idx) => { let idx = *idx; self.key_steer_session(key, idx) }
             SubView::SetLogoPath(idx) => { let idx = *idx; self.key_set_logo_path(key, idx) }
@@ -2277,8 +2284,8 @@ impl App {
                     // Edit feature in nvim
                     self.plans_edit_in_vim(proj_idx);
                 }
-                KeyCode::Char('r') => {
-                    // 94d: if on a feature, open rename dialog; otherwise refresh
+                KeyCode::Char('r') | KeyCode::F(2) => {
+                    // 94d / OPT-014: if on a feature, open rename dialog; otherwise refresh
                     if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
                         let title = proj_idx.and_then(|idx| {
                             self.projects.get(idx)?
@@ -2619,8 +2626,8 @@ impl App {
                     });
                 }
             }
-            // 94a: inline rename for the selected workforce file
-            KeyCode::Char('r') => {
+            // 94a / OPT-014: inline rename for the selected workforce file (r or F2)
+            KeyCode::Char('r') | KeyCode::F(2) => {
                 let items = self.wf_items_for_tab();
                 if let Some((name, _)) = items.get(self.wf_selected) {
                     // Strip .md extension for editing comfort; we re-append on save
@@ -3183,8 +3190,8 @@ impl App {
                     }
                 }
             }
-            // 94b: inline rename for the selected idea file (r = rename, R = review)
-            KeyCode::Char('r') => {
+            // 94b / OPT-014: inline rename for the selected idea file (r or F2 = rename, R = review)
+            KeyCode::Char('r') | KeyCode::F(2) => {
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     self.rename_buffer = idea.title.clone();
                     let idx = self.idea_selected;
@@ -3563,8 +3570,8 @@ KeyCode::Char('i') => {
                     }
                 }
             }
-            KeyCode::Char('r') => {
-                // 94c: if a project is selected, open rename dialog; otherwise reload
+            KeyCode::Char('r') | KeyCode::F(2) => {
+                // 94c / OPT-014: if a project is selected, open rename dialog; otherwise reload
                 if let Some(pidx) = self.selected_project_index() {
                     if let Some(proj) = self.projects.get(pidx) {
                         self.rename_buffer = proj.name.clone();
@@ -3920,6 +3927,27 @@ KeyCode::Char('i') => {
                         if let Some(s) = sessions.get(self.tree_selected) {
                             let sid = s.sid.clone();
                             self.pm.kill_session(&sid);
+                        }
+                    }
+                }
+            }
+            // OPT-014: rename the selected file/directory in the Oversee tree.
+            // Only active when focus is inside the file tree (not the sessions section).
+            KeyCode::Char('r') | KeyCode::F(2) => {
+                if !in_sessions {
+                    if let Some(node) = tree_nodes.get(tree_offset) {
+                        // Don't let users rename the project root itself via the tree
+                        // (project rename is handled by RenameProject from the main list).
+                        let proj_root = self.projects.get(proj_idx).map(|p| p.path.clone());
+                        if proj_root.as_ref() == Some(&node.path) {
+                            self.notify("Select a child file/dir to rename; project rename is on the main project list".into());
+                        } else {
+                            let base_name = node.path
+                                .file_name()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            self.rename_buffer = base_name;
+                            self.sub = SubView::RenameFile { proj_idx, tree_idx: tree_offset };
                         }
                     }
                 }
@@ -4577,15 +4605,31 @@ KeyCode::Char('i') => {
 
     // ─── Rename handlers (94a / 94b) ─────────────────────────────────────
 
-    /// 94a: Inline rename for a workforce/library file.
+    /// 94a / OPT-014: Inline rename for a workforce/library file.
+    ///
+    /// Works for any tab returned by `wf_items_for_tab()`:
+    /// Workflows, Teams, Agents, Skills, Tools, McpServers, Profiles, Harnesses.
+    ///
+    /// Cross-reference updates:
+    /// - **Agents tab**: after a successful rename we also (a) rewrite the
+    ///   `name:` YAML frontmatter field in the new file and (b) rewrite any
+    ///   `Agent Profile` column references in workforce markdown files. This is
+    ///   best-effort string replacement on the pipe-delimited table — works for
+    ///   the current standard schema, may miss custom formats.
+    /// - **Workflows tab**: the internal `name:` frontmatter field is rewritten
+    ///   to match the new filename (as a Title Case conversion).
+    /// - **Other tabs (Skills / Tools / Profiles / Teams / McpServers /
+    ///   Harnesses)**: filesystem rename only. References to these by name
+    ///   from outside (e.g. "see library/skills/xyz" in free-form markdown)
+    ///   are NOT updated; those are out of OPT-014 scope.
     fn key_rename_workforce(&mut self, key: KeyCode, item_idx: usize) -> Result<()> {
         match key {
             KeyCode::Enter => {
                 let new_name = self.rename_buffer.trim().to_string();
                 if !new_name.is_empty() {
                     let items = self.wf_items_for_tab();
-                    if let Some((_, old_path)) = items.get(item_idx) {
-                        let old_path = old_path.clone();
+                    let current_tab = self.workforce_tab;
+                    if let Some((old_display_name, old_path)) = items.get(item_idx).cloned() {
                         let dir = old_path.parent().unwrap_or(std::path::Path::new("."));
                         // Always use .md extension
                         let new_filename = if new_name.ends_with(".md") {
@@ -4602,6 +4646,28 @@ KeyCode::Char('i') => {
                             match std::fs::rename(&old_path, &new_path) {
                                 Ok(()) => {
                                     self.notify(format!("Renamed to {new_filename}"));
+
+                                    // OPT-014: propagate known cross-references for Agents and Workflows.
+                                    // Convert the new stem (e.g. "project_manager") into a display
+                                    // name ("Project Manager") for the `name:` field.
+                                    let new_stem = new_filename.trim_end_matches(".md").to_string();
+                                    let new_display = title_case_from_stem(&new_stem);
+
+                                    if current_tab == WorkforceTab::Agents {
+                                        if let Err(e) = update_agent_cross_references(
+                                            &new_path,
+                                            &old_display_name,
+                                            &new_display,
+                                            &self.projects_dir,
+                                        ) {
+                                            self.notify(format!("Rename OK; cross-ref update warning: {e}"));
+                                        }
+                                    } else if current_tab == WorkforceTab::Workflows {
+                                        // Best-effort: update the internal `name:` frontmatter
+                                        // so the workforce header matches the filename.
+                                        let _ = update_frontmatter_name(&new_path, &new_display);
+                                    }
+
                                     self.reload_all_library_data();
                                     // Keep selection at same index
                                     self.wf_selected = item_idx.min(
@@ -4739,6 +4805,60 @@ KeyCode::Char('i') => {
                                 Ok(_) => {
                                     self.notify(format!("Renamed to {new_title}"));
                                     self.plans_reload_project(Some(idx));
+                                }
+                                Err(e) => self.notify(format!("Rename failed: {e}")),
+                            }
+                        }
+                    }
+                }
+                self.sub = SubView::List;
+            }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Backspace => {
+                self.rename_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.rename_buffer.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// OPT-014: Inline rename for a filesystem entry in the Oversee file tree.
+    ///
+    /// Cross-reference note: this is a raw filesystem rename. Files referenced
+    /// by absolute/relative path elsewhere (e.g. from PLAN.md, workforce
+    /// markdown, or session logs) will NOT be updated. That kind of
+    /// refactor-rename would require project-wide grep/rewrite — out of scope
+    /// for OPT-014. For known entity types with structured references
+    /// (agents → workforces), see key_rename_workforce + the agent-tab branch
+    /// in rename_agent_references.
+    fn key_rename_file(&mut self, key: KeyCode, proj_idx: usize, tree_idx: usize) -> Result<()> {
+        match key {
+            KeyCode::Enter => {
+                let new_name = self.rename_buffer.trim().to_string();
+                if !new_name.is_empty() {
+                    // Rebuild the tree to resolve tree_idx → old path (tree is stateful).
+                    let nodes = self.build_tree(proj_idx);
+                    if let Some(node) = nodes.get(tree_idx) {
+                        let old_path = node.path.clone();
+                        let parent = old_path.parent().unwrap_or(std::path::Path::new("."));
+                        let new_path = parent.join(&new_name);
+                        if new_path == old_path {
+                            self.notify("Name unchanged".into());
+                        } else if new_path.exists() {
+                            self.notify(format!("Path already exists: {new_name}"));
+                        } else {
+                            match std::fs::rename(&old_path, &new_path) {
+                                Ok(()) => {
+                                    self.notify(format!("Renamed to {new_name}"));
+                                    // Invalidate cached tree for this project so the next
+                                    // render refreshes; also reload projects if we just
+                                    // renamed something at depth 0 that impacts metadata.
+                                    self.tree_cache.remove(&proj_idx);
                                 }
                                 Err(e) => self.notify(format!("Rename failed: {e}")),
                             }
@@ -6790,6 +6910,143 @@ fn spawn_feedback_processor(
     Ok(name)
 }
 
+/// OPT-014: Convert a snake/kebab-case filename stem into a human-readable
+/// Title Case name (e.g. `project_manager` → `Project Manager`).
+fn title_case_from_stem(stem: &str) -> String {
+    stem.split(|c: char| c == '_' || c == '-')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// OPT-014: Rewrite the `name:` YAML frontmatter field in a markdown file.
+/// Best-effort: expects the standard `---` delimited frontmatter used across
+/// agent / workforce / operation markdown in this repo. Returns Ok(()) even
+/// if no `name:` field is found — it just becomes a no-op.
+fn update_frontmatter_name(path: &std::path::Path, new_name: &str) -> std::io::Result<()> {
+    let content = std::fs::read_to_string(path)?;
+    // Only touch files that start with a frontmatter block.
+    if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
+        return Ok(());
+    }
+    let mut out = String::with_capacity(content.len());
+    let mut in_frontmatter = false;
+    let mut fm_opened = false;
+    let mut replaced = false;
+    for (i, line) in content.lines().enumerate() {
+        if i == 0 && line.trim() == "---" {
+            in_frontmatter = true;
+            fm_opened = true;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_frontmatter && line.trim() == "---" {
+            in_frontmatter = false;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_frontmatter && !replaced {
+            // Match `name:` at the top level (no indentation).
+            if let Some(rest) = line.strip_prefix("name:") {
+                // Preserve nothing fancy — normalize to a single-line value.
+                let _ = rest; // discard old value
+                out.push_str(&format!("name: {new_name}\n"));
+                replaced = true;
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !fm_opened {
+        return Ok(());
+    }
+    std::fs::write(path, out)
+}
+
+/// OPT-014: After an agent file has been renamed on disk, propagate the
+/// display-name change to (a) the agent's own `name:` field and (b) any
+/// `Agent Profile` column entries in workforce markdown files.
+///
+/// This is best-effort string substitution on pipe-delimited markdown tables
+/// and assumes the standard schema used in `workforces/*.md` (a `| Agent |
+/// Agent Profile | ...` table). Workforces with custom table layouts may need
+/// a manual pass.
+fn update_agent_cross_references(
+    new_agent_path: &std::path::Path,
+    old_display_name: &str,
+    new_display_name: &str,
+    projects_dir: &std::path::Path,
+) -> std::io::Result<()> {
+    // 1. Update the agent file's own `name:` frontmatter.
+    update_frontmatter_name(new_agent_path, new_display_name)?;
+
+    if old_display_name == new_display_name {
+        return Ok(());
+    }
+
+    // 2. Rewrite `Agent Profile` cells in all workforce markdown files.
+    let workforces_dir = projects_dir.join("orrchestrator").join("workforces");
+    let entries = match std::fs::read_dir(&workforces_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()), // no workforces dir; nothing to do
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "md") {
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            // Rewrite only pipe-table cells whose trimmed text exactly matches
+            // `old_display_name`. This avoids clobbering prose or descriptions
+            // that happen to mention the agent name.
+            let mut changed = false;
+            let rewritten: String = content
+                .lines()
+                .map(|line| {
+                    if !line.contains('|') {
+                        return line.to_string();
+                    }
+                    let cells: Vec<&str> = line.split('|').collect();
+                    let new_cells: Vec<String> = cells.iter().map(|c| {
+                        if c.trim() == old_display_name {
+                            changed = true;
+                            // Preserve any leading/trailing spaces inside the cell.
+                            let leading_ws: String = c.chars().take_while(|ch| ch.is_whitespace()).collect();
+                            let trailing_ws: String = c.chars().rev().take_while(|ch| ch.is_whitespace()).collect::<String>().chars().rev().collect();
+                            format!("{leading_ws}{new_display_name}{trailing_ws}")
+                        } else {
+                            c.to_string()
+                        }
+                    }).collect();
+                    new_cells.join("|")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if changed {
+                // Preserve trailing newline if the original had one.
+                let final_content = if content.ends_with('\n') && !rewritten.ends_with('\n') {
+                    format!("{rewritten}\n")
+                } else {
+                    rewritten
+                };
+                std::fs::write(&path, final_content)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Detect which KWin output orrchestrator is currently running on.
 /// Uses the active output at startup (orrchestrator should be the focused window).
 fn detect_current_output() -> Option<String> {
@@ -6842,5 +7099,94 @@ mod app_tests {
             "expected localhost URL, got {url}"
         );
         // Drop happens at end of scope; the server thread will join cleanly.
+    }
+
+    // ─── OPT-014: rename helper regression tests ──────────────────────────
+
+    #[test]
+    fn title_case_from_stem_snake_and_kebab() {
+        assert_eq!(super::title_case_from_stem("project_manager"), "Project Manager");
+        assert_eq!(super::title_case_from_stem("ui-designer"), "Ui Designer");
+        assert_eq!(super::title_case_from_stem("solo"), "Solo");
+        assert_eq!(super::title_case_from_stem(""), "");
+        assert_eq!(super::title_case_from_stem("__leading_underscore"), "Leading Underscore");
+    }
+
+    #[test]
+    fn update_frontmatter_name_rewrites_name_field() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("agent.md");
+        let original = "---\nname: Old Name\nrole: Foo\n---\n\nbody text\n";
+        std::fs::write(&path, original).unwrap();
+        super::update_frontmatter_name(&path, "New Name").expect("rewrite ok");
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("name: New Name"), "expected new name, got:\n{after}");
+        assert!(!after.contains("name: Old Name"));
+        assert!(after.contains("role: Foo"));
+        assert!(after.contains("body text"));
+    }
+
+    #[test]
+    fn update_frontmatter_name_noop_without_frontmatter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("plain.md");
+        let original = "# Plain markdown\n\nname: not-frontmatter\n";
+        std::fs::write(&path, original).unwrap();
+        super::update_frontmatter_name(&path, "Whatever").expect("noop ok");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn update_agent_cross_references_rewrites_workforce_tables() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let projects_dir = tmp.path().to_path_buf();
+        let orrch = projects_dir.join("orrchestrator");
+        std::fs::create_dir_all(orrch.join("workforces")).unwrap();
+        std::fs::create_dir_all(orrch.join("agents")).unwrap();
+
+        // New agent file (already renamed on disk) with the OLD name: still in it.
+        let agent_path = orrch.join("agents").join("foo_bar.md");
+        std::fs::write(
+            &agent_path,
+            "---\nname: Old Agent\nrole: Test\n---\n\nbody\n",
+        ).unwrap();
+
+        // Workforce that references the old agent name.
+        let wf_path = orrch.join("workforces").join("test_team.md");
+        let wf_content = "\
+---
+name: Test Team
+---
+
+## Agents
+
+| ID | Agent Profile | User-Facing |
+|----|---------------|-------------|
+| a1 | Old Agent | yes |
+| a2 | Other Person | no |
+
+A sentence mentioning Old Agent in prose should be left alone.
+";
+        std::fs::write(&wf_path, wf_content).unwrap();
+
+        super::update_agent_cross_references(
+            &agent_path,
+            "Old Agent",
+            "Foo Bar",
+            &projects_dir,
+        ).expect("cross-ref ok");
+
+        // Agent file's `name:` is rewritten.
+        let agent_after = std::fs::read_to_string(&agent_path).unwrap();
+        assert!(agent_after.contains("name: Foo Bar"), "agent name: not rewritten:\n{agent_after}");
+
+        // Workforce table cell is rewritten, prose line is NOT.
+        let wf_after = std::fs::read_to_string(&wf_path).unwrap();
+        assert!(wf_after.contains("| a1 | Foo Bar | yes |"), "table cell not rewritten:\n{wf_after}");
+        assert!(wf_after.contains("| a2 | Other Person | no |"), "unrelated row clobbered:\n{wf_after}");
+        assert!(
+            wf_after.contains("A sentence mentioning Old Agent in prose"),
+            "prose mention of Old Agent should not be rewritten:\n{wf_after}",
+        );
     }
 }

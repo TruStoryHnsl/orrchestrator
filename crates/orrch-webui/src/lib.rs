@@ -21,6 +21,9 @@ pub struct WebUiServer {
     _shutdown: tokio::sync::oneshot::Sender<()>,
 }
 
+/// Fixed port for the WebUI. Stable so the user can bookmark http://localhost:8484.
+pub const DEFAULT_PORT: u16 = 8484;
+
 impl WebUiServer {
     pub async fn start(port: u16) -> Result<Self> {
         let (state_tx, state_rx) = watch::channel(WebAppState::default());

@@ -115,27 +115,21 @@ async fn main() -> Result<()> {
     // clone it now so the Library panel has content on first launch.
     app.library_clone_if_missing();
 
-    // Task 7: Start the WebUI companion server on an OS-assigned port.
-    let pid = std::process::id();
-    let port_file = std::path::PathBuf::from(format!("/tmp/orrch-webui-{pid}.port"));
-    let webui = match orrch_webui::WebUiServer::start(0).await {
+    // Start the WebUI companion server on the fixed port. Bookmarkable URL.
+    let webui = match orrch_webui::WebUiServer::start(orrch_webui::DEFAULT_PORT).await {
         Ok(srv) => {
             app.webui_port = Some(srv.port);
-            tracing::info!("WebUI available at http://127.0.0.1:{}", srv.port);
-            // Advertise port so `orrchestrator --web` can find this instance
-            let _ = std::fs::write(&port_file, srv.port.to_string());
+            tracing::info!("WebUI available at http://localhost:{}", srv.port);
             Some(srv)
         }
         Err(e) => {
-            tracing::warn!("WebUI failed to start: {e}");
+            tracing::warn!("WebUI failed to start on :{}: {e}", orrch_webui::DEFAULT_PORT);
+            tracing::warn!("Another orrchestrator instance may already be running.");
             None
         }
     };
 
     let result = run_loop(&mut terminal, &mut app, webui).await;
-
-    // Remove advertisement file
-    let _ = std::fs::remove_file(&port_file);
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
@@ -192,30 +186,7 @@ fn wrap_in_tmux() -> Result<()> {
 /// If multiple files exist, picks the most recently modified one.
 /// Prints the URL and opens it with xdg-open.
 fn open_webui_in_browser() -> Result<()> {
-    let mut candidates: Vec<(std::time::SystemTime, std::path::PathBuf, u16)> = std::fs::read_dir("/tmp")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = path.file_name()?.to_str()?;
-            if !name.starts_with("orrch-webui-") || !name.ends_with(".port") { return None; }
-            let port_str = std::fs::read_to_string(&path).ok()?;
-            let port: u16 = port_str.trim().parse().ok()?;
-            let mtime = entry.metadata().ok()?.modified().ok()?;
-            Some((mtime, path, port))
-        })
-        .collect();
-
-    if candidates.is_empty() {
-        eprintln!("No running orrchestrator instance found (no /tmp/orrch-webui-*.port files).");
-        eprintln!("Start orrchestrator first, then run `orrchestrator --web`.");
-        std::process::exit(1);
-    }
-
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
-    let port = candidates[0].2;
-    let url = format!("http://localhost:{port}");
+    let url = format!("http://localhost:{}", orrch_webui::DEFAULT_PORT);
     println!("Opening {url}");
     let _ = std::process::Command::new("xdg-open")
         .arg(&url)
