@@ -24,6 +24,9 @@ pub struct ServerState {
     /// Forwards keystrokes received from terminal-websocket clients to the
     /// main TUI event loop.
     pub input_tx: Arc<mpsc::UnboundedSender<Vec<u8>>>,
+    /// Raised when a new terminal client connects. The main loop polls
+    /// this to trigger a full TUI redraw so the newcomer sees the screen.
+    pub redraw_flag: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub fn build_router(srv: ServerState) -> Router {
@@ -66,6 +69,10 @@ async fn terminal_ws_handler(socket: WebSocket, srv: ServerState) {
     let (mut ws_sink, mut ws_stream) = socket.split();
     let mut term_rx = srv.terminal_tx.subscribe();
     let input_tx = Arc::clone(&srv.input_tx);
+
+    // Signal the main loop to emit a full redraw so this new client sees
+    // the current screen rather than whatever partial diffs come next.
+    srv.redraw_flag.store(true, std::sync::atomic::Ordering::Relaxed);
 
     // Outbound: TUI broadcast → WebSocket
     let send_task = tokio::spawn(async move {

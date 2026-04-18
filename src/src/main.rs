@@ -504,12 +504,17 @@ async fn run_loop(
             last_workflow_poll = Instant::now();
         }
 
-        // Drain WebUI terminal keystrokes on every tick (not every second).
+        // Drain WebUI terminal keystrokes on every tick.
         // Maps raw ANSI byte sequences from xterm.js into crossterm KeyCode
         // events and dispatches to the TUI like local keypresses.
         if let Some(ref srv) = webui {
             for bytes in srv.drain_input() {
                 dispatch_web_bytes(&bytes, app);
+            }
+            // If a new client just connected, force a full redraw so they
+            // see the current screen instead of empty diffs.
+            if srv.take_redraw_request() {
+                let _ = terminal.clear();
             }
         }
 

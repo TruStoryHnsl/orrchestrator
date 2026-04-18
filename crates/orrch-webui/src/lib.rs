@@ -36,6 +36,10 @@ pub struct WebUiServer {
     action_queue: Arc<Mutex<VecDeque<WebAction>>>,
     pub terminal_tx: broadcast::Sender<Vec<u8>>,
     input_rx: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>>,
+    /// Set to `true` when a new terminal client connects. The main loop
+    /// polls this flag; when set, it does a full redraw so the client
+    /// sees the current screen (not just the diff since last frame).
+    redraw_flag: Arc<std::sync::atomic::AtomicBool>,
     _shutdown: tokio::sync::oneshot::Sender<()>,
 }
 
@@ -47,11 +51,13 @@ impl WebUiServer {
         let (terminal_tx, _) = broadcast::channel::<Vec<u8>>(TERMINAL_CHANNEL_CAPACITY);
         let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
+        let redraw_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let srv = ServerState {
             state_rx: Arc::new(state_rx),
             action_queue: Arc::clone(&action_queue),
             terminal_tx: terminal_tx.clone(),
             input_tx: Arc::new(input_tx),
+            redraw_flag: Arc::clone(&redraw_flag),
         };
         let router = build_router(srv);
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -73,8 +79,15 @@ impl WebUiServer {
             action_queue,
             terminal_tx,
             input_rx: Arc::new(Mutex::new(input_rx)),
+            redraw_flag,
             _shutdown: shutdown_tx,
         })
+    }
+
+    /// Consume and return the "new client connected" flag, if set.
+    /// The main loop calls this every tick; if true it forces a full redraw.
+    pub fn take_redraw_request(&self) -> bool {
+        self.redraw_flag.swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn update_state(&self, state: WebAppState) {
