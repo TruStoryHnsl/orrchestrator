@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orrchestrator</title>
+<link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body class="ui-body">
+<nav class="top-nav" id="top-nav"></nav>
+<main id="main-panel">
+  <div id="panel-design" class="panel active"></div>
+  <div id="panel-oversee" class="panel"></div>
+  <div id="panel-hypervise" class="panel"></div>
+  <div id="panel-analyze" class="panel"></div>
+</main>
+<div id="status-bar" class="status-bar"></div>
+<div id="mobile-pad" class="mobile-pad"></div>
+
+<script src="/static/js/ws.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/intentions.js"></script>
+<script src="/static/js/sessions.js"></script>
+<script src="/static/js/mobile.js"></script>
+<script>
+WS.connect();
+Layout.init();
+Mobile.init();
+</script>
+</body>
+</html>

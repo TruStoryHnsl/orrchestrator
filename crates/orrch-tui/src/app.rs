@@ -828,6 +828,15 @@ pub struct App {
 
     /// OPT-005: input buffer for the SetLogoPath popup
     pub logo_path_input: String,
+
+    // Session log browser (Hypervise > L)
+    pub session_logs: Vec<orrch_core::windows::SessionLogMeta>,
+    pub session_logs_selected: usize,
+    pub session_log_view: bool,        // true = viewing head/tail of selected log
+    pub session_log_scroll: usize,     // line offset when viewing log
+
+    /// Port the WebUI server is listening on, or None if not started.
+    pub webui_port: Option<u16>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1044,6 +1053,11 @@ impl App {
             session_detail_expanded: false,
             steer_buf: String::new(),
             logo_path_input: String::new(),
+            session_logs: Vec::new(),
+            session_logs_selected: 0,
+            session_log_view: false,
+            session_log_scroll: 0,
+            webui_port: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1147,6 +1161,31 @@ impl App {
         match map.get(self.project_selected) {
             Some(ListEntry::Project(idx)) => Some(*idx),
             _ => None,
+        }
+    }
+
+    /// Snapshot current app state for the WebUI server.
+    pub fn web_snapshot(&self) -> orrch_webui::WebAppState {
+        orrch_webui::WebAppState {
+            active_panel: format!("{:?}", self.panel).to_lowercase(),
+            active_sub: format!("{:?}", self.sub).to_lowercase(),
+            ideas: self.ideas.iter().map(|i| orrch_webui::WebIdea {
+                filename: i.filename.clone(),
+                progress: i.pipeline.progress,
+                targets_count: i.pipeline.targets.len(),
+                submitted: i.pipeline.is_submitted(),
+                complete: i.pipeline.is_complete(),
+            }).collect(),
+            sessions: self.managed_sessions.iter().map(|s| orrch_webui::WebSession {
+                name: s.name.clone(),
+                category: s.category.label().to_string(),
+                goal: String::new(),
+                attach_cmd: format!("tmux attach -t {}:{}", s.category.tmux_name(), s.name),
+            }).collect(),
+            projects: self.projects.iter().map(|p| orrch_webui::WebProject {
+                name: p.name.clone(),
+                status: format!("{:?}", p.lifecycle_stage).to_lowercase(),
+            }).collect(),
         }
     }
 
@@ -1376,6 +1415,14 @@ impl App {
             &session_name,
         ) {
             Ok(window_name) => {
+                // Start real-time session log
+                let log_dir = self.projects_dir.join("orrchestrator").join(".session-logs");
+                orrch_core::windows::start_session_log(
+                    orrch_core::windows::SessionCategory::Dev,
+                    &window_name,
+                    goal,
+                    &log_dir,
+                );
                 // Record usage event (JSONL persistence)
                 let _ = self.usage_tracker.record(&UsageRecord {
                     timestamp: usage::iso_now(),
@@ -1906,7 +1953,13 @@ impl App {
             SubView::List => match self.panel {
                 Panel::Design => self.key_design(key),
                 Panel::Oversee => self.key_projects(key),
-                Panel::Hypervise => self.key_sessions_tab(key),
+                Panel::Hypervise => {
+                    if self.session_log_view {
+                        self.key_session_log_browser(key)
+                    } else {
+                        self.key_sessions_tab(key)
+                    }
+                }
                 Panel::Analyze => self.key_placeholder(key),
                 Panel::Publish => self.key_publish(key),
             },
@@ -3186,7 +3239,31 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('i') => {
+            KeyCode::Char('c') => {
+                // Mark selected idea as fully implemented (manual override for
+                // ideas whose instructions landed without tracked targets).
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
+                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 100);
+                        self.ideas = orrch_core::vault::load_ideas(&vault);
+                        self.notify("Marked complete".into());
+                    }
+                }
+            }
+            KeyCode::Char('X') => {
+                // Retract a stuck submission — resets progress to 0 and clears
+                // submitted_at so the idea can be re-submitted via 's'.
+                if let Some(idea) = self.ideas.get(self.idea_selected) {
+                    if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
+                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                        let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 0);
+                        self.ideas = orrch_core::vault::load_ideas(&vault);
+                        self.notify("Submission retracted — ready to re-submit".into());
+                    }
+                }
+            }
+KeyCode::Char('i') => {
                 // Toggle audit trail expansion for the selected idea
                 if self.ideas_audit_expanded == Some(self.idea_selected) {
                     self.ideas_audit_expanded = None;
@@ -3333,7 +3410,9 @@ impl App {
                                     workspace.display(),
                                     idea_filename
                                 );
-                                let _ = self.spawn_session(&project_dir, BackendKind::Claude, Some(&goal));
+                                let stem = idea_filename.trim_end_matches(".md");
+                                let cont_name = format!("intake-cont-{stem}");
+                                let _ = self.spawn_session_named(&project_dir, BackendKind::Claude, Some(&goal), Some(&cont_name));
                             }
 
                             // User-facing notification reflects what actually happened.
@@ -5103,7 +5182,7 @@ impl App {
                 items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
                 items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
                 items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(self.selected_project_index().unwrap_or(self.project_selected)) });
-                items.push(ActionItem { key: 'F', label: "Write project feedback".into(), action: ActionKind::WriteProjectFeedback(self.selected_project_index().unwrap_or(self.project_selected)) });
+
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
@@ -5536,6 +5615,41 @@ impl App {
                 self.steer_buf.clear();
                 self.sub = SubView::SteerSession(self.session_tab_selected);
             }
+            KeyCode::Char('L') => {
+                // Toggle session log browser
+                let log_dir = self.projects_dir.join("orrchestrator").join(".session-logs");
+                self.session_logs = orrch_core::windows::load_session_logs(&log_dir, 50);
+                self.session_logs_selected = 0;
+                self.session_log_view = !self.session_log_view;
+                self.session_log_scroll = 0;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn key_session_log_browser(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.session_log_view = false;
+                self.session_log_scroll = 0;
+            }
+            KeyCode::Up => {
+                if self.session_log_scroll > 0 {
+                    self.session_log_scroll -= 1;
+                } else if self.session_logs_selected > 0 {
+                    self.session_logs_selected -= 1;
+                    self.session_log_scroll = 0;
+                }
+            }
+            KeyCode::Down => {
+                if self.session_logs_selected + 1 < self.session_logs.len() {
+                    self.session_logs_selected += 1;
+                    self.session_log_scroll = 0;
+                }
+            }
+            KeyCode::PageUp => { self.session_log_scroll = self.session_log_scroll.saturating_sub(10); }
+            KeyCode::PageDown => { self.session_log_scroll += 10; }
             _ => {}
         }
         Ok(())
@@ -6008,7 +6122,11 @@ impl App {
     /// Request an external nvim session. Creates the temp file and sets vim_request.
     fn request_vim(&mut self, kind: VimKind) {
         let file = match &kind {
-            VimKind::GlobalFeedback | VimKind::ProjectFeedback(_) => {
+            VimKind::GlobalFeedback => {
+                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                orrch_core::vault::save_idea(&vault, "").ok()
+            }
+            VimKind::ProjectFeedback(_) => {
                 orrch_core::create_draft(&self.projects_dir).ok()
             }
             VimKind::MasterPlanAppend(_) => {
@@ -6041,10 +6159,12 @@ impl App {
 
         match kind {
             VimKind::GlobalFeedback => {
-                // Save as draft — user submits from Feedback tab
-                self.reload_feedback();
-                self.notify("Feedback saved as draft".into());
+                // Saved to vault — appears in Intentions list
+                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                self.ideas = orrch_core::vault::load_ideas(&vault);
+                self.notify("Saved to Intentions".into());
                 self.panel = Panel::Design;
+                self.design_sub = DesignSub::Intentions;
                 self.sub = SubView::List;
             }
             VimKind::ProjectFeedback(proj_idx) => {

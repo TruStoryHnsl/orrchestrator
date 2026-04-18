@@ -879,6 +879,108 @@ fn kdotool_minimize(window_id: String) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+// ─── Session Logging ────────────────────────────────────────────────
+
+/// Metadata parsed from the header of a session log file.
+#[derive(Debug, Clone)]
+pub struct SessionLogMeta {
+    pub path: std::path::PathBuf,
+    pub name: String,
+    pub category: String,
+    pub started: u64,
+    pub goal: String,
+    pub attach_cmd: String,
+}
+
+/// Start real-time logging for a newly-spawned tmux window.
+/// Writes a structured header then pipes all pane output (ANSI stripped)
+/// to the log file via `tmux pipe-pane`.
+pub fn start_session_log(
+    cat: SessionCategory,
+    window_name: &str,
+    goal: Option<&str>,
+    log_dir: &Path,
+) {
+    let _ = std::fs::create_dir_all(log_dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let log_path = log_dir.join(format!("{}-{}.log", window_name, now));
+    let attach_cmd = format!("tmux attach -t {}:{}", cat.tmux_name(), window_name);
+
+    let header = format!(
+        "# Session: {}\n# Category: {}\n# Started: {}\n# Attach: {}\n# Goal: {}\n# ---\n",
+        window_name,
+        cat.label(),
+        now,
+        attach_cmd,
+        goal.unwrap_or("(no goal)"),
+    );
+    let _ = std::fs::write(&log_path, header);
+
+    let target = format!("{}:{}", cat.tmux_name(), window_name);
+    // Strip ANSI escape codes and carriage returns before appending to log.
+    let pipe_cmd = format!(
+        "sed 's/\\x1b\\[[0-9;]*[mGKHFJABCDsuhl]//g;s/\\x1b(B//g;s/\\r//g' >> {}",
+        shell_escape(&log_path.to_string_lossy())
+    );
+    let _ = Command::new("tmux")
+        .args(["pipe-pane", "-t", &target, "-o", &pipe_cmd])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Load session log metadata from the log directory, newest first, up to `limit`.
+pub fn load_session_logs(log_dir: &Path, limit: usize) -> Vec<SessionLogMeta> {
+    let Ok(entries) = std::fs::read_dir(log_dir) else { return Vec::new(); };
+    let mut files: Vec<(u64, std::path::PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
+        .filter_map(|e| {
+            let mt = e.metadata().ok()?.modified().ok()?;
+            let secs = mt.duration_since(std::time::SystemTime::UNIX_EPOCH).ok()?.as_secs();
+            Some((secs, e.path()))
+        })
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.truncate(limit);
+
+    files.into_iter().filter_map(|(_, path)| {
+        let content = std::fs::read_to_string(&path).ok()?;
+        let mut name = String::new();
+        let mut category = String::new();
+        let mut started = 0u64;
+        let mut goal = String::new();
+        let mut attach_cmd = String::new();
+        for line in content.lines().take(10) {
+            if let Some(v) = line.strip_prefix("# Session: ") { name = v.to_string(); }
+            else if let Some(v) = line.strip_prefix("# Category: ") { category = v.to_string(); }
+            else if let Some(v) = line.strip_prefix("# Started: ") { started = v.parse().unwrap_or(0); }
+            else if let Some(v) = line.strip_prefix("# Attach: ") { attach_cmd = v.to_string(); }
+            else if let Some(v) = line.strip_prefix("# Goal: ") { goal = v.chars().take(120).collect(); }
+            else if line == "# ---" { break; }
+        }
+        if name.is_empty() { return None; }
+        Some(SessionLogMeta { path, name, category, started, goal, attach_cmd })
+    }).collect()
+}
+
+/// Read the head (first `n` non-header lines) and tail (last `n` lines) from a log file.
+pub fn read_session_log_head_tail(path: &Path, n: usize) -> (Vec<String>, Vec<String>) {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let lines: Vec<&str> = content.lines()
+        .skip_while(|l| l.starts_with('#'))  // skip header
+        .skip_while(|l| l.trim().is_empty()) // skip blank separator
+        .collect();
+    let head: Vec<String> = lines.iter().take(n).map(|l| l.to_string()).collect();
+    let tail_start = lines.len().saturating_sub(n);
+    let tail: Vec<String> = lines[tail_start..].iter().map(|l| l.to_string()).collect();
+    (head, tail)
+}
+
 // ─── Legacy stubs ───────────────────────────────────────────────────
 // Keep TMUX_SESSION for backward compat during transition
 pub const TMUX_SESSION: &str = "orrch-dev";

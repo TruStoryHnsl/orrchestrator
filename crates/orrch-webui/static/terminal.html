@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orrchestrator — terminal</title>
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body class="terminal-body">
+<div id="terminal"></div>
+<script>
+const term = new Terminal({
+  cursorBlink: true,
+  theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' }
+});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('terminal'));
+fit.fit();
+
+const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+const ws = new WebSocket(proto + '://' + location.host + '/pty');
+ws.binaryType = 'arraybuffer';
+
+ws.onopen = sendResize;
+ws.onmessage = function(e) {
+  if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+};
+ws.onclose = function() {
+  term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n');
+};
+
+term.onData(function(data) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+});
+
+function sendResize() {
+  if (ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+}
+
+window.addEventListener('resize', function() { fit.fit(); sendResize(); });
+</script>
+</body>
+</html>
