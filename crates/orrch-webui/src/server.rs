@@ -57,8 +57,17 @@ async fn state_ws(ws: WebSocketUpgrade, State(srv): State<ServerState>) -> Respo
 
 async fn state_ws_handler(mut socket: WebSocket, srv: ServerState) {
     let mut rx = (*srv.state_rx).clone();
-    let mut last_hash = [0u8; 32];
+
+    // Send initial state unconditionally
+    let snapshot = rx.borrow_and_update().clone();
+    let mut last_hash = state_hash(&snapshot);
+    if let Ok(json) = serde_json::to_string(&snapshot) {
+        if socket.send(Message::Text(json.into())).await.is_err() { return; }
+    }
+
+    // Then watch for changes
     loop {
+        if rx.changed().await.is_err() { return; }
         let snapshot = rx.borrow_and_update().clone();
         let hash = state_hash(&snapshot);
         if hash != last_hash {
@@ -67,7 +76,6 @@ async fn state_ws_handler(mut socket: WebSocket, srv: ServerState) {
                 if socket.send(Message::Text(json.into())).await.is_err() { return; }
             }
         }
-        if rx.changed().await.is_err() { return; }
     }
 }
 
