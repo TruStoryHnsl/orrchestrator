@@ -342,25 +342,47 @@ fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
 
 /// Try to parse a feature line.
 fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
-    // Patterns:
+    // Patterns (checkbox form):
     //   N. [x] **Title** — description
     //   N. [ ] **Title** — description
     //   CP-N. [x] **Title** — description
     //   - [x] **Title** — description
     //   - [ ] **Title** — description
+    //
+    // Plain-bullet fallback (treated as Planned):
+    //   - Title text
+    //   - **Title** — description
+    //   N. Title text
+    //
+    // The plain-bullet fallback lets projects like porrtal and orradash that
+    // use non-checkbox bullets still populate their phase trees. Callers only
+    // invoke this inside a recognised phase (see parse_plan), so non-feature
+    // bullets in other contexts are not mistaken for features.
 
     let trimmed = line.trim();
 
     // Strip the leading prefix to get to the checkbox
     let (id, rest) = strip_feature_prefix(trimmed)?;
 
-    // Must have a status marker
-    let (mut status, consumed) = if let Some((s, n)) = parse_status_marker(rest) {
-        (s, n)
-    } else {
-        return None;
-    };
-    let after_checkbox = rest[consumed..].trim_start();
+    // Parse status marker if present; otherwise fall back to a plain bullet
+    // treated as a Planned feature.
+    let (mut status, after_checkbox): (FeatureStatus, &str) =
+        if let Some((s, n)) = parse_status_marker(rest) {
+            (s, rest[n..].trim_start())
+        } else {
+            // Plain bullet: reject lines that look like section metadata
+            // (empty, a sub-heading, a horizontal rule, or a table separator).
+            if rest.is_empty()
+                || rest.starts_with('#')
+                || rest.starts_with("---")
+                || rest.starts_with('|')
+                || rest.starts_with('>')
+                || rest.starts_with("```")
+            {
+                return None;
+            }
+            (FeatureStatus::Planned, rest)
+        };
 
     // Parse title and description
     let (title, description) = parse_title_description(after_checkbox);
@@ -792,6 +814,66 @@ mod tests {
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Agent profile management");
         assert_eq!(f.status, FeatureStatus::Planned);
+    }
+
+    #[test]
+    fn test_parse_plain_bullet_feature() {
+        // Plain dash bullet with no checkbox — porrtal-style PLAN.md.
+        let f = try_parse_feature_line("- Project scaffolding, tech stack decision").unwrap();
+        assert_eq!(f.id, None);
+        assert_eq!(f.title, "Project scaffolding, tech stack decision");
+        assert_eq!(f.status, FeatureStatus::Planned);
+        assert!(!f.user_verified);
+    }
+
+    #[test]
+    fn test_parse_plain_numbered_feature() {
+        let f = try_parse_feature_line("3. Ship the thing").unwrap();
+        assert_eq!(f.id, Some(3));
+        assert_eq!(f.title, "Ship the thing");
+        assert_eq!(f.status, FeatureStatus::Planned);
+    }
+
+    #[test]
+    fn test_parse_plain_bullet_rejects_headers_and_separators() {
+        // After prefix strip these still look like section metadata, so they
+        // must not become features.
+        assert!(try_parse_feature_line("- ").is_none());
+        assert!(try_parse_feature_line("- ---").is_none());
+        assert!(try_parse_feature_line("- # nope").is_none());
+    }
+
+    #[test]
+    fn test_plan_with_plain_bullet_phase() {
+        // Porrtal-style: ### Phase N followed by plain bullets. The parser
+        // should yield one phase containing all three bullets as Planned
+        // features, so the project shows up in Design > Plans.
+        let content = r#"# Porrtal — Plan
+
+## Phases
+
+### Phase 1: Shell
+- Project scaffolding, tech stack decision
+- Basic layout with navigation
+- Health status indicators
+
+### Phase 2: Integration
+- Embed key views
+"#;
+        let phases = parse_plan(content);
+        assert!(
+            phases.len() >= 2,
+            "expected both phases to be parsed, got {phases:?}"
+        );
+        let phase1 = phases
+            .iter()
+            .find(|p| p.name.contains("Shell"))
+            .expect("Phase 1 not found");
+        assert_eq!(phase1.features.len(), 3);
+        assert!(phase1
+            .features
+            .iter()
+            .all(|f| f.status == FeatureStatus::Planned));
     }
 
     #[test]

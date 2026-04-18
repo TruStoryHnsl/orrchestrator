@@ -39,7 +39,7 @@ This was a massive planning + implementation session. Starting from a completed 
 - **Hypervisor agent** orchestrates via Claude's Agent/subagent tool
 - **Context isolation** — verification agents never see other verifiers' results
 - **File inbox between operations**, prompt injection within workflows
-- **fb2p.md deprecated** → per-project `instructions_inbox.md` managed by COO
+- **PLAN.md deprecated** → per-project `instructions_inbox.md` managed by COO
 - **Ollama via Crush/OpenCode**, not raw Ollama
 - **Library is git-backed GitHub repo** + single orrch-mcp server
 - **Workforce format is structured markdown** (pipe-delimited step tables)
@@ -86,13 +86,13 @@ src/                 — binary crate (main.rs)
 - `library/models/` — 8 AI model definitions
 - `library/harnesses/` — 5 harness definitions
 - `plans/` — ideas vault with pipeline state in `plans/.pipeline/`
-- `fb2p.md` — historical feedback log (deprecated as active system)
+- `PLAN.md` — historical feedback log (deprecated as active system)
 
 ## Memory (for Claude sessions)
 
 Memory files at `~/.claude/projects/-home-corr-projects-orrchestrator/memory/`:
 - `feedback_agent_execution_model.md` — one session per workflow, not per agent
-- `feedback_fb2p_deprecated.md` — use instructions_inbox.md instead
+- `feedback_PLAN_deprecated.md` — use instructions_inbox.md instead
 - `project_orrchestrator_redesign.md` — 8-phase roadmap overview
 
 ## Build & Test

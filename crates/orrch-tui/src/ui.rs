@@ -3309,6 +3309,7 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
         let suffix = if found { "" } else { " (not found)" };
         let label = match backend {
             BackendKind::Claude => "Claude",
+            BackendKind::Codex => "Codex",
             BackendKind::Gemini => "Gemini",
             BackendKind::Crush => "Crush",
             BackendKind::OpenCode => "OpenCode",

@@ -1,4 +1,4 @@
-//! Remote host management — discover and manage Claude sessions across the network.
+//! Remote host management — discover and manage AI CLI sessions across the network.
 //!
 //! Uses orrch-agent.sh (piped via SSH stdin) for cross-platform discovery and
 //! session management. The agent handles Linux/macOS differences transparently.
@@ -143,7 +143,7 @@ pub(crate) fn iter_json_objects(text: &str) -> Vec<String> {
 /// This ensures remotes always run the latest version without manual deployment.
 const AGENT_SCRIPT: &str = include_str!("../../../agent/orrch-agent.sh");
 
-/// A machine on the network that can run Claude Code sessions.
+/// A machine on the network that can run agent CLI sessions.
 #[derive(Debug, Clone)]
 pub struct RemoteHost {
     pub name: String,
@@ -159,6 +159,7 @@ pub struct HostCapabilities {
     pub os: String,
     pub mux: String,      // "tmux", "screen", or "nohup"
     pub claude: bool,
+    pub codex: bool,
     pub gemini: bool,
     pub projects_dir: String,
     pub hostname: String,
@@ -272,7 +273,7 @@ struct AgentDiscovery {
     cwd: String,
 }
 
-/// Discover Claude sessions on a remote host via the agent.
+/// Discover external AI CLI sessions on a remote host via the agent.
 pub async fn discover_remote_sessions(host: &RemoteHost) -> Vec<ExternalSession> {
     if host.is_local {
         return Vec::new(); // local discovery handled by ProcessManager
@@ -323,8 +324,8 @@ pub async fn check_host_reachable(host: &mut RemoteHost) {
             // ANSI/OSC noise and scans for balanced JSON objects.
             for obj in iter_json_objects(&stdout) {
                 if let Ok(caps) = serde_json::from_str::<HostCapabilities>(&obj) {
-                    debug!("Host {} capabilities: os={}, mux={}, claude={}, gemini={}",
-                        host.name, caps.os, caps.mux, caps.claude, caps.gemini);
+                    debug!("Host {} capabilities: os={}, mux={}, claude={}, codex={}, gemini={}",
+                        host.name, caps.os, caps.mux, caps.claude, caps.codex, caps.gemini);
                     host.capabilities = Some(caps);
                     break;
                 }
@@ -493,13 +494,14 @@ mod tests {
         // This is the actual failure mode that broke orrpheus:
         // fish prompt OSC escapes prepended to the JSON line from the
         // agent's `check` command.
-        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\",\"mux\":\"screen\",\"claude\":true,\"gemini\":false,\"projects_dir\":\"/Users/x/projects\",\"hostname\":\"orrpheus\"}\n\x1b]4;15;#a6adc8\x07";
+        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\",\"mux\":\"screen\",\"claude\":true,\"codex\":true,\"gemini\":false,\"projects_dir\":\"/Users/x/projects\",\"hostname\":\"orrpheus\"}\n\x1b]4;15;#a6adc8\x07";
         let objects = iter_json_objects(raw);
         assert_eq!(objects.len(), 1, "objects: {objects:?}");
         let parsed: HostCapabilities = serde_json::from_str(&objects[0]).expect("JSON parses");
         assert_eq!(parsed.os, "macos");
         assert_eq!(parsed.mux, "screen");
         assert!(parsed.claude);
+        assert!(parsed.codex);
         assert!(!parsed.gemini);
         assert_eq!(parsed.hostname, "orrpheus");
     }

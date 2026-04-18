@@ -7,16 +7,17 @@ capabilities:
   - shell execution
   - tool use
 supported_models:
-  - gpt-4o
-  - o3
-  - o4-mini
+  - gpt-5.4
+  - gpt-5.4-mini
+  - gpt-5.3-codex
+  - gpt-5.3-codex-spark
 flags:
-  - --full-auto
+  - --dangerously-bypass-approvals-and-sandbox
 limitations:
   - OpenAI models only
 ---
 
-Native harness for OpenAI models. Use when GPT-4o or o3/o4-mini is the assigned model.
---full-auto flag enables unattended execution — use only for trusted, well-scoped tasks.
+Native harness for OpenAI Codex models. Use when a Codex-capable GPT-5 model is the assigned backend.
+Primary backend for Codex CLI sessions. The default unattended flag bypasses sandbox and approvals, so only use it in already sandboxed workspaces.
 OpenAI-only lock-in means no fallback to other providers within this harness.
-Solid for straightforward implementation tasks paired with GPT-4o.
+Solid for implementation-heavy work where Codex should have full local tool access.

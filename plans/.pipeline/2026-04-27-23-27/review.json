@@ -1,0 +1,6 @@
+{
+  "raw": "regular concord should natively support reticulum.",
+  "optimized": "### OPT-001: Add Reticulum support to Concord\n\nAdd native Reticulum network support to the main Concord project. Reticulum should be integrated as a first-class transport/discovery mechanism alongside the existing Matrix backend. Scope: regular Concord (not a fork or beta variant).\n\nSource: \"regular concord should natively support reticulum.\"",
+  "status": "confirmed",
+  "source_idea": "2026-04-27-23-27.md"
+}
