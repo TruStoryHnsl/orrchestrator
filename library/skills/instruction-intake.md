@@ -165,6 +165,8 @@ If you were invoked with the explicit instruction "continue intake from confirme
 
 Update `{{WORKSPACE}}/workflow.json` — step 5, Chief Operations Officer running.
 
+**BEFORE spawning the COO**: Read the source idea file at `~/projects/orrchestrator/plans/{{SOURCE_IDEA}}` and check its **first line** for an explicit project directive. If the first line names a project (e.g. `ORRAPUS - orragen notes`, `CONCORD: voice fixes`, `orrchestrator`), extract that as `PRIMARY_PROJECT` and pass it to the COO as the default routing target. Individual instructions may still be split to other projects if their content clearly demands it, but the COO must treat `PRIMARY_PROJECT` as the strong default and require a concrete reason to deviate.
+
 Spawn an Agent with the COO profile:
 
 > **Role**: Chief Operations Officer
@@ -172,6 +174,10 @@ Spawn an Agent with the COO profile:
 > {paste the full body of chief_operations_officer.md}
 >
 > **Your task**: Determine which project each optimized instruction should be routed to.
+>
+> **Primary project** (from source idea file header): {PRIMARY_PROJECT if detected, otherwise "none — infer from content"}
+>
+> When a primary project is set, default all instructions to it. Only route an instruction elsewhere if its content explicitly and unambiguously concerns a different project — and state your concrete reason in the Reasoning column.
 >
 > **Optimized instructions**:
 > {OPTIMIZED_INSTRUCTIONS from review.json}
@@ -182,8 +188,8 @@ Spawn an Agent with the COO profile:
 > ```
 > | Instruction | Target Project | Reasoning |
 > |-------------|---------------|-----------|
-> | OPT-001     | orrchestrator | Directly about TUI functionality |
-> | OPT-002     | concord       | Describes chat platform feature |
+> | OPT-001     | orrchestrator | Primary project (default) |
+> | OPT-002     | concord       | Explicitly about Matrix chat — unambiguously not orrchestrator |
 > ```
 >
 > If an instruction spans multiple projects, split it and route each part separately. Note the split.
