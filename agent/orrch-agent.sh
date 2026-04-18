@@ -5,7 +5,7 @@
 # session discovery, spawning, and management across Linux and macOS.
 #
 # Usage:
-#   orrch-agent.sh discover          — list Claude sessions as JSON lines
+#   orrch-agent.sh discover          — list external agent CLI sessions as JSON lines
 #   orrch-agent.sh spawn <project> <backend> <goal> [flags...]
 #   orrch-agent.sh kill <session_name>
 #   orrch-agent.sh list              — list orrchestrator-managed sessions
@@ -64,7 +64,7 @@ get_cwd() {
     fi
 }
 
-# Discover all Claude CLI sessions. Output: one JSON object per line.
+# Discover all supported agent CLI sessions. Output: one JSON object per line.
 cmd_discover() {
     # Use ps (POSIX) instead of pgrep for cross-platform compatibility
     # ps -eo pid,command works on both Linux and macOS
@@ -76,9 +76,9 @@ cmd_discover() {
         pid="$(echo "$line" | awk '{print $1}')"
         cmd="$(echo "$line" | awk '{$1=""; print $0}' | sed 's/^ //')"
 
-        # Must be a claude process
+        # Must be a supported agent CLI process
         case "$cmd" in
-            *claude*) ;;
+            *claude*|*codex*|*gemini*) ;;
             *) continue ;;
         esac
 
@@ -87,9 +87,9 @@ cmd_discover() {
             *grep*|*pgrep*|*orrch-agent*|*"bash -c"*|*"sh -c"*|*"zsh -c"*) continue ;;
         esac
 
-        # Skip non-claude binaries that happen to match (e.g. claude-related config tools)
+        # Skip non-agent binaries that happen to match
         case "$cmd" in
-            claude*|*/claude*) ;;
+            claude*|*/claude*|codex*|*/codex*|gemini*|*/gemini*) ;;
             *) continue ;;
         esac
 
@@ -212,12 +212,14 @@ cmd_list() {
 
 cmd_check() {
     has_claude="false"
+    has_codex="false"
     has_gemini="false"
     command -v claude >/dev/null 2>&1 && has_claude="true"
+    command -v codex >/dev/null 2>&1 && has_codex="true"
     command -v gemini >/dev/null 2>&1 && has_gemini="true"
 
-    printf '{"os":"%s","mux":"%s","claude":%s,"gemini":%s,"projects_dir":"%s","hostname":"%s"}\n' \
-        "$OS" "$MUX" "$has_claude" "$has_gemini" \
+    printf '{"os":"%s","mux":"%s","claude":%s,"codex":%s,"gemini":%s,"projects_dir":"%s","hostname":"%s"}\n' \
+        "$OS" "$MUX" "$has_claude" "$has_codex" "$has_gemini" \
         "$(echo "$PROJECTS_DIR" | sed 's/"/\\"/g')" \
         "$(hostname)"
 }

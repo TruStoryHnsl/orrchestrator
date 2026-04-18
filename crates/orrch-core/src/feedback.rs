@@ -193,6 +193,126 @@ pub fn identify_target_projects_pub(text: &str, projects_dir: &Path) -> Vec<(Str
     identify_target_projects(text, projects_dir)
 }
 
+/// A parsed "new project" directive extracted from optimized instruction text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewProjectDirective {
+    /// The name exactly as the user wrote it (post-trim). Callers should
+    /// slug this with `crate::slugify_project_name` before creating the
+    /// directory.
+    pub name: String,
+    /// Any descriptive text immediately following the directive on the same
+    /// line, suitable for seeding the project summary. May be empty.
+    pub summary: String,
+}
+
+/// Detect "NEW PROJECT:" directives in free-form instruction text.
+///
+/// The intake pipeline allows users to seed a brand-new project from an
+/// intention by writing a marker phrase on its own line or at the start of
+/// a paragraph. All of these are accepted (case-insensitive, optional colon
+/// spacing, optional surrounding punctuation):
+///
+/// ```text
+/// NEW PROJECT: widget-optimizer
+/// NEW PROJECT : widget optimizer — thing that does the thing
+/// new project: foo — short summary
+/// NEW_PROJECT: bar
+/// ```
+///
+/// Returns every distinct directive in the order encountered. Names are
+/// trimmed but not slugified — downstream callers apply slug rules when
+/// creating the actual directory. Duplicate names (after case-insensitive
+/// comparison) are collapsed, keeping the first occurrence's summary.
+///
+/// Detection is deterministic and runs on the optimized (COO-reviewed) text
+/// rather than the raw idea, so by the time this fires the user has had a
+/// chance to edit the COO's expansion of their intent.
+pub fn detect_new_project_directives(text: &str) -> Vec<NewProjectDirective> {
+    let mut out: Vec<NewProjectDirective> = Vec::new();
+    let mut seen: Vec<String> = Vec::new(); // lowercased names
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim_start_matches(|c: char| {
+            matches!(c, ' ' | '\t' | '#' | '*' | '-' | '>' | '|' | '_' | '`')
+        });
+        let lower = line.to_lowercase();
+
+        // Accept "new project" with either a space or underscore between the
+        // words. A word boundary (non-alphanumeric) after the phrase is
+        // required, otherwise "new projections" would match.
+        let marker_len = if lower.starts_with("new project") {
+            "new project".len()
+        } else if lower.starts_with("new_project") {
+            "new_project".len()
+        } else {
+            continue;
+        };
+
+        // Look at the character immediately after the marker. It must be
+        // either end-of-line or a non-alphanumeric separator. Alphanumeric
+        // → the marker is actually part of a longer word like
+        // "projections" → reject.
+        let after_marker = line.get(marker_len..).unwrap_or("");
+        match after_marker.chars().next() {
+            None => continue, // marker at end of line with no name
+            Some(c) if c.is_ascii_alphanumeric() => continue, // "projections"
+            _ => {}
+        }
+
+        // Strip leading separators: any mix of whitespace, ASCII hyphen,
+        // em-dash, en-dash, colon, or equals sign. What remains is the
+        // project name (optionally followed by a summary).
+        let after_punct = after_marker
+            .trim_start_matches(|c: char| {
+                c.is_whitespace() || matches!(c, ':' | '-' | '—' | '–' | '=')
+            });
+
+        if after_punct.is_empty() {
+            continue;
+        }
+
+        // Split name from summary on the first em-dash, en-dash, or " - ".
+        let (name_part, summary_part) = split_name_summary(after_punct);
+        let name = name_part.trim().trim_end_matches('.').trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+
+        let key = name.to_lowercase();
+        if seen.iter().any(|s| s == &key) {
+            continue;
+        }
+        seen.push(key);
+
+        out.push(NewProjectDirective {
+            name,
+            summary: summary_part.trim().to_string(),
+        });
+    }
+
+    out
+}
+
+/// Split a directive tail into `(name, summary)` on the first em-dash,
+/// en-dash, or " - " separator. When no separator is present the entire
+/// input becomes the name and the summary is empty.
+fn split_name_summary(tail: &str) -> (&str, &str) {
+    // Check for em-dash or en-dash first (UTF-8 safe).
+    for sep in &["—", "–"] {
+        if let Some(pos) = tail.find(sep) {
+            let (left, right) = tail.split_at(pos);
+            return (left, &right[sep.len()..]);
+        }
+    }
+    // ASCII " - " as a fallback (hyphens without surrounding spaces belong
+    // to the name itself, e.g. "widget-optimizer").
+    if let Some(pos) = tail.find(" - ") {
+        let (left, right) = tail.split_at(pos);
+        return (left, &right[3..]);
+    }
+    (tail, "")
+}
+
 /// Append a feedback entry to a project's instructions_inbox.md.
 pub fn append_to_inbox(
     feedback_text: &str,
@@ -1001,6 +1121,64 @@ mod tests {
         assert!(word_boundary_match("update concord", "concord"));
         assert!(!word_boundary_match("disconcordant behavior", "concord")); // substring
         assert!(word_boundary_match("fix concord/v2 websocket", "concord")); // slash boundary
+    }
+
+    #[test]
+    fn test_detect_new_project_colon_simple() {
+        let text = "NEW PROJECT: widget-optimizer\nDo stuff.";
+        let d = detect_new_project_directives(text);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].name, "widget-optimizer");
+        assert_eq!(d[0].summary, "");
+    }
+
+    #[test]
+    fn test_detect_new_project_case_insensitive_with_summary() {
+        let text = "new project : Hypeland Widget Distributer — neural net for widget layouts";
+        let d = detect_new_project_directives(text);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].name, "Hypeland Widget Distributer");
+        assert_eq!(d[0].summary, "neural net for widget layouts");
+    }
+
+    #[test]
+    fn test_detect_new_project_underscore_form() {
+        let text = "NEW_PROJECT: foo\nnew_project: bar - the bar tool";
+        let d = detect_new_project_directives(text);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].name, "foo");
+        assert_eq!(d[1].name, "bar");
+        assert_eq!(d[1].summary, "the bar tool");
+    }
+
+    #[test]
+    fn test_detect_new_project_markdown_prefix_stripped() {
+        // Works even when the directive is inside a markdown bullet or heading.
+        let text = "## Sub-goals\n- NEW PROJECT: alpha — first project\n* New Project: beta";
+        let d = detect_new_project_directives(text);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].name, "alpha");
+        assert_eq!(d[1].name, "beta");
+    }
+
+    #[test]
+    fn test_detect_new_project_rejects_false_positives() {
+        // "new projections" should NOT match.
+        let text = "We'll need new projections for the quarterly report. Also `new project` as a term.";
+        let d = detect_new_project_directives(text);
+        // The backtick-fenced `new project` line has no separator and no
+        // content after — rejected. "new projections" has no separator after
+        // "project" either.
+        assert!(d.is_empty(), "expected no matches, got {d:?}");
+    }
+
+    #[test]
+    fn test_detect_new_project_dedupes_by_name() {
+        let text = "NEW PROJECT: foo\nNEW PROJECT: FOO — later mention";
+        let d = detect_new_project_directives(text);
+        assert_eq!(d.len(), 1);
+        // First occurrence wins.
+        assert_eq!(d[0].name, "foo");
     }
 
     fn write_entry(buf: &mut String, ts: &str, body: &str, executed: &str) {

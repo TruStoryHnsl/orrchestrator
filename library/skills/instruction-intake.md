@@ -51,9 +51,16 @@ Spawn an Agent:
 > {paste the full body of executive_assistant.md, starting from "# Executive Assistant Agent"}
 >
 > **Your task**: Triage the following user input. Classify each part as one of:
-> 1. **Development instruction** — features to build, bugs to fix, code to write, architecture changes, technical work
+> 1. **Development instruction** — features to build, bugs to fix, code to write, architecture changes, technical work that is actionable now
 > 2. **Status inquiry** — questions about progress or state
 > 3. **General conversation** — non-technical requests, preferences, scheduling
+> 4. **Deferred idea** — bold ideas, out-of-scope brainstorms, "someday" features, or anything the user explicitly frames as future/post-launch. These are NOT ready to execute but must NOT be dropped. They get parked in the target project's PLAN.md for later.
+>
+> **Signs something is a deferred idea** (not a dev instruction):
+> - Scoped as "after we finish X" / "once Y is done" / "in the future"
+> - A brainstorm list with no explicit requirement or acceptance criteria
+> - Bold/ambitious ideas that clearly exceed the project's current maturity
+> - Anything framed as an out-there idea, vision, or "what if"
 >
 > **User input**:
 > {RAW_INPUT}
@@ -63,6 +70,9 @@ Spawn an Agent:
 > ## Development Instructions
 > <extracted dev instructions, preserving the user's exact words>
 >
+> ## Deferred Ideas
+> <brainstorms, bold ideas, and out-of-scope items — with the target project each belongs to>
+>
 > ## Non-Development Items
 > <list of non-dev items with your recommended immediate response for each>
 >
@@ -70,7 +80,7 @@ Spawn an Agent:
 > <anything you could not confidently classify — include the text and why it is ambiguous>
 > ```
 >
-> Do NOT modify the development instructions. Extract them verbatim. Do NOT interpret, summarize, or rewrite them — that is the COO's job.
+> Do NOT modify the development instructions or deferred ideas. Extract them verbatim. Do NOT interpret, summarize, or rewrite them — that is the COO's job.
 
 Store the Agent's output as `TRIAGE_RESULT`.
 
@@ -78,7 +88,10 @@ Store the Agent's output as `TRIAGE_RESULT`.
 
 **Handle ambiguous items**: If any items are flagged as ambiguous, present them to the user and ask for classification before proceeding. Wait for the user's response.
 
-Extract the development instructions portion and store as `DEV_INSTRUCTIONS`. If there are no development instructions, mark the workflow as `failed` in `{{WORKSPACE}}/workflow.json` and stop — the pipeline only processes dev work.
+Extract the development instructions portion and store as `DEV_INSTRUCTIONS`.
+Extract the deferred ideas portion and store as `DEFERRED_IDEAS` (may be empty).
+
+If there are no development instructions AND no deferred ideas, mark the workflow as `failed` in `{{WORKSPACE}}/workflow.json` and stop.
 
 ---
 
@@ -94,22 +107,40 @@ Spawn an Agent:
 >
 > {paste the full body of chief_operations_officer.md}
 >
-> **Your task**: Process these raw development instructions into token-efficient optimized versions.
+> **Your task**: Process these raw development instructions into token-efficient optimized versions. Also summarize any deferred ideas for PLAN.md storage.
 >
-> **Raw development instructions**:
+> **Raw development instructions** (actionable):
 > {DEV_INSTRUCTIONS}
 >
-> **Instructions**:
+> **Raw deferred ideas** (to be parked, not executed):
+> {DEFERRED_IDEAS}
+>
+> **Instructions for actionable items**:
 > 1. Parse — extract actionable items, requirements, constraints, and acceptance criteria. Strip conversational filler, repeated phrases, and ambiguity.
 > 2. Deduplicate — if multiple instructions describe the same thing, merge them.
 > 3. Optimize — rewrite each instruction as a clear, concise prompt. Use imperative voice. Include only information an executing agent needs. Target minimum viable token count without losing meaning.
 > 4. Preserve the user's intent exactly. Optimization is about efficiency, not editorial judgment.
 > 5. Number each optimized instruction (OPT-001, OPT-002, etc.).
 >
-> **Output**: For each instruction:
+> **Instructions for deferred ideas**:
+> - Preserve the user's exact words. Do not optimize or rewrite.
+> - Give each a short title (DEF-001, DEF-002, etc.).
+> - These will be stored verbatim in PLAN.md — no compression needed.
+>
+> **Output**:
+>
+> For each actionable instruction:
 > ```
 > ### OPT-NNN: <title>
 > <optimized instruction text>
+>
+> Source: <which part of the raw input this came from>
+> ```
+>
+> For each deferred idea:
+> ```
+> ### DEF-NNN: <title>
+> <user's original brainstorm text, preserved verbatim>
 >
 > Source: <which part of the raw input this came from>
 > ```
@@ -128,12 +159,13 @@ Write `{{WORKSPACE}}/review.json` with the following content (note: status is `"
 {
   "raw": "<DEV_INSTRUCTIONS as a string>",
   "optimized": "<OPTIMIZED_INSTRUCTIONS as a string>",
+  "deferred": "<DEFERRED_IDEAS (DEF-NNN blocks) as a string, or empty string if none>",
   "status": "pending",
   "source_idea": "{{SOURCE_IDEA}}"
 }
 ```
 
-Be careful to JSON-escape newlines and quotes inside `raw` and `optimized`.
+Be careful to JSON-escape newlines and quotes inside `raw`, `optimized`, and `deferred`.
 
 ---
 
@@ -171,14 +203,19 @@ Spawn an Agent with the COO profile:
 >
 > {paste the full body of chief_operations_officer.md}
 >
-> **Your task**: Determine which project each optimized instruction should be routed to.
+> **Your task**: Determine which project each optimized instruction and deferred idea should be routed to.
 >
-> **Optimized instructions**:
+> **Optimized instructions** (actionable now — route to project instruction inboxes):
 > {OPTIMIZED_INSTRUCTIONS from review.json}
+>
+> **Deferred ideas** (not actionable yet — route to project PLAN.md deferred sections):
+> {DEFERRED_IDEAS from review.json}
 >
 > **Available projects**: List the directories in `~/projects/` and read each project's `CLAUDE.md` or `README.md` to understand what it does. Also check `.scope` files.
 >
-> **Output**: A routing table:
+> **Output**: Two routing tables:
+>
+> **Actionable instructions** (go to instructions_inbox.md):
 > ```
 > | Instruction | Target Project | Reasoning |
 > |-------------|---------------|-----------|
@@ -186,8 +223,16 @@ Spawn an Agent with the COO profile:
 > | OPT-002     | concord       | Describes chat platform feature |
 > ```
 >
+> **Deferred ideas** (go to PLAN.md deferred section):
+> ```
+> | Idea | Target Project | Reasoning |
+> |------|---------------|-----------|
+> | Game Center brainstorm | concord | Chat platform gaming feature |
+> ```
+>
 > If an instruction spans multiple projects, split it and route each part separately. Note the split.
 > If an instruction does not clearly belong to any project, route it to `~/projects/scratchpad.md`.
+> Deferred ideas with no clear project also go to `~/projects/scratchpad.md`.
 
 Store the Agent's output as `ROUTING_TABLE`.
 
@@ -238,14 +283,22 @@ For each project that received new instructions, read the agent profile from `~/
 > **Instructions**:
 > 1. Read the project's `PLAN.md` (if it exists).
 > 2. Read the project's `CLAUDE.md` for context on what the project does.
-> 3. Determine if each new instruction:
+> 3. Determine if each new **actionable instruction**:
 >    - **Extends** an existing planned feature — merge into that section
 >    - **Modifies** a previous decision — update the relevant section, note what changed
 >    - **Adds** something new — append as a new feature roadmap entry with status "planned"
 >    - **Contradicts** existing plans — flag in an "Open Conflicts" section
-> 4. Update `PLAN.md` with the incorporated instructions. If `PLAN.md` does not exist, create it with sections: Open Conflicts, Architecture, Feature Roadmap, Recent Changes.
+> 4. For each **deferred idea** routed to this project: add it to a `### Deferred / Post-Primary-Goals` subsection inside the Feature Roadmap. Format:
+>    ```markdown
+>    ### Deferred / Post-Primary-Goals
+>    _Ideas parked here are not actionable yet. Revisit when the primary roadmap is complete._
 >
-> **Output**: Summary of what was incorporated and any conflicts detected.
+>    - **<idea title>** (captured <date>, source: <source_idea file>): <preserved brainstorm text>
+>    ```
+>    If the section already exists, append to it. Do not promote deferred ideas into the active roadmap — they stay deferred until the user explicitly acts on them.
+> 5. Update `PLAN.md`. If `PLAN.md` does not exist, create it with sections: Open Conflicts, Architecture, Feature Roadmap (including a Deferred subsection), Recent Changes.
+>
+> **Output**: Summary of what was incorporated, what was deferred, and any conflicts detected.
 
 ---
 

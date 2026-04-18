@@ -287,7 +287,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "remote_list_hosts",
-            "description": "List all known remote hosts (orrion, orrgate, orrpheus, …) with SSH target, reachability status, and probed capabilities (OS, session multiplexer, claude CLI presence, gemini CLI presence, projects_dir, hostname). Runs the orrch-agent `check` subcommand over SSH for every non-local host. Robust to shell color noise — tolerates themed fish/zsh prompts that emit ANSI/OSC escape sequences on the first line.",
+            "description": "List all known remote hosts (orrion, orrgate, orrpheus, …) with SSH target, reachability status, and probed capabilities (OS, session multiplexer, claude CLI presence, codex CLI presence, gemini CLI presence, projects_dir, hostname). Runs the orrch-agent `check` subcommand over SSH for every non-local host. Robust to shell color noise — tolerates themed fish/zsh prompts that emit ANSI/OSC escape sequences on the first line.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -295,7 +295,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "remote_discover_sessions",
-            "description": "Discover active Claude CLI sessions running on a remote host. Returns one JSON-like line per detected claude process with PID, command line, and current working directory.",
+            "description": "Discover active AI CLI sessions running on a remote host. Returns one JSON-like line per detected claude, codex, or gemini process with PID, command line, and current working directory.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1557,8 +1557,8 @@ async fn remote_list_hosts() -> String {
         ));
         if let Some(caps) = &host.capabilities {
             out.push_str(&format!(
-                "    - os: {} | mux: {} | claude: {} | gemini: {} | hostname: {} | projects_dir: {}\n",
-                caps.os, caps.mux, caps.claude, caps.gemini, caps.hostname, caps.projects_dir
+                "    - os: {} | mux: {} | claude: {} | codex: {} | gemini: {} | hostname: {} | projects_dir: {}\n",
+                caps.os, caps.mux, caps.claude, caps.codex, caps.gemini, caps.hostname, caps.projects_dir
             ));
         } else if !host.is_local && host.reachable {
             out.push_str("    - (reachable but no capability data — agent check parse failed)\n");
@@ -1579,10 +1579,10 @@ async fn remote_discover_sessions(args: &Value) -> String {
 
     let sessions = orrch_core::remote::discover_remote_sessions(&host).await;
     if sessions.is_empty() {
-        return format!("No Claude sessions found on {}.", host.name);
+        return format!("No agent CLI sessions found on {}.", host.name);
     }
 
-    let mut out = format!("## Claude sessions on {}\n\n", host.name);
+    let mut out = format!("## Agent sessions on {}\n\n", host.name);
     for s in &sessions {
         out.push_str(&format!(
             "- pid {} — `{}` @ {}\n",

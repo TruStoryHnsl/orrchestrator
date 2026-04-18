@@ -614,6 +614,130 @@ fn load_sub_projects(path: &Path) -> Vec<Project> {
     subs
 }
 
+/// Parameters for scaffolding a new project directory.
+///
+/// All projects created through this function receive a consistent starter
+/// set: `.scope`, optional `.orrtemp`, `CLAUDE.md`, and `PLAN.md`. This is the
+/// single source of truth for new-project creation — both the TUI "New
+/// Project" flow and the intake pipeline's "NEW PROJECT:" detection route
+/// through it so downstream invariants (every project has a plan, every new
+/// project appears in the Plans panel) always hold.
+#[derive(Debug, Clone)]
+pub struct ProjectScaffold<'a> {
+    pub name: &'a str,
+    pub scope: Scope,
+    pub temperature: Temperature,
+    /// Optional human-written one-line summary inserted into CLAUDE.md and
+    /// the PLAN.md header. When empty, a generic placeholder is used.
+    pub summary: &'a str,
+}
+
+/// Convert an arbitrary project name into a filesystem-safe slug.
+///
+/// Rules:
+/// - Lowercase, trim whitespace
+/// - Replace any non-alphanumeric run with a single `-`
+/// - Strip leading/trailing `-`
+/// - Collapse consecutive dashes
+///
+/// The slug is suitable for use as a directory name. Projects use slugs, not
+/// the original display names, because filesystem operations (git init, path
+/// joining, remote URLs) all need predictable ASCII.
+pub fn slugify_project_name(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    let mut prev_dash = true; // prevents leading dash
+    for ch in name.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    // Strip trailing dash
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    slug
+}
+
+/// Create a new project directory with scaffolded starter files.
+///
+/// Returns the path to the created project. Fails if the target already
+/// exists — callers that want idempotent behaviour should check beforehand
+/// with [`Path::exists`] on `projects_dir.join(slugify_project_name(name))`.
+///
+/// Scaffolded files:
+/// - `.scope` — the scope label ("private", "public", etc.)
+/// - `.orrtemp` — written only when `temperature == Temperature::Hot`
+/// - `CLAUDE.md` — minimal agent profile with project name + summary
+/// - `PLAN.md` — minimal plan with a single "Phase 1" section so the project
+///   is immediately visible in Design > Plans
+pub fn create_project_scaffold(
+    projects_dir: &Path,
+    scaffold: &ProjectScaffold<'_>,
+) -> anyhow::Result<PathBuf> {
+    let slug = slugify_project_name(scaffold.name);
+    if slug.is_empty() {
+        anyhow::bail!("project name is empty after slugification");
+    }
+
+    let project_path = projects_dir.join(&slug);
+    if project_path.exists() {
+        anyhow::bail!(
+            "project directory already exists: {}",
+            project_path.display()
+        );
+    }
+
+    std::fs::create_dir_all(&project_path)?;
+
+    // .scope
+    std::fs::write(project_path.join(".scope"), scaffold.scope.label())?;
+
+    // .orrtemp (only for hot projects)
+    if scaffold.temperature == Temperature::Hot {
+        std::fs::write(project_path.join(".orrtemp"), "hot")?;
+    }
+
+    // Choose a display name that respects user capitalisation when they gave
+    // us an already-slug-like name; otherwise fall back to the slug.
+    let display_name = if scaffold.name.trim().is_empty() {
+        slug.clone()
+    } else {
+        scaffold.name.trim().to_string()
+    };
+
+    let summary = if scaffold.summary.trim().is_empty() {
+        "Project instructions for Claude Code.".to_string()
+    } else {
+        scaffold.summary.trim().to_string()
+    };
+
+    // CLAUDE.md
+    std::fs::write(
+        project_path.join("CLAUDE.md"),
+        format!("# {display_name}\n\n{summary}\n"),
+    )?;
+
+    // PLAN.md — seeded with a single Phase 1 placeholder so the project is
+    // immediately visible in Design > Plans. The placeholder uses the
+    // `- [ ] **Title** — desc` checkbox format that the parser prefers.
+    std::fs::write(
+        project_path.join("PLAN.md"),
+        format!(
+            "# {display_name} — Plan\n\n\
+             {summary}\n\n\
+             ## Phase 1: Scaffold\n\n\
+             - [ ] **Project scaffolded** — initial directory, scope, CLAUDE.md, and PLAN.md created.\n\
+             - [ ] **Define goals** — replace this placeholder with real features.\n"
+        ),
+    )?;
+
+    Ok(project_path)
+}
+
 /// Package a project as v1 (mark complete). Creates a v1/ directory and moves source into it.
 pub fn package_as_v1(project_path: &Path) -> anyhow::Result<()> {
     let v1_dir = project_path.join("v1");
@@ -1186,6 +1310,85 @@ mod tests {
     #[test]
     fn test_scope_personal() {
         assert_eq!(Scope::from_str("personal"), Scope::Personal);
+    }
+
+    #[test]
+    fn test_slugify_project_name() {
+        assert_eq!(slugify_project_name("widget-optimizer"), "widget-optimizer");
+        assert_eq!(
+            slugify_project_name("Hypeland Widget Distributer"),
+            "hypeland-widget-distributer"
+        );
+        assert_eq!(
+            slugify_project_name("  MyProj_123  "),
+            "myproj-123"
+        );
+        assert_eq!(slugify_project_name("foo!!bar??"), "foo-bar");
+        assert_eq!(slugify_project_name(""), "");
+        assert_eq!(slugify_project_name("---"), "");
+    }
+
+    #[test]
+    fn test_create_project_scaffold_writes_all_files() {
+        let tmp = std::env::temp_dir().join(format!(
+            "orrch_scaffold_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let scaffold = ProjectScaffold {
+            name: "Widget Optimizer",
+            scope: Scope::Private,
+            temperature: Temperature::Hot,
+            summary: "Neural net that finds optimal widget layouts.",
+        };
+        let path = create_project_scaffold(&tmp, &scaffold).unwrap();
+        assert!(path.exists());
+        assert!(path.file_name().unwrap().to_string_lossy() == "widget-optimizer");
+
+        // All scaffolded files exist
+        assert!(path.join(".scope").exists());
+        assert!(path.join(".orrtemp").exists()); // Hot → orrtemp written
+        assert!(path.join("CLAUDE.md").exists());
+        assert!(path.join("PLAN.md").exists());
+
+        // Scope content correct
+        let scope_content = std::fs::read_to_string(path.join(".scope")).unwrap();
+        assert_eq!(scope_content, "private");
+
+        // PLAN.md has a Phase 1 section the parser will find
+        let plan_content = std::fs::read_to_string(path.join("PLAN.md")).unwrap();
+        assert!(plan_content.contains("## Phase 1: Scaffold"));
+        assert!(plan_content.contains("Widget Optimizer"));
+        assert!(plan_content.contains("Neural net"));
+
+        // The scaffolded PLAN.md must parse as at least one phase so the
+        // project immediately appears in Design > Plans.
+        let phases = crate::plan_parser::parse_plan(&plan_content);
+        assert!(
+            !phases.is_empty(),
+            "scaffolded PLAN.md must yield at least one parsed phase"
+        );
+
+        // Cold projects don't get .orrtemp
+        let cold_scaffold = ProjectScaffold {
+            name: "cold-proj",
+            scope: Scope::Public,
+            temperature: Temperature::Cold,
+            summary: "",
+        };
+        let cold_path = create_project_scaffold(&tmp, &cold_scaffold).unwrap();
+        assert!(!cold_path.join(".orrtemp").exists());
+
+        // Duplicate creation fails
+        let dup = create_project_scaffold(&tmp, &cold_scaffold);
+        assert!(dup.is_err(), "creating the same project twice must fail");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
