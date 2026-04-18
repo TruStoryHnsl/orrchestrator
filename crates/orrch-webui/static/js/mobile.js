@@ -14,6 +14,7 @@ var Mobile = (function() {
 
   function buildPad() {
     var pad = document.getElementById('mobile-pad');
+    if (!pad) return;
 
     var strip = document.createElement('div');
     strip.className = 'hint-strip';

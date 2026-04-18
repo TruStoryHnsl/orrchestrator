@@ -10,6 +10,7 @@ var Intentions = (function() {
     var panel = document.getElementById('panel-design');
     if (!panel.classList.contains('active')) return;
     ideas = state.ideas || [];
+    if (selected >= ideas.length) selected = Math.max(0, ideas.length - 1);
     ensureLayout(panel);
     renderList();
     renderDetail();

@@ -30,6 +30,8 @@ var Layout = (function() {
     });
     var el = document.getElementById('panel-' + name);
     if (el) el.classList.add('active');
+    var ls = WS.getLastState();
+    if (name === 'design' && ls && Object.keys(ls).length) Intentions.render(ls);
   }
 
   function syncFromServer(state) {
