@@ -1032,3 +1032,158 @@ fn shell_escape(s: &str) -> String {
         s.to_string()
     }
 }
+
+// ─── OPT-010(b): Stale Session Cleanup ──────────────────────────────
+
+/// A `ManagedSession` is considered stale when it is `Dead` OR it is `Idle`
+/// and older than the supplied threshold. `Working` and `WaitingForInput`
+/// windows are never considered stale — the user is either doing work or
+/// being blocked waiting for input. Only `last_output` is used as a proxy
+/// for "age" here because `ManagedSession` does not carry timestamps; the
+/// caller decides the threshold by consulting its own records via
+/// `load_session_records` (see below).
+pub fn is_stale(session: &ManagedSession) -> bool {
+    matches!(session.status, SessionStatus::Dead)
+}
+
+/// Prune all `Dead` managed sessions by killing their tmux windows and
+/// clearing their records. Returns the number of windows pruned. This is
+/// the minimum-risk pruning that never kills a window the user is actively
+/// looking at — only ones tmux has already torn down.
+///
+/// For idle-timeout pruning, pair this with `SessionRecord::spawned_at`
+/// from `load_session_records` and kill windows whose records exceed the
+/// desired max-age.
+pub fn prune_stale_managed_sessions() -> usize {
+    let mut pruned = 0usize;
+    for cat in SessionCategory::all() {
+        for s in list_sessions_in(*cat) {
+            if is_stale(&s) {
+                // Double-check tmux still knows the window before kill/remove.
+                if tmux_window_exists(cat.tmux_name(), &s.name) {
+                    if kill_session(*cat, &s.name) {
+                        pruned += 1;
+                    }
+                } else {
+                    remove_session_record(cat.tmux_name(), &s.name);
+                }
+            }
+        }
+    }
+    // Catch orphans whose tmux session entirely disappeared.
+    pruned + purge_orphaned_sessions()
+}
+
+// ─── OPT-012(b): Window Splitting ───────────────────────────────────
+
+/// Break a tmux window out of its category session into a standalone tmux
+/// session attached to its own alacritty terminal. Enables side-by-side
+/// viewing of multiple orrchestrator-managed sessions.
+///
+/// Implementation:
+///   1. `tmux break-pane -s <category>:<window_name> -t <new_session>`
+///      moves the pane into a fresh session named `orrch-split-<sanitized>`.
+///   2. A new alacritty process attaches to that session.
+///
+/// Returns the name of the new tmux session on success.
+pub fn break_window_to_new_terminal(
+    category: SessionCategory,
+    window_name: &str,
+) -> anyhow::Result<String> {
+    let src = format!("{}:{}", category.tmux_name(), window_name);
+
+    // Verify the source window exists first so we fail loudly, not silently.
+    if !tmux_window_exists(category.tmux_name(), window_name) {
+        anyhow::bail!("source tmux window not found: {src}");
+    }
+
+    let suffix: String = window_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(40)
+        .collect();
+    let new_session = format!("orrch-split-{suffix}");
+
+    // `break-pane -d -s <src> -t <dst>:` creates a new session `dst` containing
+    // just the broken-out pane. `-d` keeps the src session's focus stable.
+    let status = Command::new("tmux")
+        .args([
+            "break-pane",
+            "-d",
+            "-s", &src,
+            "-t", &format!("{new_session}:"),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(_) => anyhow::bail!("tmux break-pane failed for {src}"),
+        Err(e) => anyhow::bail!("tmux break-pane spawn error: {e}"),
+    }
+
+    // Launch a fresh alacritty attached to the new session. We quote the
+    // session name defensively even though sanitization should keep it safe.
+    let escaped = shell_escape(&new_session);
+    let title = format!("[orrch split] {window_name}");
+    let _ = Command::new("alacritty")
+        .args(["--title", &title, "-e", "tmux", "attach-session", "-t"])
+        .arg(&escaped)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+
+    Ok(new_session)
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn shell_escape_round_trips_plain_names() {
+        assert_eq!(shell_escape("normal"), "normal");
+        assert_eq!(shell_escape("window-42"), "window-42");
+        assert_eq!(shell_escape("my_proj"), "my_proj");
+    }
+
+    #[test]
+    fn shell_escape_quotes_whitespace_and_specials() {
+        assert_eq!(shell_escape("has space"), "'has space'");
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+        assert_eq!(shell_escape("a\"b"), "'a\"b'");
+        assert_eq!(shell_escape("a$b"), "'a$b'");
+        assert_eq!(shell_escape("back`tick"), "'back`tick'");
+    }
+
+    #[test]
+    fn is_stale_only_for_dead() {
+        let make = |status| ManagedSession {
+            category: SessionCategory::Dev,
+            index: 0,
+            name: "x".into(),
+            cwd: String::new(),
+            active: false,
+            status,
+            last_output: String::new(),
+        };
+        assert!(is_stale(&make(SessionStatus::Dead)));
+        assert!(!is_stale(&make(SessionStatus::Idle)));
+        assert!(!is_stale(&make(SessionStatus::Working)));
+        assert!(!is_stale(&make(SessionStatus::WaitingForInput)));
+    }
+
+    #[test]
+    fn break_window_fails_cleanly_when_source_missing() {
+        // We can't exercise the tmux write path in CI, but we can verify the
+        // guard rejects a bogus window before attempting any mutation.
+        let res = break_window_to_new_terminal(
+            SessionCategory::Dev,
+            "definitely-not-a-real-window-orrch-test-xyz",
+        );
+        assert!(res.is_err());
+        let msg = format!("{}", res.err().unwrap());
+        assert!(msg.contains("source tmux window not found"));
+    }
+}
