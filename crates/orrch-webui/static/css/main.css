@@ -5,12 +5,14 @@
   --green: #4a9; --amber: #a84;
   --radius: 4px;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; min-width: 0; }
 html, body {
   background: var(--bg); color: var(--text);
   font-family: monospace; font-size: 13px;
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
+  width: 100%; max-width: 100%;
+  overflow-x: hidden;
 }
 
 .index-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
@@ -61,34 +63,42 @@ main { flex: 1; overflow: hidden; position: relative; }
 .hint-strip { display: flex; gap: 4px; margin-bottom: 8px; }
 .hint-btn { flex: 1; background: rgba(15,42,58,0.85); border: 1px solid rgba(26,74,106,0.6); border-radius: var(--radius); color: var(--text-accent); font-size: 11px; text-align: center; padding: 6px 2px; cursor: pointer; font-family: monospace; user-select: none; }
 .toggle-btn { flex: 0 0 auto; padding: 6px 10px; }
-.controls-row { display: flex; gap: 12px; align-items: center; }
-.action-cluster { display: flex; flex-direction: column; gap: 5px; width: 110px; }
+.controls-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: nowrap; width: 100%; }
+.action-cluster { display: flex; flex-direction: column; gap: 5px; width: 110px; flex-shrink: 0; }
 .action-cluster-top { display: flex; gap: 5px; }
 .pad-btn { flex: 1; border-radius: 5px; font-family: monospace; font-size: 11px; text-align: center; padding: 8px 4px; cursor: pointer; user-select: none; border: 1px solid; }
 .pad-tab { background: rgba(26,58,42,0.9); border-color: rgba(42,106,74,0.7); color: var(--green); }
 .pad-esc { background: rgba(42,26,26,0.9); border-color: rgba(90,42,42,0.7); color: #c75; }
 .pad-enter { background: rgba(20,50,90,0.95); border-color: rgba(42,106,154,0.8); color: var(--text); font-size: 13px; font-weight: bold; padding: 13px 4px; }
 .spacer { flex: 1; }
-.dpad { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 4px; width: 110px; height: 110px; }
+.dpad { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 4px; width: 110px; height: 110px; flex-shrink: 0; }
 .dpad-btn { background: rgba(26,58,90,0.9); border: 1px solid rgba(42,90,138,0.8); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 20px; cursor: pointer; user-select: none; }
 .dpad-center { background: rgba(15,25,40,0.6); border: 1px solid rgba(30,50,70,0.4); }
 
 @media (max-width: 768px), (pointer: coarse) {
-  .master-detail { flex-direction: column; }
+  .master-detail { flex-direction: column; width: 100%; }
   .master { width: 100%; max-height: 40vh; height: auto; border-right: none; border-bottom: 1px solid var(--border2); flex-shrink: 0; }
-  .detail { padding: 10px 12px 20px; }
+  .detail { padding: 10px 12px 20px; width: 100%; }
   .ui-body { overflow: hidden; }
   .list-item { padding: 10px 12px; }
-  .item-name { font-size: 14px; }
+  .item-name { font-size: 14px; word-break: break-word; }
   .item-meta { font-size: 12px; }
   .action-btn { padding: 12px; font-size: 14px; }
-  .detail-title { font-size: 17px; }
-  .dpad { width: 140px !important; height: 140px !important; }
-  .dpad-btn { font-size: 24px !important; }
-  .pad-btn { padding: 12px 4px !important; font-size: 13px !important; }
-  .pad-enter { padding: 16px 4px !important; font-size: 15px !important; }
-  .hint-btn { padding: 10px 4px !important; font-size: 12px !important; }
-  .action-cluster { width: 120px !important; }
+  .detail-title { font-size: 17px; word-break: break-word; }
+
+  /* Mobile pad — scale to fit narrow screens */
+  .mobile-pad { padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
+  .dpad { width: 120px !important; height: 120px !important; }
+  .dpad-btn { font-size: 22px !important; }
+  .pad-btn { padding: 10px 4px !important; font-size: 12px !important; }
+  .pad-enter { padding: 14px 4px !important; font-size: 14px !important; }
+  .hint-btn { padding: 8px 4px !important; font-size: 11px !important; }
+  .action-cluster { width: 100px !important; }
+}
+@media (max-width: 400px) {
+  .dpad { width: 100px !important; height: 100px !important; }
+  .action-cluster { width: 90px !important; }
+  .dpad-btn { font-size: 18px !important; }
 }
 @media (min-width: 769px) and (pointer: fine) {
   .mobile-pad { display: none; }
