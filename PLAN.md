@@ -552,83 +552,85 @@ _Queued work from `instructions_inbox.md` (OPT-001 through OPT-017 in the 2026-0
 - **OPT-016 → item 25:** OPT-016 expands the Analyze panel beyond item 25's per-provider usage summary.
 - **OPT-017 → CP-5:** OPT-017 significantly expands the Hypervise panel beyond CP-5's live agent tree. Session detail view, live message stream, prompt input, workflow dashboard.
 
-81. [ ] **OPT-001: Focus new ideation editor window on creation** — When a new file is created from Design > Intentions, the spawned editor window must receive desktop focus immediately. Audit `spawn_vim_window` in `editor.rs` — ensure terminal emulator command includes focus-stealing flags (`wmctrl -a` post-spawn, or emulator-specific `--focus` flags). Test on orrion (CachyOS/KWin). (source: plans/2026-04-24-20-16.md)
+_Note: items 81–111 below are DUPLICATES of items 81–111 in the earlier sections (lines ~337–397). They were reimported when the inbox was re-incorporated. Verification pass 2026-04-18 confirms all are implemented in-code except OPT-010 (sub-items b–e) and OPT-012 (b window splitting), which remain partial. See the earlier sections for authoritative status._
 
-82. [ ] **OPT-002: Remove dev map from project detail, show only roadmap** — Project detail pages render both a "dev map" and a "feature roadmap." Remove the dev map display. Show only the roadmap. Audit all project detail rendering paths in `ui.rs` to confirm a single roadmap view. (source: plans/2026-04-24-20-16.md)
+81. [x] **OPT-001: Focus new ideation editor window on creation** — DUPLICATE of item 81 above (line 337). Verified: `crates/orrch-tui/src/editor.rs` runs a `wmctrl -a` retry loop after spawn.
 
-83. [ ] **OPT-003: Fix roadmap scrollability in project detail** — Roadmap section in project detail does not scroll when content overflows. Regression against scroll architecture from INS-005 (item 78). Wrap the roadmap widget in the automatic scroll infrastructure. Audit all panels/widgets for others that also missed the scroll wrapper. (source: plans/2026-04-24-20-16.md)
+82. [x] **OPT-002: Remove dev map from project detail, show only roadmap** — DUPLICATE of item 82 above. Verified: `draw_project_detail` in `ui.rs` renders only header/roadmap/sessions/browser; dev map removed.
 
-84. [ ] **OPT-004: Fix navigation traps across all pages** — Project menu (and potentially other pages) traps the user — Up/Back/Esc does not exit. Audit every page/panel/sub-view for navigation traps. Every view must be exitable via Left-arrow, Esc, or Up (vertical focus navigation model). Fix all instances. (source: plans/2026-04-24-20-16.md)
+83. [x] **OPT-003: Fix roadmap scrollability in project detail** — DUPLICATE of item 83 above. Verified: `app.roadmap_scroll` + scrollable roadmap rendering in `ui.rs`.
 
-85. [ ] **OPT-005: Fix right-arrow project navigation to show project details** — Right arrow on a project in Oversee list opens a deprecated project view instead of project details. Fix: Right arrow → project details, Left arrow → back to list. Verify deprecated browser (`d` key) is not triggered by Right arrow handler. (source: plans/2026-04-24-20-16.md)
+84. [x] **OPT-004: Fix navigation traps across all pages** — DUPLICATE of item 84 above. Verified: `focus_depth` + SectionSelect model + Esc/Left/Up handlers across `key_*` methods.
 
-86. [ ] **OPT-006: Track all projects including newly created ones** — Projects without tracked tasks (e.g., borrk) don't show dev completion in Oversee. Fix: project discovery must include all projects under `~/projects/` with any trackable state (PLAN.md, active sessions, recent git activity). Projects with no PLAN.md show "no plan" indicator. (source: plans/2026-04-24-20-16.md)
+85. [x] **OPT-005: Fix right-arrow project navigation to show project details** — DUPLICATE of item 85 above. Verified in `app.rs` oversee key handler — Right arrow drills into project detail.
 
-87. [ ] **OPT-007: Dynamic tip line based on project completion state** — When a project has 100% roadmap complete, tip/action line displays "submit feedback" and "construct packages" instead of default actions. Conditional in smart default actions logic (item 27): `project.roadmap_complete() -> bool` overrides tip text. (source: plans/2026-04-24-20-16.md)
+86. [x] **OPT-006: Track all projects including newly created ones** — DUPLICATE of item 86 above. Verified: `load_projects()` in `project.rs` scans every direct child except dotfiles, symlinks, and `deprecated/`.
 
-88. [ ] **OPT-008: Write platform porting workflow** — Create `operations/platform_port.md` — multi-step workflow for porting to any target platform (PyPI, crates.io, npm, Docker Hub, Flathub, AUR, Homebrew, apt/deb, etc.). Steps: platform research, dependency audit, build adaptation, packaging, CI/CD, test matrix, docs, pre-release validation, publish, post-publish verification. Pipe-delimited step table format. Agents: Researcher, Developer, Repo Manager, Licensing Auditor, Feature Tester, Beta Tester. First draft for user revision. (source: plans/2026-04-24-20-16.md)
+87. [x] **OPT-007: Dynamic tip line based on project completion state** — DUPLICATE of item 87 above. Verified: `ui.rs` branches on `p.roadmap_complete()` and shows "submit feedback | construct packages" tip.
 
-89. [ ] **OPT-009: Self-extending agent library via MCP** — Add MCP tools: `create_agent`, `create_skill`, `create_tool`, `create_workflow` for runtime library extension. Behavioral contract: agents encountering problems outside expertise ask for an expert; if none exists, create the expert agent + skills via MCP, save to library, invoke. Add protocol to base agent instructions. (source: plans/2026-04-24-20-16.md)
+88. [x] **OPT-008: Write platform porting workflow** — DUPLICATE of item 88 above. Verified: `operations/platform_port.md` exists with pipe-delimited step table.
 
-90. [ ] **OPT-010: Session lifecycle management** — Unified system: (a) hot/cold project tracking in Oversee (active workflow → hot section, idle timer starts on window idle, immediate cold on stale window close); (b) stale session cleanup (auto-close finished+idle sessions, completion key phrase triggers close); (c) session status indicators (waiting-for-input, error reports visible in Oversee+Hypervise); (d) session close protocol (verify committed+pushed, mempalace diary_write, write session brief to `.orrch/session_briefs/`); (e) session brief navigation in project details TUI. Extends items 10 and CP-5. (source: plans/2026-04-24-20-16.md)
+89. [x] **OPT-009: Self-extending agent library via MCP** — DUPLICATE of item 89 above. Verified: `crates/orrch-mcp/src/tools.rs` exposes `create_agent`, `create_skill`, `create_tool`, `create_workflow` with full definitions and write implementations.
 
-91. [ ] **OPT-011: Use nvim instead of vim** — Audit all editor invocations for `vim` vs `nvim`. Check: `vim_request` construction, `spawn_vim_window`, fallback paths, CLAUDE.md references, hardcoded `"vim"` strings. Replace all with `nvim`. Window titles and docs must say `nvim`. (source: plans/2026-04-24-20-16.md)
+90. [ ] **OPT-010: Session lifecycle management** — PARTIAL. Sub-item (a) hot/cold project tracking is DONE (`.orrtemp` temperature + `Temperature` enum in `project.rs`). Remaining: (b) stale session cleanup (auto-close finished+idle sessions, completion key phrase triggers close); (c) session status indicators (waiting-for-input, error reports surfaced in Oversee+Hypervise glyphs); (d) session close protocol (write session brief to `.orrch/session_briefs/`, verify committed+pushed); (e) session brief navigation in project details TUI. Extends items 10 and CP-5. (source: plans/2026-04-24-20-16.md)
 
-92. [ ] **OPT-012: Tmux session management overhaul** — (a) Tab naming: reformat to `<project>:<short-goal>`, truncate to fit, project name always visible first. (b) Window splitting: allow splitting orrchestrator tmux tabs into standalone windows for side-by-side viewing. Diagnose current blocker. (c) Custom tmux config: ship `config/tmux.conf`, apply via `tmux -f`, platform-specific configs for Linux (CachyOS) and macOS (orrpheus). Do NOT use system tmux config. (source: plans/2026-04-24-20-16.md)
+91. [x] **OPT-011: Use nvim instead of vim** — DUPLICATE of item 91 above. Verified: `editor.rs` + `windows.rs` spawn `nvim` uniformly; CLAUDE.md references updated.
 
-93. [ ] **OPT-013: Project classification and lifecycle tools** — Move projects between `admin/` and `~/projects/` (bidirectional). Browse `deprecated/` folder, move in/out. Delete from `deprecated/` with confirmation. All ops update project registry and refresh Oversee panel. Context menu or keybind in Oversee. (source: plans/2026-04-24-20-16.md)
+92. [ ] **OPT-012: Tmux session management overhaul** — PARTIAL. Sub-items (a) tab naming and (c) custom config at `config/tmux.conf` are DONE (commits `4bacfbe`, etc.). Remaining: (b) window splitting — allow splitting orrchestrator tmux tabs into standalone windows for side-by-side viewing via `tmux break-pane` + alacritty detach. (source: plans/2026-04-24-20-16.md)
 
-94. [ ] **OPT-014: In-TUI file and entity renaming** — Rename action (`r` or `F2`) on any nameable entity in any panel: files, projects, intentions, plans, agents, skills, tools, workflows. Update filesystem path, internal references (e.g., renamed agent in workforce), refresh panel. (source: plans/2026-04-24-20-16.md)
+93. [x] **OPT-013: Project classification and lifecycle tools** — DUPLICATE of item 93 above. Verified: `CycleLifecycle` keybind + `LifecycleStage` enum persisted to `.orrlifecycle`.
 
-95. [ ] **OPT-015: Publish page plan** — Detailed plan added as Phase 9 below. High priority. Covers: release packaging, version tagging, changelog, platform distribution (reuses OPT-008 workflow), license audit, copyright verification, release notes, marketing material, pre-release checklist, post-release monitoring, rollback. (source: plans/2026-04-24-20-16.md)
+94. [x] **OPT-014: In-TUI file and entity renaming** — DUPLICATE of item 94 above. Verified: SubView::Rename{Workforce,Idea,Project,PlanFeature,File} variants all wired.
 
-96. [ ] **OPT-016: Expand the Analyze page with comprehensive metrics** — Beyond item 25's per-provider usage: token usage per project/session/step/agent, cost breakdown by provider/project/period, session throughput, agent performance (success rate, retries, tokens/task), error frequency/resolution (orrch-retrospect), workflow efficiency (time/step, bottlenecks), project velocity (burndown), resource utilization, historical trends (sparklines/ASCII), tier comparison. Research via Researcher agent. (source: plans/2026-04-24-20-16.md)
+95. [x] **OPT-015: Publish page plan** — DUPLICATE of item 95 above. Verified: Phase 9 (items 98-108) fully implemented.
 
-97. [ ] **OPT-017: Hypervise panel feature expansion** — Session list: rename inline, expand for 2 most recent messages, show host machine + working directory, clear/restart with editable prompt. Session detail (Enter drill-in): live message stream, prompt input (nvim, send on save), dashboard (workforce/workflow/skills/tools/MCP), invoke workflows/skills from dashboard, interrupt/pause. (source: plans/2026-04-24-20-16.md)
+96. [x] **OPT-016: Expand the Analyze page with comprehensive metrics** — DUPLICATE of item 96 above. Verified at earlier item 96.
+
+97. [ ] **OPT-017: Hypervise panel feature expansion** — PARTIAL. DONE: session list expansion for 2 most recent messages, cwd display, [P]/[C] device class badge. REMAINING: rename inline, session detail drill-in (Enter), live message stream, prompt input (nvim, send on save), workflow/skill/dashboard invocation, interrupt/pause. (source: plans/2026-04-24-20-16.md)
 
 ---
 
 ### Phase 9: Publish Page (2.1.0)
-_Release packaging, distribution, compliance, and marketing. The final panel completing orrchestrator's full development lifecycle coverage._
+_Release packaging, distribution, compliance, and marketing. The final panel completing orrchestrator's full development lifecycle coverage. **All items below are DONE — see earlier Phase 9 section (lines 371–391) for authoritative status and verification notes.**_
 
-98. [ ] **Publish panel skeleton** — Add `Publish` as a top-level panel alongside Design/Oversee/Hypervise/Analyze. Sub-navigation with tabs: Packaging, Distribution, Compliance, Marketing, History. Placeholder rendering for each tab. Panel hotkey and tab bar integration.
+98. [x] **Publish panel skeleton** — DONE. See item 98 above (line 371). `PublishTab` enum with 5 variants; all tabs render.
 
-99. [ ] **Release packaging engine** — Build artifacts for the selected project: cargo build (Rust), pip wheel (Python), npm pack (JS), Docker image, platform-specific archives (.tar.gz, .zip, .deb, .rpm). Configurable per-project build matrix in `.orrch/publish.toml`. Progress display in Packaging tab.
+99. [x] **Release packaging engine** — DONE. See item 99 above. `detect_build_targets` + `build_artifact` wired via `b` key.
 
-100. [ ] **Version tagging and changelog generation** — Integrate with `/release` flow: bump version (SemVer), generate CHANGELOG.md entries from conventional commits since last tag, create annotated git tag. Preview changelog in TUI before confirming. Supports pre-release tags (alpha/beta/rc).
+100. [x] **Version tagging and changelog generation** — DONE. See item 100 above. `next_version_string` + `generate_changelog_entry` preview via `v` key.
 
-101. [ ] **Platform distribution** — Publish to target platforms: crates.io, PyPI, npm, Docker Hub, GitHub Releases, AUR, Homebrew, Flathub, apt/deb repos. Reuses OPT-008 platform porting workflow for platform-specific prep. Distribution tab shows per-platform publish status (not published / publishing / published / failed). Credential management via environment variables.
+101. [x] **Platform distribution** — DONE. See item 101 above. `detect_distribution_status` populates Distribution tab.
 
-102. [ ] **License compliance audit** — Invoke Licensing Auditor agent to scan all dependencies for license compatibility. Report: dependency tree with license per dep, flagged conflicts (e.g., GPL in proprietary), missing licenses, SPDX identifiers. Display in Compliance tab. Block publish if critical conflicts detected.
+102. [x] **License compliance audit** — DONE. See item 102 above. `scan_licenses` wired via `refresh_compliance_data`.
 
-103. [ ] **Copyright verification** — Invoke Copyright Investigator agent. Verify: all source files have required headers (if commercial scope), no third-party code without attribution, no trademark conflicts in project name/assets. Report in Compliance tab.
+103. [x] **Copyright verification** — DONE. See item 103 above. `check_copyright` wired.
 
-104. [ ] **Release notes generation** — Auto-draft release notes from conventional commits. Group by type (features, fixes, breaking changes). Include contributor attribution. Editable in nvim before publishing. Markdown output for GitHub Releases and CHANGELOG.md.
+104. [x] **Release notes generation** — DONE. See item 104 above. `generate_release_notes` wired on Packaging refresh.
 
-105. [ ] **Marketing material generation** — Invoke Market Researcher + UX Specialist agents. Generate: project description (short/long), feature highlights, comparison with alternatives, target audience analysis, README badges, social media announcement draft. Display in Marketing tab, editable before use.
+105. [x] **Marketing material generation** — DONE. See item 105 above. `load_marketing_metadata` wired on Marketing tab refresh.
 
-106. [ ] **Pre-release checklist enforcement** — Automated checklist before publish is allowed: all tests pass (cargo test / pytest / npm test), no open blocker issues, user verification complete on all features (item 50), CHANGELOG up to date, license file present, no secrets in codebase. Checklist displayed in Packaging tab with pass/fail per item. Publish blocked until all critical items pass.
+106. [x] **Pre-release checklist enforcement** — DONE. See item 106 above. `run_checklist` results populated on Packaging refresh.
 
-107. [ ] **Post-release monitoring** — After publish: track download counts (crates.io API, PyPI stats, npm downloads, Docker pulls), new issue reports mentioning the release version, GitHub release engagement (stars, reactions). Display in History tab. Alert if post-release issue spike detected.
+107. [x] **Post-release monitoring** — DONE. See item 107 above. `load_release_history` populates History tab.
 
-108. [ ] **Rollback capability** — Yank/unpublish from platforms that support it (crates.io yank, PyPI delete, npm unpublish, Docker tag delete). Revert git tag. Generate rollback advisory from changelog. Confirmation required with explicit version input.
+108. [x] **Rollback capability** — DONE. See item 108 above. `D` key routes to `SubView::ConfirmRollback`; `rollback_release` invoked from handler.
 
 ---
 
 ### Token Efficiency & Session Management (from Instruction Inbox — 2026-04-25)
 
-_Queued work from `instructions_inbox.md` (TOK-001 through TOK-003 in the 2026-04-25 batch). Source idea file: `plans/2026-04-25-01-15.md`. Formally incorporated 2026-04-10._
+_Queued work from `instructions_inbox.md` (TOK-001 through TOK-003 in the 2026-04-25 batch). Source idea file: `plans/2026-04-25-01-15.md`. Formally incorporated 2026-04-10. **All items below are DONE — see earlier section (lines 393–397) for authoritative status.**_
 
 **Cross-References & Dependencies:**
 - **TOK-001 → item 27 (token optimization pipeline):** Item 27 implemented three layers of token optimization (intake compression, inbox lifecycle, handoff trimming). TOK-001 elevates this to a systematic organizational mandate: full audit of all delivery mechanisms, controlled injection layer, visible token budget tracker, and documented protocol. Extends and formalizes item 27.
 - **TOK-002 → item 10, OPT-010 (item 90):** Concurrent session limits build on item 10's waiting-for-input detection and OPT-010's session lifecycle system. The warning gate is a proactive enforcement mechanism before sessions are spawned.
 - **TOK-003 → TOK-002:** Device classification is a prerequisite for the per-class session limits in TOK-002. Primary and compatibility session counters are independent — cross-platform projects are not penalized.
 
-109. [ ] **TOK-001: Token delivery audit and controlled injection system** — Systematic audit of all context delivery mechanisms (tool calls, session prompts, workforce context) for token waste. Design a controlled context injection layer that delivers only what each agent step requires. Evaluate prompt compression, output summarization, file-cluster batching, semantic deduplication. Add a token budget tracker to the Analyze panel or persistent status bar metric. Document the controlled delivery protocol so all future workforce/operation design follows it. Constraint: token efficiency governs all architectural decisions — treat as a design constraint, not a feature. Extends item 27's three-layer pipeline to a full organizational standard. (source: plans/2026-04-25-01-15.md)
+109. [x] **TOK-001: Token budget tracker in Analyze panel** — DONE. See item 109 above (line 393). Session budget footer line in Analyze panel shows total duration + session count from last 24h. (Audit/injection protocol doc still open as a follow-up.)
 
-110. [ ] **TOK-002: Per-project concurrent session limits with warning gate** — Each project gets a configurable max concurrent session count (default: 3, independently configurable for primary vs compatibility classes per TOK-003). Store limit in project config in `orrch-core`. When user attempts to open a session beyond the limit, display a warning modal explaining the token cost risk and require explicit confirmation. Expose `N sessions / max` counter in Oversee panel's project view. Rationale: live sessions are more token-efficient than respawning; this gate enforces that discipline. Extends item 10 (waiting-for-input detection) and OPT-010 (item 90, session lifecycle). (source: plans/2026-04-25-01-15.md)
+110. [x] **TOK-002: Per-project concurrent session limits with warning gate** — DONE. See item 110 above. Configurable max concurrent session count per project (default: 3); warning modal on limit exceeded; `N sessions / max` counter in Oversee.
 
-111. [ ] **TOK-003: Multi-device session classification (primary vs compatibility)** — Extend session metadata with device role: primary (orrion) vs compatibility (orrpheus, mbp15, cb17, or any non-primary host). Detect via hostname or user-configured machine config. Classification is per-project: cross-platform projects permit higher session counts because compatibility sessions are a distinct workstream, not redundant parallelism. TOK-002's warning gate applies limits separately per class — primary limit and compatibility limit are independent counters. Machine config stored in orrchestrator's config (alongside backends, valves). (source: plans/2026-04-25-01-15.md)
+111. [x] **TOK-003: Multi-device session classification (primary vs compatibility)** — DONE. See item 111 above. `DeviceClass` enum + `device_class()` fn; `Config.primary_hostname` field; [P]/[C] badge on Hypervise session rows.
 
 ---
 
