@@ -16,6 +16,7 @@ pub mod provider;
 pub mod release;
 pub mod remote;
 pub mod session;
+pub mod session_brief;
 pub mod session_log;
 pub mod usage;
 pub mod windows;
@@ -35,6 +36,7 @@ pub use plan_parser::{parse_plan, parse_status_marker, PlanPhase, PlanFeature, F
 pub use diff_log::{DiffEntry, diff_log_path, append_diff, load_diffs, load_all_diffs};
 pub use project::{create_project_scaffold, list_directory, load_deprecated, load_projects, package_as_v1, slugify_project_name, update_feature_status_in_plan, ColorTag, DirEntry, LifecycleStage, Project, ProjectMeta, ProjectScaffold, RoadmapItem, Scope, Temperature};
 pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_class};
+pub use session_brief::{SESSION_BRIEFS_SUBDIR, SessionBrief, SessionBriefInput, list_session_briefs, write_session_brief};
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};
