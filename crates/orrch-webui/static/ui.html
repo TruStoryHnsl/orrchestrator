@@ -33,6 +33,38 @@
 WS.connect();
 Layout.init();
 Mobile.init();
+
+// Overflow diagnostic — tap the badge to see which elements are wider
+// than the viewport. Tap-hold 1s to toggle red outlines on offenders.
+(function() {
+  var badge = document.createElement('div');
+  badge.style.cssText = 'position:fixed;top:4px;right:4px;background:#a30;color:#fff;font:11px monospace;padding:3px 6px;border-radius:3px;z-index:99999;opacity:0.85';
+  badge.textContent = 'scan';
+  document.body.appendChild(badge);
+
+  function scan() {
+    var vw = window.innerWidth;
+    var offenders = [];
+    document.querySelectorAll('*').forEach(function(el) {
+      var w = el.getBoundingClientRect().width;
+      if (w > vw + 1) offenders.push({ tag: el.tagName, cls: el.className, id: el.id, w: Math.round(w) });
+    });
+    return { vw: vw, offenders: offenders };
+  }
+
+  badge.addEventListener('click', function() {
+    var r = scan();
+    badge.textContent = r.offenders.length + ' > vw ' + r.vw;
+    if (r.offenders.length) {
+      var lines = r.offenders.slice(0, 5).map(function(o) {
+        return o.w + 'px: <' + o.tag.toLowerCase() + (o.id ? '#' + o.id : '') + (o.cls ? '.' + String(o.cls).split(' ')[0] : '') + '>';
+      });
+      alert('viewport=' + r.vw + 'px, ' + r.offenders.length + ' overflowing:\n\n' + lines.join('\n'));
+    } else {
+      alert('no overflowing elements');
+    }
+  });
+})();
 </script>
 </body>
 </html>
