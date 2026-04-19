@@ -43,6 +43,7 @@ pub fn build_router(srv: ServerState) -> Router {
         .route("/static/js/mobile.js", get(serve_mobile_js))
         .route("/pty", get(terminal_ws))
         .route("/state", get(state_ws))
+        .route("/size", get(get_size))
         .route("/action", post(handle_action))
         .with_state(srv)
 }
@@ -161,6 +162,18 @@ async fn state_ws_handler(mut socket: WebSocket, srv: ServerState) {
             }
         }
     }
+}
+
+async fn get_size(State(srv): State<ServerState>) -> impl IntoResponse {
+    let state = srv.state_rx.borrow();
+    let body = serde_json::json!({ "cols": state.term_cols, "rows": state.term_rows });
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body.to_string(),
+    ).into_response()
 }
 
 async fn handle_action(State(srv): State<ServerState>, Json(body): Json<Value>) -> StatusCode {

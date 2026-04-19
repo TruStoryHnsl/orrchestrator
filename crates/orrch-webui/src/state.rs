@@ -8,6 +8,10 @@ pub struct WebAppState {
     pub ideas: Vec<WebIdea>,
     pub sessions: Vec<WebSession>,
     pub projects: Vec<WebProject>,
+    /// Local terminal size — xterm.js must match exactly or content
+    /// wrapping will corrupt the display on narrower browser viewports.
+    pub term_cols: u16,
+    pub term_rows: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
