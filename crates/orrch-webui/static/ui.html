@@ -2,55 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>orrchestrator</title>
-<link rel="stylesheet" href="/static/css/main.css?v=2">
+<link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body class="ui-body">
-
-<!-- Diagnostic: BIG red bar at the top. Tap to scan for overflow. -->
-<div id="diag-badge" style="position:fixed;top:0;left:0;right:0;background:#c00;color:#fff;font:bold 13px monospace;padding:8px 10px;text-align:center;z-index:99999;cursor:pointer">
-  TAP HERE TO SCAN FOR OVERFLOW — V3
-</div>
-<script>
-(function() {
-  var badge = document.getElementById('diag-badge');
-  function scan() {
-    var vw = window.innerWidth;
-    var dw = document.documentElement.scrollWidth;
-    var bw = document.body.scrollWidth;
-    var offenders = [];
-    document.querySelectorAll('*').forEach(function(el) {
-      var r = el.getBoundingClientRect();
-      if (r.width > vw + 1 || r.right > vw + 1) {
-        offenders.push({
-          tag: el.tagName,
-          cls: (el.className || '').toString().slice(0, 40),
-          id: el.id,
-          w: Math.round(r.width),
-          left: Math.round(r.left),
-          right: Math.round(r.right)
-        });
-      }
-    });
-    return { vw: vw, docW: dw, bodyW: bw, offenders: offenders };
-  }
-  badge.addEventListener('click', function() {
-    var r = scan();
-    var msg = 'viewport=' + r.vw + 'px  docW=' + r.docW + '  bodyW=' + r.bodyW + '\n\n';
-    msg += r.offenders.length + ' elements overflowing:\n\n';
-    msg += r.offenders.slice(0, 8).map(function(o) {
-      var sel = '<' + o.tag.toLowerCase() + (o.id ? '#' + o.id : '') + (o.cls ? '.' + o.cls.split(' ')[0] : '') + '>';
-      return 'left=' + o.left + ' right=' + o.right + ' w=' + o.w + ' ' + sel;
-    }).join('\n');
-    alert(msg);
-  });
-})();
-</script>
-
-<nav class="top-nav" id="top-nav" style="margin-top:36px"></nav>
+<nav class="top-nav" id="top-nav"></nav>
 <main id="main-panel">
   <div id="panel-design" class="panel active"></div>
   <div id="panel-oversee" class="panel"></div>
@@ -60,20 +17,17 @@
 <div id="status-bar" class="status-bar">
   <span id="status-left"></span>
   <span id="status-right">
-    <a href="/terminal" style="color:#4a9; text-decoration: none; margin-right: 8px;">terminal ⇗</a>
+    <a href="/" style="color:#4a9; text-decoration: none; margin-right: 8px;">terminal ⇗</a>
   </span>
 </div>
-<div id="mobile-pad" class="mobile-pad"></div>
 
-<script src="/static/js/ws.js?v=2"></script>
-<script src="/static/js/layout.js?v=2"></script>
-<script src="/static/js/intentions.js?v=2"></script>
-<script src="/static/js/sessions.js?v=2"></script>
-<script src="/static/js/mobile.js?v=2"></script>
+<script src="/static/js/ws.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/intentions.js"></script>
+<script src="/static/js/sessions.js"></script>
 <script>
-try { WS.connect(); } catch (e) { console.error('WS.connect:', e); }
-try { Layout.init(); } catch (e) { console.error('Layout.init:', e); }
-try { Mobile.init(); } catch (e) { console.error('Mobile.init:', e); }
+WS.connect();
+Layout.init();
 </script>
 </body>
 </html>

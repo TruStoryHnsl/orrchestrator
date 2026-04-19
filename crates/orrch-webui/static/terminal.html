@@ -5,103 +5,103 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>orrchestrator — terminal</title>
+<title>orrchestrator</title>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
-  margin: 0; padding: 0; height: 100%;
-  background: #050d18; color: #8fbfff;
+  width: 100%; max-width: 100%; overflow-x: hidden;
+  height: 100%; background: #050d18; color: #8fbfff;
   font-family: monospace; overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
 }
-body {
-  display: flex; flex-direction: column; height: 100dvh;
-}
-#terminal {
-  flex: 1 1 auto; min-height: 0;
-  padding: 4px;
-}
-.xterm { height: 100%; }
+body { display: flex; flex-direction: column; height: 100dvh; }
+
+#terminal { flex: 1 1 auto; min-height: 0; min-width: 0; padding: 2px; }
+.xterm { height: 100%; width: 100%; }
 .xterm-viewport { background: #050d18 !important; }
 
-/* Mobile control pad — only visible on touch devices / narrow screens */
-.mpad {
+/* Mobile gamepad — touch/keyboard bridge for the TUI on phones. */
+.pad {
   display: none;
   flex: 0 0 auto;
+  width: 100%;
   background: rgba(5,13,24,0.95);
   border-top: 1px solid rgba(26,58,90,0.5);
-  padding: 6px 8px env(safe-area-inset-bottom);
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   user-select: none; -webkit-user-select: none;
 }
-.mpad .hints { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
-.mpad .hint-btn {
-  flex: 1 1 auto; min-width: 56px;
-  background: rgba(15,42,58,0.9);
-  border: 1px solid rgba(26,74,106,0.7);
-  border-radius: 4px;
-  color: #8fbfff; font-family: monospace; font-size: 12px;
-  text-align: center; padding: 7px 4px;
+.pad .hints { display: flex; gap: 4px; margin-bottom: 6px; }
+.pad .hint {
+  flex: 1 1 0; min-width: 0;
+  background: rgba(15,42,58,0.9); border: 1px solid rgba(26,74,106,0.7);
+  border-radius: 4px; color: #8fbfff; font: 11px monospace;
+  text-align: center; padding: 8px 2px;
 }
-.mpad .hint-btn:active { background: rgba(30,60,90,0.95); }
-
-.mpad .row { display: flex; gap: 10px; align-items: flex-end; }
-.mpad .actions { display: flex; flex-direction: column; gap: 5px; width: 110px; }
-.mpad .actions-top { display: flex; gap: 5px; }
-.mpad .btn {
-  flex: 1; border-radius: 5px; font-family: monospace; font-size: 12px;
-  text-align: center; padding: 10px 4px;
-  border: 1px solid; user-select: none;
-}
-.mpad .btn:active { filter: brightness(1.3); }
+.pad .hint:active { background: rgba(30,60,90,0.95); }
+.pad .row { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
+.pad .actions { display: flex; flex-direction: column; gap: 5px; width: 90px; flex-shrink: 0; }
+.pad .actions-top { display: flex; gap: 5px; }
+.pad .btn { flex: 1; border-radius: 5px; font: 12px monospace; text-align: center; padding: 10px 2px; border: 1px solid; }
+.pad .btn:active { filter: brightness(1.3); }
 .btn-tab   { background: rgba(26,58,42,0.9); border-color: rgba(42,106,74,0.8); color: #4a9; }
 .btn-esc   { background: rgba(42,26,26,0.9); border-color: rgba(90,42,42,0.8); color: #c75; }
-.btn-enter { background: rgba(20,50,90,0.95); border-color: rgba(42,106,154,0.8); color: #8fbfff; font-weight: bold; padding: 14px 4px; }
+.btn-enter { background: rgba(20,50,90,0.95); border-color: rgba(42,106,154,0.8); color: #8fbfff; font-weight: bold; padding: 14px 2px; }
+.pad .spacer { flex: 1 1 auto; }
+.pad .dpad { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 4px; width: 110px; height: 110px; flex-shrink: 0; }
+.pad .dbtn { background: rgba(26,58,90,0.9); border: 1px solid rgba(42,90,138,0.8); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #8fbfff; font-size: 20px; }
+.pad .dbtn:active { background: rgba(40,80,120,0.95); }
+.pad .dbtn-blank { background: transparent; border-color: transparent; }
 
-.mpad .spacer { flex: 1; }
-.mpad .dpad {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr 1fr;
-  gap: 5px; width: 140px; height: 140px;
-}
-.mpad .dbtn {
-  background: rgba(26,58,90,0.9);
-  border: 1px solid rgba(42,90,138,0.8);
-  border-radius: 7px;
-  display: flex; align-items: center; justify-content: center;
-  color: #8fbfff; font-size: 22px;
-}
-.mpad .dbtn:active { background: rgba(40,80,120,0.95); }
-.mpad .dbtn-center { background: transparent; border-color: transparent; }
-
-/* Show pad on narrow screens or touch devices */
-@media (max-width: 900px), (pointer: coarse) {
-  .mpad { display: block; }
-}
-
-#debug {
-  position: fixed; bottom: 2px; right: 6px;
-  font-size: 10px; color: #556; pointer-events: none; z-index: 999;
+@media (max-width: 900px), (pointer: coarse) { .pad { display: block; } }
+@media (max-width: 360px) {
+  .pad .dpad { width: 96px; height: 96px; }
+  .pad .actions { width: 80px; }
 }
 </style>
 </head>
 <body>
+
 <div id="terminal"></div>
-<div class="mpad" id="mpad"></div>
-<div id="debug"></div>
+
+<div class="pad" id="pad">
+  <div class="hints">
+    <div class="hint" data-key="n">n new</div>
+    <div class="hint" data-key="s">submit</div>
+    <div class="hint" data-key="r">rename</div>
+    <div class="hint" data-key="a">actions</div>
+  </div>
+  <div class="row">
+    <div class="actions">
+      <div class="actions-top">
+        <div class="btn btn-tab" data-key="Tab">Tab</div>
+        <div class="btn btn-esc" data-key="Escape">Esc</div>
+      </div>
+      <div class="btn btn-enter" data-key="Enter">Enter</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="dpad">
+      <div class="dbtn dbtn-blank"></div>
+      <div class="dbtn" data-key="ArrowUp">↑</div>
+      <div class="dbtn dbtn-blank"></div>
+      <div class="dbtn" data-key="ArrowLeft">←</div>
+      <div class="dbtn dbtn-blank"></div>
+      <div class="dbtn" data-key="ArrowRight">→</div>
+      <div class="dbtn dbtn-blank"></div>
+      <div class="dbtn" data-key="ArrowDown">↓</div>
+      <div class="dbtn dbtn-blank"></div>
+    </div>
+  </div>
+</div>
 
 <script>
-var dbg = document.getElementById('debug');
-function dlog(m) { dbg.textContent = m; }
-
-// ── xterm setup ───────────────────────────────────────────
+// ── xterm.js ──────────────────────────────────────────────
 var term = new Terminal({
   cursorBlink: true,
   fontSize: 12,
-  theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' },
-  convertEol: false,
-  allowProposedApi: true,
+  theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' }
 });
 var fit = new FitAddon.FitAddon();
 term.loadAddon(fit);
@@ -113,127 +113,40 @@ var proto = location.protocol === 'https:' ? 'wss' : 'ws';
 var ws = new WebSocket(proto + '://' + location.host + '/pty');
 ws.binaryType = 'arraybuffer';
 
-var bytesIn = 0, frames = 0;
-ws.onopen = function() { dlog('connected'); };
 ws.onmessage = function(e) {
-  frames++;
   if (e.data instanceof ArrayBuffer) {
-    var u8 = new Uint8Array(e.data);
-    bytesIn += u8.length;
-    term.write(u8);
+    term.write(new Uint8Array(e.data));
   } else if (e.data instanceof Blob) {
-    e.data.arrayBuffer().then(function(buf) {
-      var u8 = new Uint8Array(buf);
-      bytesIn += u8.length;
-      term.write(u8);
-    });
+    e.data.arrayBuffer().then(function(buf) { term.write(new Uint8Array(buf)); });
   } else if (typeof e.data === 'string') {
-    bytesIn += e.data.length;
     term.write(e.data);
   }
-  if (frames % 20 === 1) dlog(frames + 'f/' + bytesIn + 'b');
 };
-ws.onerror = function() { dlog('ws error'); };
-ws.onclose = function() { dlog('disconnected'); term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n'); };
+ws.onclose = function() { term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n'); };
+ws.onerror = function() { try { ws.close(); } catch (_) {} };
 
-// ── keyboard → ws ─────────────────────────────────────────
-term.onData(function(data) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+// xterm keyboard → ws
+term.onData(function(d) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
 });
 
-// ── mobile pad ────────────────────────────────────────────
-// Sends raw ANSI bytes via the same WebSocket that xterm.js uses. No
-// `/action` indirection — these are keystrokes to the live TUI.
+// ── gamepad keys → ws (raw ANSI) ──────────────────────────
 function sendKey(key) {
   if (ws.readyState !== WebSocket.OPEN) return;
-  var seq = null;
-  switch (key) {
-    case 'Enter':      seq = '\r'; break;
-    case 'Tab':        seq = '\t'; break;
-    case 'Escape':     seq = '\x1b'; break;
-    case 'Backspace':  seq = '\x7f'; break;
-    case 'ArrowUp':    seq = '\x1b[A'; break;
-    case 'ArrowDown':  seq = '\x1b[B'; break;
-    case 'ArrowRight': seq = '\x1b[C'; break;
-    case 'ArrowLeft':  seq = '\x1b[D'; break;
-    default:           seq = key; // single printable char
-  }
+  var seq = {
+    Enter: '\r', Tab: '\t', Escape: '\x1b', Backspace: '\x7f',
+    ArrowUp: '\x1b[A', ArrowDown: '\x1b[B',
+    ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D'
+  }[key] || key;
   ws.send(new TextEncoder().encode(seq));
 }
 
-function buildPad() {
-  var pad = document.getElementById('mpad');
-  if (!pad) return;
-
-  // Hint strip — common actions
-  var hints = [
-    { label: 'n new',     key: 'n' },
-    { label: 's submit',  key: 's' },
-    { label: 'r rename',  key: 'r' },
-    { label: 'a actions', key: 'a' }
-  ];
-  var hintRow = document.createElement('div');
-  hintRow.className = 'hints';
-  hints.forEach(function(h) {
-    var b = document.createElement('div');
-    b.className = 'hint-btn';
-    b.textContent = h.label;
-    attachHold(b, h.key);
-    hintRow.appendChild(b);
-  });
-  pad.appendChild(hintRow);
-
-  // Controls row: actions LEFT, spacer, d-pad RIGHT
-  var row = document.createElement('div');
-  row.className = 'row';
-
-  var actions = document.createElement('div');
-  actions.className = 'actions';
-  var top = document.createElement('div');
-  top.className = 'actions-top';
-  top.appendChild(makeBtn('Tab',  'btn btn-tab',  'Tab'));
-  top.appendChild(makeBtn('Esc',  'btn btn-esc',  'Escape'));
-  actions.appendChild(top);
-  actions.appendChild(makeBtn('Enter', 'btn btn-enter', 'Enter'));
-  row.appendChild(actions);
-
-  var sp = document.createElement('div');
-  sp.className = 'spacer';
-  row.appendChild(sp);
-
-  // D-pad
-  var dpad = document.createElement('div');
-  dpad.className = 'dpad';
-  var cells = [
-    null,           { label: '↑', key: 'ArrowUp'    }, null,
-    { label: '←', key: 'ArrowLeft'  }, null, { label: '→', key: 'ArrowRight' },
-    null,           { label: '↓', key: 'ArrowDown'  }, null
-  ];
-  cells.forEach(function(c) {
-    var el = document.createElement('div');
-    if (c) { el.className = 'dbtn'; el.textContent = c.label; attachHold(el, c.key); }
-    else   { el.className = 'dbtn dbtn-center'; }
-    dpad.appendChild(el);
-  });
-  row.appendChild(dpad);
-  pad.appendChild(row);
-}
-
-function makeBtn(label, cls, key) {
-  var b = document.createElement('div');
-  b.className = cls;
-  b.textContent = label;
-  attachHold(b, key);
-  return b;
-}
-
-// touchstart/touchend avoid the 300ms tap delay. Hold starts after 150ms,
-// then repeats every 80ms.
+// Tap-and-hold: 150ms initial delay, then 80ms repeat.
 var holds = {};
 function attachHold(el, key) {
   function press() { sendKey(key); }
-  function start(e) { e.preventDefault(); press(); holds[key] = setTimeout(function() { holds[key] = setInterval(press, 80); }, 150); }
-  function end(e)   { if (e) e.preventDefault(); clearTimeout(holds[key]); clearInterval(holds[key]); }
+  function start(e) { e && e.preventDefault(); press(); holds[key] = setTimeout(function() { holds[key] = setInterval(press, 80); }, 150); }
+  function end(e)   { e && e.preventDefault(); clearTimeout(holds[key]); clearInterval(holds[key]); }
   el.addEventListener('touchstart', start, { passive: false });
   el.addEventListener('touchend',   end,   { passive: false });
   el.addEventListener('touchcancel', end,  { passive: false });
@@ -241,16 +154,16 @@ function attachHold(el, key) {
   el.addEventListener('mouseup',   end);
   el.addEventListener('mouseleave', end);
 }
+document.querySelectorAll('[data-key]').forEach(function(el) {
+  attachHold(el, el.getAttribute('data-key'));
+});
 
-buildPad();
-
-// ── resize: refit xterm whenever layout changes ───────────
+// ── refit on resize ───────────────────────────────────────
 function refit() { try { fit.fit(); } catch (_) {} }
 window.addEventListener('resize', refit);
 window.addEventListener('orientationchange', function() { setTimeout(refit, 200); });
-
-// Initial refit once the pad has taken its space
 setTimeout(refit, 50);
 </script>
+
 </body>
 </html>

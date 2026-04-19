@@ -47,11 +47,9 @@ pub fn build_router(srv: ServerState) -> Router {
         .with_state(srv)
 }
 
-// `/` serves the native UI directly — that's the primary experience.
-// `/terminal` still serves the xterm mirror for anyone who wants it.
-// The old two-button landing page (assets::INDEX_HTML) is still available
-// at `/landing` for reference/debug.
-async fn serve_index() -> impl IntoResponse { html(assets::UI_HTML) }
+// `/` serves the terminal mirror — that's the primary, reliable 1-to-1
+// TUI display. The native UI is secondary at `/ui`.
+async fn serve_index() -> impl IntoResponse { html(assets::TERMINAL_HTML) }
 async fn serve_landing() -> impl IntoResponse { html(assets::INDEX_HTML) }
 async fn serve_terminal() -> impl IntoResponse { html(assets::TERMINAL_HTML) }
 async fn serve_ui() -> impl IntoResponse { html(assets::UI_HTML) }
