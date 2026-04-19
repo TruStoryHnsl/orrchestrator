@@ -2,32 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>orrchestrator</title>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
-  width: 100%; max-width: 100%; overflow-x: hidden;
+  width: 100%; max-width: 100%; overflow: hidden;
   height: 100%; background: #050d18; color: #8fbfff;
   font-family: monospace; overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
 }
 body { display: flex; flex-direction: column; height: 100dvh; }
 
-#terminal { flex: 1 1 auto; min-height: 0; min-width: 0; padding: 2px; }
-.xterm { height: 100%; width: 100%; }
+/* Wrapper clips and centers the scaled terminal. */
+#term-wrap {
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  overflow: hidden; position: relative;
+}
+/* The actual xterm container renders at its "natural" large size; we
+   scale it down via CSS transform so the whole TUI fits the viewport. */
+#terminal {
+  transform-origin: top left;
+  position: absolute; top: 0; left: 0;
+}
 .xterm-viewport { background: #050d18 !important; }
 
 /* Mobile gamepad — touch/keyboard bridge for the TUI on phones. */
 .pad {
   display: none;
-  flex: 0 0 auto;
-  width: 100%;
+  flex: 0 0 auto; width: 100%;
   background: rgba(5,13,24,0.95);
   border-top: 1px solid rgba(26,58,90,0.5);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
@@ -64,7 +71,9 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 </head>
 <body>
 
-<div id="terminal"></div>
+<div id="term-wrap">
+  <div id="terminal"></div>
+</div>
 
 <div class="pad" id="pad">
   <div class="hints">
@@ -97,38 +106,75 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 </div>
 
 <script>
-// ── xterm.js ──────────────────────────────────────────────
-var term = new Terminal({
-  cursorBlink: true,
-  fontSize: 12,
-  theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' }
+// ── xterm MUST match the actual local terminal's cols/rows exactly, or
+// the TUI's cursor positioning wraps around and corrupts the display.
+// We fetch the size from the server before opening the terminal. Then
+// scale the rendered terminal down via CSS transform to fit the viewport.
+var term = null;
+
+function openTerminal(cols, rows) {
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    cols: cols, rows: rows,
+    theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' },
+    scrollback: 0
+  });
+  term.open(document.getElementById('terminal'));
+  setTimeout(rescale, 50);
+  openWebSocket();
+}
+
+// Fetch the real terminal size from the server and open xterm to match.
+fetch('/size').then(function(r) { return r.json(); }).then(function(s) {
+  var cols = s.cols && s.cols > 0 ? s.cols : 80;
+  var rows = s.rows && s.rows > 0 ? s.rows : 24;
+  openTerminal(cols, rows);
+}).catch(function() {
+  // Fallback if /size isn't available
+  openTerminal(120, 40);
 });
-var fit = new FitAddon.FitAddon();
-term.loadAddon(fit);
-term.open(document.getElementById('terminal'));
-fit.fit();
 
-// ── websocket ─────────────────────────────────────────────
-var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-var ws = new WebSocket(proto + '://' + location.host + '/pty');
-ws.binaryType = 'arraybuffer';
+function rescale() {
+  var wrap = document.getElementById('term-wrap');
+  var el = document.getElementById('terminal');
+  // Briefly clear any prior transform to measure natural size.
+  el.style.transform = 'none';
+  var natW = el.offsetWidth  || 1;
+  var natH = el.offsetHeight || 1;
+  var availW = wrap.clientWidth;
+  var availH = wrap.clientHeight;
+  // Fit by BOTH width and height — shrink to the smaller ratio.
+  var sx = availW / natW;
+  var sy = availH / natH;
+  var scale = Math.min(sx, sy, 1);
+  el.style.transform = 'scale(' + scale + ')';
+}
 
-ws.onmessage = function(e) {
-  if (e.data instanceof ArrayBuffer) {
-    term.write(new Uint8Array(e.data));
-  } else if (e.data instanceof Blob) {
-    e.data.arrayBuffer().then(function(buf) { term.write(new Uint8Array(buf)); });
-  } else if (typeof e.data === 'string') {
-    term.write(e.data);
-  }
-};
-ws.onclose = function() { term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n'); };
-ws.onerror = function() { try { ws.close(); } catch (_) {} };
+// ── websocket (opened after xterm is ready) ──────────────
+var ws = null;
+function openWebSocket() {
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host + '/pty');
+  ws.binaryType = 'arraybuffer';
 
-// xterm keyboard → ws
-term.onData(function(d) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
-});
+  ws.onmessage = function(e) {
+    if (e.data instanceof ArrayBuffer) {
+      term.write(new Uint8Array(e.data));
+    } else if (e.data instanceof Blob) {
+      e.data.arrayBuffer().then(function(buf) { term.write(new Uint8Array(buf)); });
+    } else if (typeof e.data === 'string') {
+      term.write(e.data);
+    }
+  };
+  ws.onclose = function() { term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n'); };
+  ws.onerror = function() { try { ws.close(); } catch (_) {} };
+
+  // xterm keyboard → ws
+  term.onData(function(d) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
+  });
+}
 
 // ── gamepad keys → ws (raw ANSI) ──────────────────────────
 function sendKey(key) {
@@ -141,7 +187,7 @@ function sendKey(key) {
   ws.send(new TextEncoder().encode(seq));
 }
 
-// Tap-and-hold: 150ms initial delay, then 80ms repeat.
+// Tap-and-hold: 150ms delay, 80ms repeat.
 var holds = {};
 function attachHold(el, key) {
   function press() { sendKey(key); }
@@ -158,11 +204,9 @@ document.querySelectorAll('[data-key]').forEach(function(el) {
   attachHold(el, el.getAttribute('data-key'));
 });
 
-// ── refit on resize ───────────────────────────────────────
-function refit() { try { fit.fit(); } catch (_) {} }
-window.addEventListener('resize', refit);
-window.addEventListener('orientationchange', function() { setTimeout(refit, 200); });
-setTimeout(refit, 50);
+// ── rescale on window resize / orientation change ─────────
+window.addEventListener('resize', rescale);
+window.addEventListener('orientationchange', function() { setTimeout(rescale, 200); });
 </script>
 
 </body>

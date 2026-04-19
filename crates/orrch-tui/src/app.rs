@@ -1173,9 +1173,13 @@ impl App {
 
     /// Snapshot current app state for the WebUI server.
     pub fn web_snapshot(&self) -> orrch_webui::WebAppState {
+        // Query the current local terminal size so xterm.js can match it exactly.
+        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         orrch_webui::WebAppState {
             active_panel: format!("{:?}", self.panel).to_lowercase(),
             active_sub: format!("{:?}", self.sub).to_lowercase(),
+            term_cols: cols,
+            term_rows: rows,
             ideas: self.ideas.iter().map(|i| orrch_webui::WebIdea {
                 filename: i.filename.clone(),
                 progress: i.pipeline.progress,
