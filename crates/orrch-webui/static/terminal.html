@@ -123,6 +123,27 @@ function openTerminal(cols, rows) {
   term.open(document.getElementById('terminal'));
   setTimeout(rescale, 50);
   openWebSocket();
+  openStateWebSocket();
+}
+
+// Live-resize: subscribe to /state; when term_cols/term_rows change we
+// resize xterm and re-scale to fit the viewport. Drop reconnects gracefully.
+function openStateWebSocket() {
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  var sws = new WebSocket(proto + '://' + location.host + '/state');
+  sws.onmessage = function(e) {
+    try {
+      var s = JSON.parse(e.data);
+      if (!term) return;
+      var c = s.term_cols | 0, r = s.term_rows | 0;
+      if (c > 0 && r > 0 && (c !== term.cols || r !== term.rows)) {
+        term.resize(c, r);
+        setTimeout(rescale, 10);
+      }
+    } catch (_) {}
+  };
+  sws.onclose = function() { setTimeout(openStateWebSocket, 2000); };
+  sws.onerror = function() { try { sws.close(); } catch (_) {} };
 }
 
 // Fetch the real terminal size from the server and open xterm to match.
