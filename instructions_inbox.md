@@ -193,3 +193,18 @@ The Hypervise panel needs significant capability upgrades. Required features:
 - Interrupt/pause the session's current process
 
 Source: Raw instruction 24 (2026-04-24-20-16.md)
+
+### OPT-018: Truncate webportal URL display (source: plans/2026-05-06-03-57.md)
+Webui panel displays full portal URL — replace with truncated form (host:port or icon + port only). Remove full-URL rendering from portal list/status widgets.
+
+Source: "The webportals entire url shouldnt be displayed."
+
+### OPT-019: Settings popup menu (source: plans/2026-05-06-03-57.md)
+Add dedicated settings popup (modal overlay) accessible from anywhere in the TUI. Centralize all user-configurable options: display styles/themes, webui access toggles, and every other currently-scattered setting. Single entry point, categorized sections, persists to config.
+
+Source: "We need to create a dedicated settings interface. Make a popup menu that controls all settings from display styles, to webui access and everything else too."
+
+### OPT-020: TUI UX audit + enterprise refactor via frontend-design agent (source: plans/2026-05-06-03-57.md)
+Perform thorough UX analysis of current TUI (layout, navigation, affordances, density, discoverability, consistency across panels). Document findings. Then invoke the frontend-design agent/skill to refactor the entire TUI into an enterprise-grade interface based on the audit. Scope covers every panel, not a subset.
+
+Source: "Do thorough analysis on the UX options of TUI's and then call the frontend-design agent/skill to refactor EVERYTHING into a usable enterprise project"
