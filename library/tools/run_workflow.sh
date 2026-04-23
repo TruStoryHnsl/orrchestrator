@@ -477,15 +477,68 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" 2>/dev/nul
 
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
 
+# Push the branch so it exists on the remote before merge
+git push -u origin HEAD 2>/dev/null || log "note: push skipped (no remote or private scope)"
+
+# ─── STEP 11: Merge session branch to main ──────────────────────────
+
+update_status 11 "merging"
+
+SB=$(git branch --show-current 2>/dev/null || echo "")
+MERGE_STATUS="skipped"
+
+case "${SB}" in
+    main|master|develop|"")
+        log "already on ${SB:-no-branch} — no merge needed"
+        MERGE_STATUS="not-needed"
+        ;;
+    *)
+        log "merging ${SB} → main..."
+        if ! git diff --quiet 2>/dev/null; then
+            log "ERROR: uncommitted changes — cannot merge"
+            MERGE_STATUS="failed-dirty-tree"
+        else
+            git checkout main 2>&1 | tail -3 || { log "ERROR: checkout main failed"; MERGE_STATUS="failed-checkout"; }
+            git pull --ff-only origin main 2>/dev/null || true
+
+            if git merge --no-ff "${SB}" -m "merge: ${SB}" 2>&1 | tail -5; then
+                if [[ -n "$(git ls-files --unmerged 2>/dev/null)" ]]; then
+                    log "ERROR: merge conflict with main — escalating to user"
+                    git merge --abort 2>/dev/null || true
+                    MERGE_STATUS="conflict"
+                    update_status 11 "merge-conflict"
+                else
+                    git push origin main 2>/dev/null || true
+                    git branch -d "${SB}" 2>/dev/null || true
+                    git push origin --delete "${SB}" 2>/dev/null || true
+                    log "merged ${SB} → main"
+                    MERGE_STATUS="merged"
+                fi
+            else
+                log "ERROR: merge command failed"
+                git merge --abort 2>/dev/null || true
+                MERGE_STATUS="failed"
+            fi
+        fi
+        ;;
+esac
+
 # ─── DONE ────────────────────────────────────────────────────────────
 
-update_status 10 "complete"
+update_status 12 "complete"
 
 log "=== Workflow complete ==="
 log "verdict: ${VERDICT}"
 log "rework cycles: ${REWORK_CYCLE}"
 log "commit: ${COMMIT_HASH}"
+log "merge: ${MERGE_STATUS}"
 log "see ${ORRCH_DIR}/ for all step outputs"
+
+if [[ "${MERGE_STATUS}" == "conflict" || "${MERGE_STATUS}" == "failed"* ]]; then
+    echo ""
+    echo "!!! MERGE TO MAIN DID NOT COMPLETE — session is NOT finished !!!"
+    echo "!!! Resolve the merge manually before starting new parallel work !!!"
+fi
 
 echo ""
 echo "--- Workflow finished. Full log: ${LOG_FILE} ---"

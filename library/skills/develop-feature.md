@@ -328,14 +328,55 @@ git add <files from workspace_state.md>
 git commit -m "feat: <summary derived from instructions>"
 ```
 
-Do NOT push or tag unless user requested a release.
+Do NOT tag unless the user requested a release. **Push is required** so the session branch exists on the remote before the merge step.
+
+```bash
+git push -u origin HEAD 2>/dev/null || true   # private scope: no remote, ignore
+```
+
+---
+
+## STEP 8 — Merge session branch to main (MANDATORY)
+
+Update workflow.json: `{"step":8,"status":"merging"}`.
+
+Session branches exist for isolation WHILE WORKING. Once the work is committed, merge the branch back to `main` so follow-up sessions start from the integrated codebase. Leaving branches unmerged is the direct cause of the parallel-session regression cascade (same problem solved four times, merges break every implementation). This is a standing authorization — no per-session user prompt required.
+
+```bash
+SB=$(git branch --show-current)
+case "$SB" in main|master|develop|"") echo "already on $SB — no merge needed"; exit 0 ;; esac
+
+# Working tree must be clean
+git diff --quiet || { echo "ERROR: uncommitted changes — abort merge"; exit 1; }
+
+# Switch to main, fast-forward from remote if one exists
+git checkout main
+git pull --ff-only origin main 2>/dev/null || true
+
+# Merge the session branch (--no-ff preserves branch topology in history)
+git merge --no-ff "$SB" -m "merge: $SB"
+
+# On conflict: STOP. Cross-session conflicts require human judgment.
+if [ -n "$(git ls-files --unmerged)" ]; then
+    echo "ERROR: merge conflict on $SB — another session touched the same code. Escalate."
+    git merge --abort
+    exit 1
+fi
+
+# Push main and delete the session branch
+git push origin main 2>/dev/null || true
+git branch -d "$SB"
+git push origin --delete "$SB" 2>/dev/null || true
+```
+
+Do NOT report workflow complete until the merge lands. A committed-but-unmerged branch is NOT done. If conflicts occur, stop the workflow and surface them to the user — do not auto-resolve.
 
 ---
 
 ## DONE
 
 ```
-echo '{"workflow":"develop-feature","step":7,"status":"complete"}' > .orrch/workflow.json
+echo '{"workflow":"develop-feature","step":8,"status":"complete"}' > .orrch/workflow.json
 ```
 
-Report: what was built, verification summary, commit hash, known issues.
+Report: what was built, verification summary, commit hash, **merge status** (merged to main / conflict / skipped because already on main), known issues.
