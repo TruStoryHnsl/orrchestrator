@@ -56,12 +56,10 @@ Branch created:
   2. Use conventional commits: git commit -m "feat: description"
   3. Push: git push -u origin HEAD
   4. At session/feature completion — MERGE BACK TO MAIN (mandatory, not optional):
-       git checkout main
-       git pull --ff-only origin main 2>/dev/null || true
-       git merge --no-ff <this-branch> -m "merge: <this-branch>"
-       git push origin main 2>/dev/null || true
-       git branch -d <this-branch>
-     On conflict: abort and escalate to user (cross-session conflicts need human judgment).
+       ~/projects/orrchestrator/library/tools/merge_to_main.sh
+     The tool handles tiered resolution: patience merge → union-merge for
+     additive files → LLM resolver for code conflicts → pre-merge checkpoint.
+     Exit 0 = merged + branch deleted. Exit 1 = escalation required.
      On public/commercial: /commit-push-pr + gh pr merge is an acceptable substitute.
   5. The session is NOT complete until main contains the work. Unmerged branches cause regressions.
 ```
