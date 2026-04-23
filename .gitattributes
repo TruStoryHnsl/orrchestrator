@@ -1,0 +1,20 @@
+# Additive files — union-merge silently concatenates both sides' conflicting
+# hunks instead of emitting conflict markers. Safe for logs, plans, lists.
+# See library/tools/merge_to_main.sh for the tiered-merge policy.
+
+PLAN.md               merge=union
+DEVLOG.md             merge=union
+CHANGELOG.md          merge=union
+HANDOFF.md            merge=union
+instructions_inbox.md merge=union
+MEMORY.md             merge=union
+
+# Ideas/intent docs accumulate entries additively
+plans/*.md            merge=union
+
+# Workforce/operations/agents definitions are additive registries
+agents/*.md           merge=union
+operations/*.md       merge=union
+workforces/*.md       merge=union
+library/models/*.md   merge=union
+library/harnesses/*.md merge=union

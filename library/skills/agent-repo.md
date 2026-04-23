@@ -46,12 +46,14 @@ Session branches exist only to keep parallel sessions out of each other's way WH
 
 1. Verify all work is committed on the branch (`git status` clean, `git diff --quiet`).
 2. Push the branch so the remote has the latest: `git push -u origin HEAD` (skip on private with no remote).
-3. Switch to main and fast-forward from remote: `git checkout main && git pull --ff-only origin main 2>/dev/null || true`.
-4. Merge the session branch preserving topology: `git merge --no-ff "$SB" -m "merge: $SB"`.
-5. Push main: `git push origin main 2>/dev/null || true`.
-6. Delete the branch locally and on the remote: `git branch -d "$SB" && git push origin --delete "$SB" 2>/dev/null || true`.
-7. **On merge conflict: STOP.** Run `git merge --abort`. Escalate to the user — cross-session conflicts require human judgment about which version wins. NEVER auto-resolve.
-8. Do NOT report the task complete until main contains the work. "Committed to a branch" ≠ "done". "Merged to main" = "done".
+3. Delegate to the tiered-merge tool:
+   ```
+   ~/projects/orrchestrator/library/tools/merge_to_main.sh
+   ```
+   The tool handles: patience merge → union merge for additive files → LLM per-file resolver for code conflicts (COMBINE / PICK_OURS / PICK_THEIRS / ESCALATE) → pre-merge checkpoint tag. See the script header for full semantics.
+4. Exit codes: `0` merged + branch deleted (done); `1` escalation required (genuine logic conflict — user must resolve); `2` setup error (dirty tree or no main branch).
+5. **On exit `1`**: STOP. Do NOT re-run. Surface the escalated file list. The tool left main at the checkpoint and the branch intact. User resolves manually and re-runs close.
+6. Do NOT report the task complete until main contains the work. "Committed to a branch" ≠ "done". "Merged to main" = "done".
 
 On `public`/`commercial` scope, a PR workflow (`gh pr create` + `gh pr merge --squash --auto`) is an acceptable substitute — but the session is not closed until the PR actually merges.
 
