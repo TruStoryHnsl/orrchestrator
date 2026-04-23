@@ -52,7 +52,16 @@ Branch created:
   Issue:  #N - <issue title> (if applicable)
 
   Next steps:
-  1. Make your changes
+  1. Make your changes on this branch (session isolation WHILE YOU WORK)
   2. Use conventional commits: git commit -m "feat: description"
-  3. When done: /commit-push-pr
+  3. Push: git push -u origin HEAD
+  4. At session/feature completion — MERGE BACK TO MAIN (mandatory, not optional):
+       git checkout main
+       git pull --ff-only origin main 2>/dev/null || true
+       git merge --no-ff <this-branch> -m "merge: <this-branch>"
+       git push origin main 2>/dev/null || true
+       git branch -d <this-branch>
+     On conflict: abort and escalate to user (cross-session conflicts need human judgment).
+     On public/commercial: /commit-push-pr + gh pr merge is an acceptable substitute.
+  5. The session is NOT complete until main contains the work. Unmerged branches cause regressions.
 ```

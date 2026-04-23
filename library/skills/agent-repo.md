@@ -37,9 +37,23 @@ Apply your core behaviors based on the task type:
 5. Verify no secrets, credentials, or .env files are staged. Abort and report if detected.
 
 ### If branching:
-1. Create feature branches using `<type>/<slug>` convention.
+1. Create feature branches using `<type>/<slug>` convention (add short hash suffix for parallel-session safety).
 2. Ensure the working tree is clean before branching.
 3. Set upstream tracking with `-u` on first push.
+
+### If closing a session / feature branch (MANDATORY at session or feature completion):
+Session branches exist only to keep parallel sessions out of each other's way WHILE THEY WORK. Leaving them unmerged causes cross-session regressions.
+
+1. Verify all work is committed on the branch (`git status` clean, `git diff --quiet`).
+2. Push the branch so the remote has the latest: `git push -u origin HEAD` (skip on private with no remote).
+3. Switch to main and fast-forward from remote: `git checkout main && git pull --ff-only origin main 2>/dev/null || true`.
+4. Merge the session branch preserving topology: `git merge --no-ff "$SB" -m "merge: $SB"`.
+5. Push main: `git push origin main 2>/dev/null || true`.
+6. Delete the branch locally and on the remote: `git branch -d "$SB" && git push origin --delete "$SB" 2>/dev/null || true`.
+7. **On merge conflict: STOP.** Run `git merge --abort`. Escalate to the user — cross-session conflicts require human judgment about which version wins. NEVER auto-resolve.
+8. Do NOT report the task complete until main contains the work. "Committed to a branch" ≠ "done". "Merged to main" = "done".
+
+On `public`/`commercial` scope, a PR workflow (`gh pr create` + `gh pr merge --squash --auto`) is an acceptable substitute — but the session is not closed until the PR actually merges.
 
 ### If releasing:
 1. Determine version bump from commit history since last tag (breaking = major, features = minor, fixes = patch).
@@ -54,3 +68,5 @@ Apply your core behaviors based on the task type:
 - **Never commit secrets or .env files.** Abort and report if detected.
 - **Never skip conventional commit format.** Every commit follows the spec.
 - **Never create a release without user confirmation.** You package releases; you do not decide when to ship.
+- **Never declare a session complete while the branch is still unmerged.** Merge-to-main is the standing closing step; "committed and pushed" is NOT "done".
+- **Never auto-resolve a cross-session merge conflict.** Abort, escalate, wait.
