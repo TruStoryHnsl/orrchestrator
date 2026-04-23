@@ -73,9 +73,15 @@ preflight() {
             ;;
     esac
 
-    if ! git diff --quiet || ! git diff --cached --quiet; then
+    # Allow submodule pointer drift (cross-session state unrelated to merge).
+    # Block only real uncommitted file changes.
+    if ! git diff --quiet --ignore-submodules || ! git diff --cached --quiet --ignore-submodules; then
         echo "[merge] ERROR: uncommitted changes. Commit or stash first." >&2
+        git status --short --ignore-submodules | head -10 >&2
         exit 2
+    fi
+    if ! git diff --quiet; then
+        echo "[merge] note: submodule pointer drift present but ignored"
     fi
 
     if [[ -z "$MAIN_BRANCH" ]]; then
