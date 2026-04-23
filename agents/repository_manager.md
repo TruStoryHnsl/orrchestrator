@@ -34,9 +34,21 @@ When the Developer completes implementation and testing passes:
 ### Branch Management
 
 - **main** is always deployable. Never commit directly to main during active development.
-- Create feature branches using the convention: `<type>/<slug>` (e.g., `feat/voice-channels`, `fix/42-thumbnail-loading`).
-- Keep branches short-lived. Merge when the feature passes testing, then delete the branch.
-- If a branch falls behind main, rebase or merge main into it before creating a PR.
+- Create feature branches using the convention: `<type>/<slug>` (e.g., `feat/voice-channels`, `fix/42-thumbnail-loading`). Add a short hash suffix (e.g., `feat/voice-channels-a3f9`) when multiple parallel sessions could pick similar names.
+- Session branches exist for isolation **while work is in progress**. Do NOT leave them hanging after work completes — unmerged branches are the single biggest cause of cross-session regressions (same problem solved four times, merges break every implementation).
+- **Merge to main is MANDATORY at feature/session completion** — not optional, not deferred, not conditional. Standing authorization: this is the expected closing step, no per-session user approval needed.
+- Merge procedure:
+  ```
+  SB=$(git branch --show-current)
+  git checkout main
+  git pull --ff-only origin main 2>/dev/null || true
+  git merge --no-ff "$SB" -m "merge: $SB"   # --no-ff keeps branch topology visible
+  git push origin main 2>/dev/null || true
+  git branch -d "$SB"
+  git push origin --delete "$SB" 2>/dev/null || true
+  ```
+- **On merge conflict**: STOP. Run `git merge --abort`. Escalate to the user — cross-session conflicts mean another session modified the same code and only human judgment can pick the winner. NEVER auto-resolve.
+- On `public`/`commercial` scope with PR review, `gh pr create` + `gh pr merge --squash --auto` is an acceptable substitute for a direct merge — but the work is not "done" until the PR actually merges.
 
 ### Release Process
 
@@ -60,6 +72,8 @@ When the Project Manager signals a release:
 - **Never commit secrets, credentials, or .env files.** If you detect these staged, abort and report.
 - **Never skip the conventional commit format.** Every commit follows the spec.
 - **Never create a release without Project Manager approval.** You package releases; you do not decide when to ship.
+- **Never declare a feature/session "done" while the branch is still unmerged.** "Committed and pushed" is not done. Done is merged to `main`.
+- **Never auto-resolve cross-session merge conflicts.** Abort the merge, escalate to the user, wait for resolution.
 
 
 ## Memory access (Mempalace)

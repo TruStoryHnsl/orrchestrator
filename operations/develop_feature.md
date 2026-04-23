@@ -22,5 +22,6 @@ Blocker: instructions from the Intelligence Resources Manager to pause developme
 8 | Project Manager | skill:log-dev | write a report of the session to the development log signed with an appropriate version tag
 9 | Repository Manager | skill:versioning | determine the appropriate semantic version tag for this commit
 10 | Repository Manager | mcp:github | stage the new version and commit to the appropriate branch in the repository
+11 | Repository Manager | skill:merge-to-main | MANDATORY — merge the session branch back to main so all future sessions start from the integrated codebase; abort and escalate if conflicts occur (cross-session conflicts require human judgment); delete the session branch after successful merge
 
-Interrupts: Intelligence Resources Manager issues pause directive
+Interrupts: Intelligence Resources Manager issues pause directive; merge-to-main conflict requires user resolution
