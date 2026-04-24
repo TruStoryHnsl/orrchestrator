@@ -3,7 +3,9 @@ name: General Software Development
 description: Full dev team with PM, engineers, testers, and DevOps. Suitable for most software projects.
 operations:
   - INSTRUCTION INTAKE
+  - INTAKE BUGREPORT
   - DEVELOP FEATURE
+  - ASSESS DEVELOPMENT
 ---
 
 ## Agents

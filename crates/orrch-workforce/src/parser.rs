@@ -520,6 +520,129 @@ pub fn parse_operation_markdown(content: &str) -> Option<Operation> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    /// Locate the workspace root by walking up until we find a `Cargo.toml`
+    /// alongside an `operations/` directory. Tests run from the crate dir
+    /// in `cargo test`, so we walk up to the repo root.
+    fn workspace_root() -> PathBuf {
+        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        loop {
+            if p.join("operations").is_dir() && p.join("workforces").is_dir() {
+                return p;
+            }
+            if !p.pop() {
+                panic!("could not locate workspace root with operations/ dir");
+            }
+        }
+    }
+
+    #[test]
+    fn test_intake_bugreport_operation_parses() {
+        let path = workspace_root().join("operations/intake_bugreport.md");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+        let op = parse_operation_markdown(&content)
+            .expect("intake_bugreport.md must parse");
+        assert_eq!(op.name, "INTAKE BUGREPORT");
+        assert!(op.steps.len() >= 9, "expected >=9 steps, got {}", op.steps.len());
+        // Step 1 — Executive Assistant triages
+        assert_eq!(op.steps[0].agent, "Executive Assistant");
+        // Step 5 — Hypervisor blocking gate
+        let hyp_idx = op.steps.iter().position(|s| s.agent == "Hypervisor")
+            .expect("must have a Hypervisor blocking step");
+        assert_eq!(op.steps[hyp_idx].tool_or_skill, None);
+        // Tools that this op introduces must be referenced
+        let combined: String = op.steps.iter()
+            .map(|s| s.tool_or_skill.clone().unwrap_or_default())
+            .collect::<Vec<_>>().join("|");
+        assert!(combined.contains("tool:route-bug"), "must reference tool:route-bug");
+        assert!(combined.contains("tool:ledger-append"), "must reference tool:ledger-append");
+    }
+
+    #[test]
+    fn test_assess_development_operation_parses() {
+        let path = workspace_root().join("operations/assess_development.md");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+        let op = parse_operation_markdown(&content)
+            .expect("assess_development.md must parse");
+        assert_eq!(op.name, "ASSESS DEVELOPMENT");
+        // Step 2 must be a parallel group: Feature Tester, Developer, Researcher
+        let step2: Vec<&Step> = op.steps.iter().filter(|s| s.index == "2").collect();
+        assert_eq!(step2.len(), 3, "step 2 should have 3 parallel agents, got {}", step2.len());
+        let agents: Vec<&str> = step2.iter().map(|s| s.agent.as_str()).collect();
+        assert!(agents.contains(&"Feature Tester"));
+        assert!(agents.contains(&"Developer"));
+        assert!(agents.contains(&"Researcher"));
+        // All three should share a parallel group
+        let groups: Vec<Option<u32>> = step2.iter().map(|s| s.parallel_group).collect();
+        assert!(groups[0].is_some());
+        assert_eq!(groups[0], groups[1]);
+        assert_eq!(groups[1], groups[2]);
+    }
+
+    #[test]
+    fn test_workforces_reference_new_operations() {
+        let root = workspace_root();
+        for wf_name in &[
+            "general_software_development",
+            "commercial_software_development",
+            "personal_tech_support",
+        ] {
+            let path = root.join(format!("workforces/{}.md", wf_name));
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+            let wf = parse_workforce_markdown(&content)
+                .unwrap_or_else(|| panic!("{} must parse", wf_name));
+            assert!(wf.operations.contains(&"INTAKE BUGREPORT".to_string()),
+                "{} must list INTAKE BUGREPORT", wf_name);
+            assert!(wf.operations.contains(&"ASSESS DEVELOPMENT".to_string()),
+                "{} must list ASSESS DEVELOPMENT", wf_name);
+        }
+    }
+
+    #[test]
+    fn test_workforces_have_agents_required_by_new_operations() {
+        // Scoped to the two operations added in this change. Older operations
+        // (DEVELOP FEATURE, INSTRUCTION INTAKE) have pre-existing agent-table
+        // gaps in some workforces — out of scope for this test.
+        let root = workspace_root();
+        let new_ops = ["INTAKE BUGREPORT", "ASSESS DEVELOPMENT"];
+
+        for wf_name in &[
+            "general_software_development",
+            "commercial_software_development",
+            "personal_tech_support",
+        ] {
+            let path = root.join(format!("workforces/{}.md", wf_name));
+            let content = std::fs::read_to_string(&path).unwrap();
+            let wf = parse_workforce_markdown(&content).unwrap();
+            let agents: Vec<&str> = wf.agents.iter()
+                .map(|a| a.agent_profile.as_str()).collect();
+
+            for op_listed in &wf.operations {
+                if !new_ops.contains(&op_listed.as_str()) {
+                    continue;
+                }
+                let op_file = op_listed.to_lowercase().replace(' ', "_");
+                let op_path = root.join(format!("operations/{}.md", op_file));
+                let op_content = std::fs::read_to_string(&op_path).unwrap();
+                let op = parse_operation_markdown(&op_content).unwrap();
+                for step in &op.steps {
+                    if step.agent == "Hypervisor" {
+                        continue; // dispatcher, never declared in agent table
+                    }
+                    assert!(
+                        agents.contains(&step.agent.as_str()),
+                        "workforce {} declares new operation {} which uses agent '{}' \
+                         but that agent is not in the workforce's agent table",
+                        wf_name, op_listed, step.agent
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_parse_instruction_intake() {
