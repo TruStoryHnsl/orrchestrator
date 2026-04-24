@@ -3,7 +3,9 @@ name: Commercial Software Development
 description: Full corporate-style team with all departments. Includes legal, marketing, and comprehensive QA. For production-grade distributable software.
 operations:
   - INSTRUCTION INTAKE
+  - INTAKE BUGREPORT
   - DEVELOP FEATURE
+  - ASSESS DEVELOPMENT
 ---
 
 ## Agents
