@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -29,14 +29,92 @@ pub struct ServerState {
     /// Raised when a new terminal client connects. The main loop polls
     /// this to trigger a full TUI redraw so the newcomer sees the screen.
     pub redraw_flag: Arc<std::sync::atomic::AtomicBool>,
-    /// Optional bearer token. When set, non-localhost requests must present
-    /// it via `Authorization: Bearer <token>`, `?token=<token>`, or
+    /// Optional bearer token. When set, requests that don't come from a
+    /// loopback address or a `trusted_cidrs` entry must present it via
+    /// `Authorization: Bearer <token>`, `?token=<token>`, or
     /// `Cookie: orrch_token=<token>`.
     pub auth_token: Option<String>,
+    /// CIDRs that bypass `auth_token` in addition to loopback. Loopback
+    /// (`127.0.0.0/8`, `::1`) is always trusted; this list extends it.
+    /// Typical use: `100.64.0.0/10` to trust a Tailscale tailnet.
+    pub trusted_cidrs: Vec<Cidr>,
+}
+
+/// A simple IPv4-or-IPv6 CIDR, parsed from `1.2.3.4/24` or `2001:db8::/32`.
+///
+/// Containment uses straight bitmask comparison — this is a tiny in-house
+/// implementation to avoid pulling in `ipnet`. Sufficient for the auth
+/// middleware's "is this peer trusted?" check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cidr {
+    addr: IpAddr,
+    prefix: u8,
+}
+
+impl Cidr {
+    /// Parse `<addr>/<prefix>`. Bare `<addr>` (no prefix) is treated as
+    /// `/32` for IPv4 and `/128` for IPv6. Returns a human-readable error
+    /// on malformed input.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let (addr_str, prefix_str) = match s.split_once('/') {
+            Some((a, p)) => (a, Some(p)),
+            None => (s, None),
+        };
+        let addr: IpAddr = addr_str
+            .parse()
+            .map_err(|e| format!("invalid IP {addr_str:?}: {e}"))?;
+        let max = if addr.is_ipv4() { 32 } else { 128 };
+        let prefix: u8 = match prefix_str {
+            Some(p) => p
+                .parse()
+                .map_err(|e| format!("invalid prefix {p:?}: {e}"))?,
+            None => max,
+        };
+        if prefix > max {
+            return Err(format!("prefix /{prefix} exceeds /{max}"));
+        }
+        Ok(Cidr { addr, prefix })
+    }
+
+    /// Return true if `peer` falls within this CIDR.
+    pub fn contains(&self, peer: IpAddr) -> bool {
+        match (self.addr, peer) {
+            (IpAddr::V4(net), IpAddr::V4(p)) => v4_in_cidr(p, net, self.prefix),
+            (IpAddr::V6(net), IpAddr::V6(p)) => v6_in_cidr(p, net, self.prefix),
+            // IPv4-mapped IPv6 addresses (`::ffff:1.2.3.4`) — unwrap and retry.
+            (IpAddr::V4(net), IpAddr::V6(p)) => match p.to_ipv4_mapped() {
+                Some(v4) => v4_in_cidr(v4, net, self.prefix),
+                None => false,
+            },
+            (IpAddr::V6(net), IpAddr::V4(p)) => {
+                let mapped = p.to_ipv6_mapped();
+                v6_in_cidr(mapped, net, self.prefix)
+            }
+        }
+    }
+}
+
+fn v4_in_cidr(peer: Ipv4Addr, net: Ipv4Addr, prefix: u8) -> bool {
+    if prefix == 0 {
+        return true;
+    }
+    let mask = u32::MAX.checked_shl(32 - prefix as u32).unwrap_or(0);
+    (u32::from(peer) & mask) == (u32::from(net) & mask)
+}
+
+fn v6_in_cidr(peer: Ipv6Addr, net: Ipv6Addr, prefix: u8) -> bool {
+    if prefix == 0 {
+        return true;
+    }
+    let p = u128::from(peer);
+    let n = u128::from(net);
+    let mask = u128::MAX.checked_shl(128 - prefix as u32).unwrap_or(0);
+    (p & mask) == (n & mask)
 }
 
 pub fn build_router(srv: ServerState) -> Router {
     let token = srv.auth_token.clone();
+    let trusted = srv.trusted_cidrs.clone();
     Router::new()
         .route("/", get(serve_index))
         .route("/landing", get(serve_landing))
@@ -54,7 +132,8 @@ pub fn build_router(srv: ServerState) -> Router {
         .route("/action", post(handle_action))
         .layer(middleware::from_fn(move |req, next| {
             let token = token.clone();
-            async move { auth_middleware(token, req, next).await }
+            let trusted = trusted.clone();
+            async move { auth_middleware(token, trusted, req, next).await }
         }))
         .with_state(srv)
 }
@@ -62,16 +141,19 @@ pub fn build_router(srv: ServerState) -> Router {
 /// Optional-token auth gate.
 ///
 /// - When `token` is `None`: pass-through (unconfigured = open).
-/// - When `token` is `Some`: requests from `127.0.0.1` / `::1` pass through
-///   (operator's own machine is trusted). All other requests must present
-///   the token via `Authorization: Bearer <token>`, `?token=<token>`, or
+/// - When `token` is `Some`: requests from a trusted source pass through.
+///   Trusted sources are loopback (`127.0.0.0/8`, `::1`) plus any peer
+///   IP that falls inside one of the configured `trusted_cidrs`. All
+///   other requests must present the token via
+///   `Authorization: Bearer <token>`, `?token=<token>`, or
 ///   `Cookie: orrch_token=<token>`. Otherwise returns 401.
 ///
 /// The cookie path supports the bookmark-friendly login flow: visit
-/// `https://orrchestrator.com/?token=...` once and the browser caches the
+/// `http://orrchestrator.com/?token=...` once and the browser caches the
 /// cookie for subsequent requests.
 async fn auth_middleware(
     token: Option<String>,
+    trusted: Vec<Cidr>,
     req: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
@@ -79,11 +161,12 @@ async fn auth_middleware(
         return next.run(req).await;
     };
 
-    // Trust loopback unconditionally. ConnectInfo is populated by
+    // Trust loopback + any configured CIDR. ConnectInfo is populated by
     // `into_make_service_with_connect_info`; if it's missing we err on the
     // side of requiring the token.
     if let Some(ConnectInfo(addr)) = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>() {
-        if is_loopback(addr.ip()) {
+        let peer = addr.ip();
+        if is_loopback(peer) || trusted.iter().any(|c| c.contains(peer)) {
             return next.run(req).await;
         }
     }
@@ -417,5 +500,70 @@ mod tests {
         assert!(is_loopback("::1".parse().unwrap()));
         assert!(!is_loopback("192.168.1.1".parse().unwrap()));
         assert!(!is_loopback("8.8.8.8".parse().unwrap()));
+    }
+
+    // ─── Cidr parser + containment ──────────────────────────────────
+
+    #[test]
+    fn cidr_parses_ipv4_with_prefix() {
+        let cidr = Cidr::parse("100.64.0.0/10").unwrap();
+        assert_eq!(cidr.prefix, 10);
+    }
+
+    #[test]
+    fn cidr_parses_bare_ipv4_as_slash_32() {
+        let cidr = Cidr::parse("192.168.1.5").unwrap();
+        assert_eq!(cidr.prefix, 32);
+        assert!(cidr.contains("192.168.1.5".parse().unwrap()));
+        assert!(!cidr.contains("192.168.1.6".parse().unwrap()));
+    }
+
+    #[test]
+    fn cidr_rejects_overflow_prefix() {
+        let err = Cidr::parse("10.0.0.0/33").unwrap_err();
+        assert!(err.contains("/33") || err.contains("exceeds"));
+    }
+
+    #[test]
+    fn cidr_tailnet_cgnat_contains_typical_addrs() {
+        let cidr = Cidr::parse("100.64.0.0/10").unwrap();
+        // Real Tailscale-assigned IPs from this tailnet
+        assert!(cidr.contains("100.124.189.67".parse().unwrap()));
+        assert!(cidr.contains("100.116.151.17".parse().unwrap()));
+        assert!(cidr.contains("100.119.244.84".parse().unwrap()));
+        // Public IP must not match
+        assert!(!cidr.contains("162.195.121.21".parse().unwrap()));
+        // LAN IP must not match
+        assert!(!cidr.contains("192.168.1.152".parse().unwrap()));
+    }
+
+    #[test]
+    fn cidr_ipv6_basic() {
+        let cidr = Cidr::parse("2001:db8::/32").unwrap();
+        assert!(cidr.contains("2001:db8::1".parse().unwrap()));
+        assert!(cidr.contains("2001:db8:abcd::1234".parse().unwrap()));
+        assert!(!cidr.contains("2001:db9::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn cidr_ipv4_mapped_in_v4_cidr() {
+        // ::ffff:192.168.1.5 should match a v4 CIDR
+        let cidr = Cidr::parse("192.168.1.0/24").unwrap();
+        let mapped: IpAddr = "::ffff:192.168.1.5".parse().unwrap();
+        assert!(cidr.contains(mapped));
+    }
+
+    #[test]
+    fn cidr_zero_prefix_matches_everything() {
+        let cidr = Cidr::parse("0.0.0.0/0").unwrap();
+        assert!(cidr.contains("8.8.8.8".parse().unwrap()));
+        assert!(cidr.contains("1.2.3.4".parse().unwrap()));
+    }
+
+    #[test]
+    fn cidr_invalid_address_rejected() {
+        assert!(Cidr::parse("nothex").is_err());
+        assert!(Cidr::parse("256.256.256.256/8").is_err());
+        assert!(Cidr::parse("10.0.0.0/abc").is_err());
     }
 }
