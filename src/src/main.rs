@@ -584,6 +584,17 @@ async fn run_loop(
                         MouseEventKind::ScrollDown => {
                             app.handle_scroll(3);
                         }
+                        MouseEventKind::Down(_) => {
+                            // Click on the WebUI presence indicator → open browser.
+                            if let Some(badge) = app.webui_badge_area {
+                                let (cx, cy) = (mouse.column, mouse.row);
+                                if cy >= badge.y && cy < badge.y + badge.height
+                                    && cx >= badge.x && cx < badge.x + badge.width
+                                {
+                                    app.open_webui();
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }

@@ -16,6 +16,61 @@ use tokio::sync::mpsc;
 
 use crate::editor::{VimKind, VimRequest, PendingEditor};
 
+/// Translate a crossterm key event into a tmux `send-keys` argument.
+///
+/// Returns `None` for keys that have no useful tmux representation (e.g.
+/// pure modifier presses). Modifiers map to tmux's `C-`, `M-`, `S-`
+/// prefixes — `S-` is omitted for letter keys because the uppercase form
+/// already carries the shift meaning.
+fn key_to_tmux_spec(code: KeyCode, mods: KeyModifiers) -> Option<String> {
+    let ctrl = mods.contains(KeyModifiers::CONTROL);
+    let alt = mods.contains(KeyModifiers::ALT);
+    let shift = mods.contains(KeyModifiers::SHIFT);
+
+    let base: String = match code {
+        KeyCode::Char(c) => {
+            // For Ctrl combos tmux uses C-<lowercase letter>; for plain
+            // chars, send the literal (uppercase preserved for shifted
+            // letter keys courtesy of crossterm).
+            if ctrl {
+                let lower = c.to_ascii_lowercase();
+                return Some(format_key_spec(&format!("{lower}"), true, alt, false));
+            }
+            // Bare printable char — let tmux handle it via `-l` literal mode
+            // by returning a marker the caller recognizes. We use a special
+            // prefix `LITERAL:` so the helper knows to invoke `send-keys -l`.
+            return Some(format!("LITERAL:{c}"));
+        }
+        KeyCode::Enter => "Enter".into(),
+        KeyCode::Tab => "Tab".into(),
+        KeyCode::BackTab => "BTab".into(),
+        KeyCode::Backspace => "BSpace".into(),
+        KeyCode::Delete => "DC".into(),
+        KeyCode::Insert => "IC".into(),
+        KeyCode::Esc => "Escape".into(),
+        KeyCode::Up => "Up".into(),
+        KeyCode::Down => "Down".into(),
+        KeyCode::Left => "Left".into(),
+        KeyCode::Right => "Right".into(),
+        KeyCode::Home => "Home".into(),
+        KeyCode::End => "End".into(),
+        KeyCode::PageUp => "PPage".into(),
+        KeyCode::PageDown => "NPage".into(),
+        KeyCode::F(n) if (1..=12).contains(&n) => format!("F{n}"),
+        _ => return None,
+    };
+
+    Some(format_key_spec(&base, ctrl, alt, shift))
+}
+
+fn format_key_spec(base: &str, ctrl: bool, alt: bool, shift: bool) -> String {
+    let mut prefix = String::new();
+    if ctrl { prefix.push_str("C-"); }
+    if alt { prefix.push_str("M-"); }
+    if shift { prefix.push_str("S-"); }
+    format!("{prefix}{base}")
+}
+
 // ─── Scroll Infrastructure (INS-005) ─────────────────────────────────
 
 /// Reusable scroll state for any list panel.
@@ -257,6 +312,10 @@ pub enum SubView {
     SteerSession(usize),
     /// OPT-005: text input for setting a project logo path. Carries project index.
     SetLogoPath(usize),
+    /// Hypervise expanded view — fills the panel with a single session's
+    /// live tmux pane and forwards every keypress to the session via
+    /// `tmux send-keys`. Carries the flat session index.
+    ExpandedSession(usize),
 }
 
 /// Sub-panels within the Design panel.
@@ -849,6 +908,23 @@ pub struct App {
     /// Auth token required by non-localhost WebUI clients, when configured.
     /// Used to construct the bookmarkable login URL shown in the Esc menu.
     pub webui_token: Option<String>,
+
+    /// Screen area occupied by the small WebUI availability indicator —
+    /// captured during render so the mouse-click dispatcher can route a
+    /// click on it to `open_webui()`. The URL itself is shown only in
+    /// the Esc menu; this is just a clickable presence dot.
+    pub webui_badge_area: Option<ratatui::layout::Rect>,
+
+    /// Cached ANSI pane capture for the currently expanded Hypervise
+    /// session. Refreshed by `draw_expanded_session` on a short cadence.
+    pub expanded_pane_content: String,
+    /// Last-capture timestamp for `expanded_pane_content`. Used to throttle
+    /// `tmux capture-pane` invocations to ~10 Hz.
+    pub expanded_pane_last_capture: Option<std::time::Instant>,
+    /// First-Esc-press timestamp while in `SubView::ExpandedSession`. A
+    /// second Esc within 500ms exits expanded mode; otherwise the first
+    /// Esc is forwarded to the session.
+    pub expanded_pending_esc: Option<std::time::Instant>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1072,6 +1148,10 @@ impl App {
             webui_port: None,
             webui_public_url: None,
             webui_token: None,
+            webui_badge_area: None,
+            expanded_pane_content: String::new(),
+            expanded_pane_last_capture: None,
+            expanded_pending_esc: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1888,6 +1968,14 @@ impl App {
             return Ok(());
         }
 
+        // Hypervise expanded view: every key (including modifiers) routes
+        // straight to `tmux send-keys` for the active session. Handled before
+        // any global key remapping (j/k aliases, Esc-opens-menu, etc) so the
+        // session receives keys verbatim.
+        if let SubView::ExpandedSession(idx) = self.sub {
+            return self.handle_expanded_session_key(code, modifiers, idx);
+        }
+
         // Global Esc: from List views opens app menu, from app menu closes it
         if code == KeyCode::Esc {
             match &self.sub {
@@ -2052,6 +2140,9 @@ impl App {
             }
             SubView::SteerSession(idx) => { let idx = *idx; self.key_steer_session(key, idx) }
             SubView::SetLogoPath(idx) => { let idx = *idx; self.key_set_logo_path(key, idx) }
+            // ExpandedSession is intercepted in handle_key before the j/k/h/l
+            // remap; it never reaches this dispatch table.
+            SubView::ExpandedSession(_) => Ok(()),
         }
     }
 
@@ -5774,8 +5865,22 @@ KeyCode::Char('i') => {
                     self.session_tab_selected += 1;
                 }
             }
-            KeyCode::Enter => {
-                // Focus the selected session's terminal window + tmux window
+            KeyCode::Enter | KeyCode::Right => {
+                // Expand the selected session inline. Replaces the old
+                // external-window focus behavior — `o` preserves that.
+                if !self.managed_sessions.is_empty()
+                    && self.session_tab_selected < self.managed_sessions.len()
+                {
+                    self.expanded_pane_content.clear();
+                    self.expanded_pane_last_capture = None;
+                    self.expanded_pending_esc = None;
+                    self.sub = SubView::ExpandedSession(self.session_tab_selected);
+                }
+            }
+            KeyCode::Char('o') => {
+                // Open the selected session's external tmux/terminal window
+                // (the previous Enter behavior, kept on `o` for users who
+                // want a separate window instead of the inline expand).
                 if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
                     orrch_core::windows::select_and_focus(s.category, s.index);
                 }
@@ -5809,6 +5914,68 @@ KeyCode::Char('i') => {
                 self.session_log_scroll = 0;
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle a key event while a Hypervise session is expanded inline.
+    ///
+    /// Routes every keystroke to `tmux send-keys` for the target session,
+    /// with one exception: `Esc` is buffered. A second `Esc` within 500ms
+    /// exits expanded mode; a single `Esc` after the window expires is
+    /// forwarded to the session (so vim/htop-style apps inside the pane
+    /// still see Esc when the user means to send it).
+    fn handle_expanded_session_key(
+        &mut self,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+        idx: usize,
+    ) -> Result<()> {
+        use std::time::{Duration, Instant};
+
+        // Resolve target session once. If gone, drop back to the list.
+        let Some(s) = self.managed_sessions.get(idx) else {
+            self.expanded_pending_esc = None;
+            self.sub = SubView::List;
+            return Ok(());
+        };
+        let cat = s.category;
+        let win = s.index;
+
+        const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(500);
+
+        if code == KeyCode::Esc {
+            let now = Instant::now();
+            if let Some(prev) = self.expanded_pending_esc {
+                if now.duration_since(prev) <= ESC_DOUBLE_TAP_WINDOW {
+                    // Second Esc within the window — exit expanded mode.
+                    // The first Esc was deliberately NOT forwarded; if the
+                    // user meant to send Esc to the pane they wait out the
+                    // window and tap once more (handled below).
+                    self.expanded_pending_esc = None;
+                    self.sub = SubView::List;
+                    return Ok(());
+                }
+            }
+            // First Esc — start the window. Do not forward yet; if no second
+            // Esc arrives within the window, we'll flush it on the next
+            // capture-pane tick (see draw_expanded_session) so vim still gets
+            // its Esc with at most a 500ms delay.
+            self.expanded_pending_esc = Some(now);
+            return Ok(());
+        }
+
+        // Any non-Esc key cancels a pending double-Esc and forwards both
+        // the buffered Esc (if still within the window) and the new key.
+        if let Some(_prev) = self.expanded_pending_esc.take() {
+            // Always flush the buffered Esc — the user clearly didn't want
+            // to exit (they typed something else). Forwarding Esc first
+            // preserves the order the user typed.
+            orrch_core::windows::send_raw_key(cat, win, "Escape");
+        }
+
+        if let Some(spec) = key_to_tmux_spec(code, modifiers) {
+            orrch_core::windows::send_raw_key(cat, win, &spec);
         }
         Ok(())
     }
@@ -7108,6 +7275,57 @@ fn detect_current_output() -> Option<String> {
 #[cfg(test)]
 mod app_tests {
     use super::*;
+
+    #[test]
+    fn tmux_spec_for_arrow_keys() {
+        let spec = key_to_tmux_spec(KeyCode::Up, KeyModifiers::NONE).unwrap();
+        assert_eq!(spec, "Up");
+        let spec = key_to_tmux_spec(KeyCode::Right, KeyModifiers::NONE).unwrap();
+        assert_eq!(spec, "Right");
+    }
+
+    #[test]
+    fn tmux_spec_for_ctrl_letter() {
+        let spec = key_to_tmux_spec(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ).unwrap();
+        assert_eq!(spec, "C-c");
+        // Uppercase letter under Ctrl should still send lowercase form.
+        let spec = key_to_tmux_spec(
+            KeyCode::Char('C'),
+            KeyModifiers::CONTROL,
+        ).unwrap();
+        assert_eq!(spec, "C-c");
+    }
+
+    #[test]
+    fn tmux_spec_for_alt_combos() {
+        let spec = key_to_tmux_spec(KeyCode::Char('x'), KeyModifiers::ALT).unwrap();
+        assert_eq!(spec, "LITERAL:x", "alt+printable still goes literal — tmux uses M- prefix only with named keys via send-keys");
+        let spec = key_to_tmux_spec(KeyCode::Up, KeyModifiers::ALT).unwrap();
+        assert_eq!(spec, "M-Up");
+    }
+
+    #[test]
+    fn tmux_spec_for_special_keys() {
+        assert_eq!(key_to_tmux_spec(KeyCode::Enter, KeyModifiers::NONE).unwrap(), "Enter");
+        assert_eq!(key_to_tmux_spec(KeyCode::Tab, KeyModifiers::NONE).unwrap(), "Tab");
+        assert_eq!(key_to_tmux_spec(KeyCode::Backspace, KeyModifiers::NONE).unwrap(), "BSpace");
+        assert_eq!(key_to_tmux_spec(KeyCode::Esc, KeyModifiers::NONE).unwrap(), "Escape");
+        assert_eq!(key_to_tmux_spec(KeyCode::F(5), KeyModifiers::NONE).unwrap(), "F5");
+        assert_eq!(key_to_tmux_spec(KeyCode::PageUp, KeyModifiers::NONE).unwrap(), "PPage");
+    }
+
+    #[test]
+    fn tmux_spec_for_printable_char() {
+        let spec = key_to_tmux_spec(KeyCode::Char('a'), KeyModifiers::NONE).unwrap();
+        assert_eq!(spec, "LITERAL:a");
+        let spec = key_to_tmux_spec(KeyCode::Char('A'), KeyModifiers::SHIFT).unwrap();
+        assert_eq!(spec, "LITERAL:A");
+        let spec = key_to_tmux_spec(KeyCode::Char('~'), KeyModifiers::NONE).unwrap();
+        assert_eq!(spec, "LITERAL:~", "tilde must go through -l mode to avoid tmux interpretation");
+    }
 
     #[test]
     fn ai_assistance_header_contains_kind_label() {
