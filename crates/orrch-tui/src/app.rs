@@ -841,8 +841,14 @@ pub struct App {
     /// Port the WebUI server is listening on, or None if not started.
     pub webui_port: Option<u16>,
 
-    /// Screen area occupied by the WebUI URL badge (for mouse click detection).
-    pub webui_badge_area: Option<ratatui::layout::Rect>,
+    /// Public-facing URL for the WebUI (e.g. `https://orrchestrator.com`)
+    /// when TLS is configured. Displayed in the Esc menu alongside the
+    /// localhost URL. None when TLS is not configured.
+    pub webui_public_url: Option<String>,
+
+    /// Auth token required by non-localhost WebUI clients, when configured.
+    /// Used to construct the bookmarkable login URL shown in the Esc menu.
+    pub webui_token: Option<String>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1064,7 +1070,8 @@ impl App {
             session_log_view: false,
             session_log_scroll: 0,
             webui_port: None,
-            webui_badge_area: None,
+            webui_public_url: None,
+            webui_token: None,
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance

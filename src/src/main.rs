@@ -98,14 +98,23 @@ async fn main() -> Result<()> {
 
     // Start the WebUI server FIRST so we can tap its terminal broadcast
     // channel into the ratatui backend. Bookmarkable URL: localhost:8484.
-    let webui = match orrch_webui::WebUiServer::start(orrch_webui::DEFAULT_PORT).await {
+    //
+    // TLS, auth token, and public URL come from environment variables — see
+    // `orrch_webui::WebUiConfig::from_env` for the full list.
+    let webui_cfg = orrch_webui::WebUiConfig::from_env();
+    let webui = match orrch_webui::WebUiServer::start_with_config(webui_cfg).await {
         Ok(srv) => {
             app.webui_port = Some(srv.port);
+            app.webui_public_url = srv.public_url.clone();
+            app.webui_token = srv.auth_token.clone();
             tracing::info!("WebUI available at http://localhost:{}", srv.port);
+            if let Some(url) = &srv.public_url {
+                tracing::info!("WebUI public URL: {url}");
+            }
             Some(srv)
         }
         Err(e) => {
-            tracing::warn!("WebUI failed to start on :{}: {e}", orrch_webui::DEFAULT_PORT);
+            tracing::warn!("WebUI failed to start: {e}");
             tracing::warn!("Another orrchestrator instance may already be running.");
             None
         }
@@ -574,17 +583,6 @@ async fn run_loop(
                         }
                         MouseEventKind::ScrollDown => {
                             app.handle_scroll(3);
-                        }
-                        MouseEventKind::Down(_) => {
-                            // Click on the WebUI URL badge → open browser + copy URL
-                            if let Some(badge) = app.webui_badge_area {
-                                let (cx, cy) = (mouse.column, mouse.row);
-                                if cy >= badge.y && cy < badge.y + badge.height
-                                    && cx >= badge.x && cx < badge.x + badge.width
-                                {
-                                    app.open_webui();
-                                }
-                            }
                         }
                         _ => {}
                     }
