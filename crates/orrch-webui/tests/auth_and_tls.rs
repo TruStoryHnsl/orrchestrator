@@ -38,9 +38,8 @@ async fn local_listener_bypasses_auth_when_token_set() {
     let port = free_port();
     let cfg = WebUiConfig {
         local_port: port,
-        tls: None,
         auth_token: Some("super-secret".into()),
-        public_url: None,
+        ..Default::default()
     };
     let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
@@ -60,9 +59,7 @@ async fn no_token_means_open() {
     let port = free_port();
     let cfg = WebUiConfig {
         local_port: port,
-        tls: None,
-        auth_token: None,
-        public_url: None,
+        ..Default::default()
     };
     let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
@@ -98,6 +95,7 @@ async fn tls_listener_serves_https_with_token() {
         }),
         auth_token: Some("super-secret".into()),
         public_url: Some("https://test.example".into()),
+        ..Default::default()
     };
     let srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
@@ -135,9 +133,8 @@ async fn auth_via_query_param_succeeds_via_proxy_simulation() {
     let port = free_port();
     let cfg = WebUiConfig {
         local_port: port,
-        tls: None,
         auth_token: Some("super-secret".into()),
-        public_url: None,
+        ..Default::default()
     };
     let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
@@ -151,16 +148,13 @@ async fn auth_via_query_param_succeeds_via_proxy_simulation() {
 
 #[test]
 fn config_from_env_reads_all_vars() {
+    let _g = env_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let cert = dir.path().join("c.pem");
     let key = dir.path().join("k.pem");
     std::fs::write(&cert, "x").unwrap();
     std::fs::write(&key, "x").unwrap();
 
-    // Use a unique key prefix so parallel tests don't trample each other.
-    // SAFETY: `set_var` mutates process-global env state. These tests run
-    // serially within this single test (no concurrent env mutation), so
-    // the temporary set/remove pattern is sound.
     unsafe {
         std::env::set_var("ORRCH_WEBUI_PORT", "9999");
         std::env::set_var("ORRCH_WEBUI_TLS_CERT", cert.to_str().unwrap());
@@ -193,3 +187,92 @@ fn config_from_env_reads_all_vars() {
 // when a non-loopback peer is available).
 #[allow(dead_code)]
 fn _unused(_: SocketAddr) {}
+
+/// Process-wide lock for env-var tests. `from_env` reads global state, so
+/// tests that mutate ORRCH_* env vars must run sequentially or they trample
+/// each other. tokio::test runs by default on a thread pool — we can't use
+/// `--test-threads=1` from inside the test code, so we serialize manually.
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+#[tokio::test]
+async fn config_from_env_parses_trusted_cidrs() {
+    use orrch_webui::Cidr;
+    let _g = env_lock();
+    unsafe {
+        std::env::set_var(
+            "ORRCH_WEBUI_TRUSTED_CIDRS",
+            "100.64.0.0/10, 192.168.1.0/24",
+        );
+        std::env::set_var("ORRCH_WEBUI_BIND", "0.0.0.0");
+    }
+
+    let cfg = WebUiConfig::from_env();
+    assert_eq!(cfg.local_bind, "0.0.0.0");
+    assert_eq!(cfg.trusted_cidrs.len(), 2);
+    assert_eq!(
+        cfg.trusted_cidrs[0],
+        Cidr::parse("100.64.0.0/10").unwrap(),
+    );
+    assert_eq!(
+        cfg.trusted_cidrs[1],
+        Cidr::parse("192.168.1.0/24").unwrap(),
+    );
+
+    unsafe {
+        std::env::remove_var("ORRCH_WEBUI_TRUSTED_CIDRS");
+        std::env::remove_var("ORRCH_WEBUI_BIND");
+    }
+}
+
+#[tokio::test]
+async fn config_from_env_skips_invalid_trusted_cidrs() {
+    let _g = env_lock();
+    unsafe {
+        std::env::set_var(
+            "ORRCH_WEBUI_TRUSTED_CIDRS",
+            "100.64.0.0/10, garbage, 192.168.1.0/99",
+        );
+    }
+
+    let cfg = WebUiConfig::from_env();
+    // Only the valid CIDR survives; the garbage entries are dropped.
+    assert_eq!(cfg.trusted_cidrs.len(), 1);
+
+    unsafe { std::env::remove_var("ORRCH_WEBUI_TRUSTED_CIDRS"); }
+}
+
+#[tokio::test]
+async fn local_bind_default_is_loopback() {
+    let cfg = WebUiConfig::default();
+    assert_eq!(cfg.local_bind, "127.0.0.1");
+    assert!(cfg.trusted_cidrs.is_empty());
+}
+
+#[tokio::test]
+async fn server_starts_on_zero_zero_zero_zero() {
+    // Just verify the bind works on 0.0.0.0 — exposing the server.
+    // We don't assert remote reachability (CI doesn't have a non-loopback
+    // peer); reachability via loopback is enough to prove the listener
+    // accepts connections at all.
+    let port = free_port();
+    let cfg = WebUiConfig {
+        local_port: port,
+        local_bind: "0.0.0.0".to_string(),
+        ..Default::default()
+    };
+    let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
+
+    let resp = reqwest::Client::new()
+        .get(&format!("http://127.0.0.1:{port}/"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(resp.status(), 200);
+}
