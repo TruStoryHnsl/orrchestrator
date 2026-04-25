@@ -3679,29 +3679,6 @@ fn draw_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(line).style(Style::default().bg(BG_DARK)),
         area,
     );
-    if let Some(port) = app.webui_port {
-        let label = format!(" ⬡ http://localhost:{port} ");
-        let badge_width = label.len() as u16;
-        let badge_area = Rect {
-            x: area.x + area.width.saturating_sub(badge_width),
-            y: area.y,
-            width: badge_width.min(area.width),
-            height: 1,
-        };
-        app.webui_badge_area = Some(badge_area);
-        let badge = Paragraph::new(Line::from(vec![
-            Span::styled(
-                label,
-                Style::default()
-                    .fg(Color::Rgb(0x1a, 0x1a, 0x2e))
-                    .bg(Color::Rgb(0x4a, 0xaa, 0x99))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        frame.render_widget(badge, badge_area);
-    } else {
-        app.webui_badge_area = None;
-    }
 }
 
 /// Build a styled hint line with highlighted keys grouped by function.
@@ -3951,7 +3928,20 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         ("v", "Version info"),
     ];
 
-    let popup = centered_popup(frame.area(), 40, (items.len() as u16) + 5);
+    // WebUI URL block — shown when the server is running. Local always
+    // appears; public only appears when TLS is configured.
+    let local_url = app.webui_port.map(|p| format!("http://localhost:{p}"));
+    let public_url = app.webui_public_url.clone();
+    let mut url_lines = 0u16;
+    if local_url.is_some() {
+        url_lines += 2; // "WebUI:" header + local line
+        if public_url.is_some() {
+            url_lines += 1;
+        }
+        url_lines += 1; // spacer
+    }
+
+    let popup = centered_popup(frame.area(), 56, (items.len() as u16) + 5 + url_lines);
     frame.render_widget(Clear, popup);
 
     let mut lines = vec![
@@ -3959,6 +3949,24 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         Line::styled("v0.1.0", Style::default().fg(TEXT_MUTED)),
         Line::raw(""),
     ];
+
+    if let Some(local) = &local_url {
+        lines.push(Line::styled(
+            "WebUI",
+            Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled("  local  ", Style::default().fg(TEXT_DIM)),
+            Span::styled(local.clone(), Style::default().fg(ACCENT)),
+        ]));
+        if let Some(public) = &public_url {
+            lines.push(Line::from(vec![
+                Span::styled("  public ", Style::default().fg(TEXT_DIM)),
+                Span::styled(public.clone(), Style::default().fg(ACCENT)),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
 
     for (i, (key, label)) in items.iter().enumerate() {
         let sel = i == app.app_menu_selected;

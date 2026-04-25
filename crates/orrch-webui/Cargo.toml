@@ -7,6 +7,8 @@ edition.workspace = true
 [dependencies]
 orrch-core = { path = "../orrch-core" }
 axum = { version = "0.7", features = ["ws", "macros"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -14,3 +16,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 sha2 = { workspace = true }
 futures-util = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+rcgen = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
