@@ -55,9 +55,17 @@ pub struct WebUiConfig {
     /// `trusted_cidrs` when binding non-loopback so the listener is not
     /// open to the entire LAN unauthenticated.
     pub local_bind: String,
-    /// Optional TLS configuration. When `Some`, a second listener binds
+    /// Optional TLS configuration. When `Some`, an additional listener binds
     /// to `tls_addr` and serves the same router behind rustls.
     pub tls: Option<TlsConfig>,
+    /// Optional secondary public HTTP listener. When `Some`, an additional
+    /// plaintext listener binds to `bind:port` and serves the same router as
+    /// the local HTTP listener — same auth middleware, same state. This lets
+    /// a single process simultaneously serve `127.0.0.1:8484` (operator-only)
+    /// AND a public address (e.g. `0.0.0.0:80` for tailnet/LAN access on the
+    /// canonical port). Bind 80 directly without root via:
+    ///   sudo setcap cap_net_bind_service=+ep ./target/release/orrchestrator
+    pub public_http: Option<PublicHttpConfig>,
     /// Optional bearer token. When `Some`, all non-localhost requests must
     /// present `Authorization: Bearer <token>`, `Cookie: orrch_token=<token>`,
     /// or `?token=<token>`. Localhost connections always bypass auth.
@@ -78,6 +86,7 @@ impl Default for WebUiConfig {
             local_port: DEFAULT_PORT,
             local_bind: "127.0.0.1".to_string(),
             tls: None,
+            public_http: None,
             auth_token: None,
             trusted_cidrs: Vec::new(),
             public_url: None,
@@ -96,12 +105,17 @@ impl WebUiConfig {
     /// | `ORRCH_WEBUI_TLS_KEY`       | path to privkey.pem (enables TLS)                     |
     /// | `ORRCH_WEBUI_TLS_PORT`      | TLS port (default 8443)                               |
     /// | `ORRCH_WEBUI_TLS_BIND`      | TLS bind address (default 0.0.0.0)                    |
+    /// | `ORRCH_WEBUI_PUBLIC_HTTP_PORT` | secondary public HTTP port (e.g. 80) — off by default |
+    /// | `ORRCH_WEBUI_PUBLIC_HTTP_BIND` | secondary public HTTP bind addr (default 0.0.0.0)  |
     /// | `ORRCH_WEBUI_TOKEN`         | bearer token required for non-trusted requests        |
     /// | `ORRCH_WEBUI_TRUSTED_CIDRS` | CSV of CIDRs that bypass token (e.g. tailnet)         |
     /// | `ORRCH_WEBUI_PUBLIC_URL`    | display string (e.g. http://orrchestrator.com)        |
     ///
     /// TLS only activates when BOTH `ORRCH_WEBUI_TLS_CERT` and
     /// `ORRCH_WEBUI_TLS_KEY` are set — partial config is treated as off.
+    /// The secondary public HTTP listener activates when `ORRCH_WEBUI_PUBLIC_HTTP_PORT`
+    /// is set; pair it with TLS or `ORRCH_WEBUI_TOKEN` if the bind reaches
+    /// the public internet so it isn't open unauthenticated.
     /// Unparseable entries in `ORRCH_WEBUI_TRUSTED_CIDRS` are skipped
     /// silently (with a tracing warning) — startup never fails on a typo.
     pub fn from_env() -> Self {
@@ -136,6 +150,18 @@ impl WebUiConfig {
             _ => None,
         };
 
+        let public_http = std::env::var("ORRCH_WEBUI_PUBLIC_HTTP_PORT")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .and_then(|p| p.parse::<u16>().ok())
+            .map(|port| {
+                let bind = std::env::var("ORRCH_WEBUI_PUBLIC_HTTP_BIND")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "0.0.0.0".to_string());
+                PublicHttpConfig { bind, port }
+            });
+
         let auth_token = std::env::var("ORRCH_WEBUI_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
@@ -165,6 +191,7 @@ impl WebUiConfig {
             local_port,
             local_bind,
             tls,
+            public_http,
             auth_token,
             trusted_cidrs,
             public_url,
@@ -185,12 +212,28 @@ pub struct TlsConfig {
     pub port: u16,
 }
 
+/// Secondary plaintext HTTP listener — independent of the always-on local
+/// `127.0.0.1:8484` listener and the optional TLS listener. Typical use is
+/// binding `0.0.0.0:80` so a tailnet/LAN domain (e.g. `orrchestrator.com`)
+/// reaches the same router without requiring TLS or a separate process.
+#[derive(Debug, Clone)]
+pub struct PublicHttpConfig {
+    /// Bind address (default `0.0.0.0`).
+    pub bind: String,
+    /// Listen port (no default — opting in is explicit).
+    pub port: u16,
+}
+
 pub struct WebUiServer {
     /// Local HTTP port. Always bound to 127.0.0.1.
     pub port: u16,
     /// Public TLS URL when TLS is enabled (e.g. `https://orrchestrator.com`
     /// when `ORRCH_WEBUI_PUBLIC_URL` is set; otherwise the bound TLS addr).
     pub public_url: Option<String>,
+    /// Public plaintext HTTP URL when the secondary public HTTP listener is
+    /// enabled (e.g. `http://0.0.0.0:80`). Independent of `public_url` —
+    /// both can be set simultaneously when TLS is layered on top of plaintext.
+    pub public_http_url: Option<String>,
     /// Bearer token required by non-localhost requests, when configured.
     pub auth_token: Option<String>,
     state_tx: watch::Sender<WebAppState>,
@@ -259,6 +302,36 @@ impl WebUiServer {
         });
         tracing::info!("WebUI HTTP listening on http://127.0.0.1:{actual_port}");
 
+        // Optional secondary public HTTP listener. Same router, same auth
+        // middleware, same state — just a second socket so a single process
+        // can serve both `127.0.0.1:8484` (operator-only) and `0.0.0.0:80`
+        // (canonical port for a tailnet/LAN domain) at once.
+        let public_http_url = if let Some(public_http) = cfg.public_http.clone() {
+            let bind_str = format!("{}:{}", public_http.bind, public_http.port);
+            let bind_addr: SocketAddr = bind_str.parse()
+                .with_context(|| format!("invalid public-http bind addr: {bind_str}"))?;
+            let public_listener = tokio::net::TcpListener::bind(bind_addr).await
+                .with_context(|| format!("WebUI public-HTTP bind failed on {bind_addr}"))?;
+            let public_addr = public_listener.local_addr()?;
+
+            let public_router = router.clone();
+            tokio::spawn(async move {
+                if let Err(e) = axum::serve(
+                    public_listener,
+                    public_router.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .await
+                {
+                    tracing::error!("WebUI public-HTTP listener exited: {e}");
+                }
+            });
+            tracing::info!("WebUI public HTTP listening on http://{public_addr}");
+
+            Some(format!("http://{public_addr}"))
+        } else {
+            None
+        };
+
         // Optional TLS listener.
         let public_url = if let Some(tls) = cfg.tls.clone() {
             // rustls 0.23 requires a process-level crypto provider before
@@ -301,6 +374,7 @@ impl WebUiServer {
         Ok(WebUiServer {
             port: actual_port,
             public_url,
+            public_http_url,
             auth_token: cfg.auth_token,
             state_tx,
             action_queue,
