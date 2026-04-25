@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use tokio::sync::{broadcast, watch};
 
+pub use server::Cidr;
 use server::{ServerState, build_router};
 
 /// Fixed port for the local HTTP listener. Stable so the user can bookmark
@@ -47,6 +48,13 @@ const INPUT_CHANNEL_CAPACITY: usize = 256;
 pub struct WebUiConfig {
     /// Port for the always-on local HTTP listener. Defaults to 8484.
     pub local_port: u16,
+    /// Bind address for the local HTTP listener. Defaults to `127.0.0.1`
+    /// — operator-only access. Set to `0.0.0.0` (or a specific interface
+    /// IP, e.g. the Tailscale-assigned address) to expose the WebUI on
+    /// other networks. Always pair with `auth_token` and/or
+    /// `trusted_cidrs` when binding non-loopback so the listener is not
+    /// open to the entire LAN unauthenticated.
+    pub local_bind: String,
     /// Optional TLS configuration. When `Some`, a second listener binds
     /// to `tls_addr` and serves the same router behind rustls.
     pub tls: Option<TlsConfig>,
@@ -54,6 +62,11 @@ pub struct WebUiConfig {
     /// present `Authorization: Bearer <token>`, `Cookie: orrch_token=<token>`,
     /// or `?token=<token>`. Localhost connections always bypass auth.
     pub auth_token: Option<String>,
+    /// CIDRs that bypass `auth_token` in addition to loopback. Use this
+    /// to grant tailnet/VPN/LAN access without bookmarking a token URL
+    /// on every device. Loopback (`127.0.0.0/8`, `::1`) is always
+    /// trusted; this list extends that set.
+    pub trusted_cidrs: Vec<Cidr>,
     /// Optional public-facing URL displayed to users (e.g. in the Esc menu).
     /// Pure cosmetics — does not affect binding or routing.
     pub public_url: Option<String>,
@@ -63,8 +76,10 @@ impl Default for WebUiConfig {
     fn default() -> Self {
         Self {
             local_port: DEFAULT_PORT,
+            local_bind: "127.0.0.1".to_string(),
             tls: None,
             auth_token: None,
+            trusted_cidrs: Vec::new(),
             public_url: None,
         }
     }
@@ -73,23 +88,32 @@ impl Default for WebUiConfig {
 impl WebUiConfig {
     /// Build a config from environment variables.
     ///
-    /// | Variable                | Effect                                  |
-    /// |-------------------------|-----------------------------------------|
-    /// | `ORRCH_WEBUI_PORT`      | local HTTP port (default 8484)          |
-    /// | `ORRCH_WEBUI_TLS_CERT`  | path to fullchain.pem (enables TLS)     |
-    /// | `ORRCH_WEBUI_TLS_KEY`   | path to privkey.pem (enables TLS)       |
-    /// | `ORRCH_WEBUI_TLS_PORT`  | TLS port (default 8443)                 |
-    /// | `ORRCH_WEBUI_TLS_BIND`  | TLS bind address (default 0.0.0.0)      |
-    /// | `ORRCH_WEBUI_TOKEN`     | bearer token required for non-localhost |
-    /// | `ORRCH_WEBUI_PUBLIC_URL`| display string (e.g. https://x.com)     |
+    /// | Variable                    | Effect                                                |
+    /// |-----------------------------|-------------------------------------------------------|
+    /// | `ORRCH_WEBUI_PORT`          | local HTTP port (default 8484)                        |
+    /// | `ORRCH_WEBUI_BIND`          | local HTTP bind addr (default `127.0.0.1`)            |
+    /// | `ORRCH_WEBUI_TLS_CERT`      | path to fullchain.pem (enables TLS)                   |
+    /// | `ORRCH_WEBUI_TLS_KEY`       | path to privkey.pem (enables TLS)                     |
+    /// | `ORRCH_WEBUI_TLS_PORT`      | TLS port (default 8443)                               |
+    /// | `ORRCH_WEBUI_TLS_BIND`      | TLS bind address (default 0.0.0.0)                    |
+    /// | `ORRCH_WEBUI_TOKEN`         | bearer token required for non-trusted requests        |
+    /// | `ORRCH_WEBUI_TRUSTED_CIDRS` | CSV of CIDRs that bypass token (e.g. tailnet)         |
+    /// | `ORRCH_WEBUI_PUBLIC_URL`    | display string (e.g. http://orrchestrator.com)        |
     ///
     /// TLS only activates when BOTH `ORRCH_WEBUI_TLS_CERT` and
     /// `ORRCH_WEBUI_TLS_KEY` are set — partial config is treated as off.
+    /// Unparseable entries in `ORRCH_WEBUI_TRUSTED_CIDRS` are skipped
+    /// silently (with a tracing warning) — startup never fails on a typo.
     pub fn from_env() -> Self {
         let local_port = std::env::var("ORRCH_WEBUI_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_PORT);
+
+        let local_bind = std::env::var("ORRCH_WEBUI_BIND")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
 
         let tls = match (
             std::env::var("ORRCH_WEBUI_TLS_CERT").ok(),
@@ -116,11 +140,35 @@ impl WebUiConfig {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let trusted_cidrs = std::env::var("ORRCH_WEBUI_TRUSTED_CIDRS")
+            .ok()
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .filter_map(|s| match Cidr::parse(s) {
+                        Ok(cidr) => Some(cidr),
+                        Err(e) => {
+                            tracing::warn!("ignoring invalid trusted CIDR {s:?}: {e}");
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let public_url = std::env::var("ORRCH_WEBUI_PUBLIC_URL")
             .ok()
             .filter(|s| !s.is_empty());
 
-        Self { local_port, tls, auth_token, public_url }
+        Self {
+            local_port,
+            local_bind,
+            tls,
+            auth_token,
+            trusted_cidrs,
+            public_url,
+        }
     }
 }
 
@@ -185,12 +233,16 @@ impl WebUiServer {
             input_tx: Arc::new(input_tx),
             redraw_flag: Arc::clone(&redraw_flag),
             auth_token: cfg.auth_token.clone(),
+            trusted_cidrs: cfg.trusted_cidrs.clone(),
         };
         let router = build_router(srv);
 
-        // Local HTTP listener — always on 127.0.0.1 so authentication is
-        // unnecessary for the operator's own machine.
-        let local_addr = SocketAddr::from(([127, 0, 0, 1], cfg.local_port));
+        // HTTP listener. Default bind is 127.0.0.1 (operator-only); set
+        // `ORRCH_WEBUI_BIND` to expose on other interfaces (e.g. tailnet).
+        // Auth bypass for the bound host is governed by `trusted_cidrs`.
+        let bind_ip: std::net::IpAddr = cfg.local_bind.parse()
+            .with_context(|| format!("invalid ORRCH_WEBUI_BIND: {}", cfg.local_bind))?;
+        let local_addr = SocketAddr::new(bind_ip, cfg.local_port);
         let listener = tokio::net::TcpListener::bind(local_addr).await
             .with_context(|| format!("WebUI HTTP bind failed on {local_addr}"))?;
         let actual_port = listener.local_addr()?.port();
