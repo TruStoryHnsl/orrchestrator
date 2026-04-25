@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
-use axum::http::{header, StatusCode};
+use axum::extract::{ConnectInfo, State};
+use axum::http::{header, Request, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -27,9 +29,14 @@ pub struct ServerState {
     /// Raised when a new terminal client connects. The main loop polls
     /// this to trigger a full TUI redraw so the newcomer sees the screen.
     pub redraw_flag: Arc<std::sync::atomic::AtomicBool>,
+    /// Optional bearer token. When set, non-localhost requests must present
+    /// it via `Authorization: Bearer <token>`, `?token=<token>`, or
+    /// `Cookie: orrch_token=<token>`.
+    pub auth_token: Option<String>,
 }
 
 pub fn build_router(srv: ServerState) -> Router {
+    let token = srv.auth_token.clone();
     Router::new()
         .route("/", get(serve_index))
         .route("/landing", get(serve_landing))
@@ -45,8 +52,143 @@ pub fn build_router(srv: ServerState) -> Router {
         .route("/state", get(state_ws))
         .route("/size", get(get_size))
         .route("/action", post(handle_action))
+        .layer(middleware::from_fn(move |req, next| {
+            let token = token.clone();
+            async move { auth_middleware(token, req, next).await }
+        }))
         .with_state(srv)
 }
+
+/// Optional-token auth gate.
+///
+/// - When `token` is `None`: pass-through (unconfigured = open).
+/// - When `token` is `Some`: requests from `127.0.0.1` / `::1` pass through
+///   (operator's own machine is trusted). All other requests must present
+///   the token via `Authorization: Bearer <token>`, `?token=<token>`, or
+///   `Cookie: orrch_token=<token>`. Otherwise returns 401.
+///
+/// The cookie path supports the bookmark-friendly login flow: visit
+/// `https://orrchestrator.com/?token=...` once and the browser caches the
+/// cookie for subsequent requests.
+async fn auth_middleware(
+    token: Option<String>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let Some(token) = token else {
+        return next.run(req).await;
+    };
+
+    // Trust loopback unconditionally. ConnectInfo is populated by
+    // `into_make_service_with_connect_info`; if it's missing we err on the
+    // side of requiring the token.
+    if let Some(ConnectInfo(addr)) = req.extensions().get::<ConnectInfo<std::net::SocketAddr>>() {
+        if is_loopback(addr.ip()) {
+            return next.run(req).await;
+        }
+    }
+
+    if request_has_token(&req, &token) {
+        // Set a cookie if the token came in via query string so subsequent
+        // requests can omit it. SameSite=Lax + HttpOnly + Secure on https.
+        let scheme_is_https = req.uri().scheme_str() == Some("https")
+            || req.headers().get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok()) == Some("https");
+        let mut response = next.run(req).await;
+        if scheme_is_https {
+            // Best-effort cookie set — drop on header insertion failure.
+            if let Ok(cookie) = format!(
+                "orrch_token={token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000"
+            ).parse() {
+                response.headers_mut().append(header::SET_COOKIE, cookie);
+            }
+        }
+        return response;
+    }
+
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::WWW_AUTHENTICATE, "Bearer realm=\"orrchestrator\"")],
+        "401 — token required. Pass ?token=<TOKEN>, Authorization: Bearer <TOKEN>, or Cookie orrch_token=<TOKEN>.",
+    )
+        .into_response()
+}
+
+fn is_loopback(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback(),
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+fn request_has_token(req: &Request<axum::body::Body>, expected: &str) -> bool {
+    // Authorization: Bearer <token>
+    if let Some(h) = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+        if let Some(rest) = h.strip_prefix("Bearer ") {
+            if constant_time_eq(rest.trim(), expected) {
+                return true;
+            }
+        }
+    }
+    // Cookie: orrch_token=<token>
+    if let Some(cookies) = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+        for piece in cookies.split(';') {
+            let kv = piece.trim();
+            if let Some(value) = kv.strip_prefix("orrch_token=") {
+                if constant_time_eq(value, expected) {
+                    return true;
+                }
+            }
+        }
+    }
+    // ?token=<token>
+    if let Some(query) = req.uri().query() {
+        for pair in query.split('&') {
+            if let Some(value) = pair.strip_prefix("token=") {
+                let decoded = percent_decode(value);
+                if constant_time_eq(&decoded, expected) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Constant-time comparison so a malicious caller can't time the auth.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Minimal percent-decoder for the `?token=` parameter — enough for typical
+/// URL-safe tokens. Falls back to the raw input if decoding fails.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+}
+
 
 // `/` serves the terminal mirror — that's the primary, reliable 1-to-1
 // TUI display. The native UI is secondary at `/ui`.
@@ -211,4 +353,69 @@ fn js(s: &'static str) -> Response {
         ],
         s,
     ).into_response()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::Request;
+
+    fn build_req(headers: &[(&str, &str)], uri: &str) -> Request<axum::body::Body> {
+        let mut builder = Request::builder().uri(uri);
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn token_via_bearer_header() {
+        let req = build_req(&[("Authorization", "Bearer hunter2")], "/");
+        assert!(request_has_token(&req, "hunter2"));
+        assert!(!request_has_token(&req, "wrong"));
+    }
+
+    #[test]
+    fn token_via_cookie() {
+        let req = build_req(&[("Cookie", "foo=bar; orrch_token=hunter2; baz=qux")], "/");
+        assert!(request_has_token(&req, "hunter2"));
+        assert!(!request_has_token(&req, "wrong"));
+    }
+
+    #[test]
+    fn token_via_query_string() {
+        let req = build_req(&[], "/?foo=1&token=hunter2&bar=2");
+        assert!(request_has_token(&req, "hunter2"));
+        assert!(!request_has_token(&req, "wrong"));
+    }
+
+    #[test]
+    fn token_query_percent_decoded() {
+        // "%20" decodes to a space character
+        let req = build_req(&[], "/?token=hunter%20two");
+        assert!(request_has_token(&req, "hunter two"));
+    }
+
+    #[test]
+    fn no_token_anywhere_rejects() {
+        let req = build_req(&[], "/somepath");
+        assert!(!request_has_token(&req, "any"));
+    }
+
+    #[test]
+    fn constant_time_eq_handles_lengths() {
+        assert!(!constant_time_eq("a", "ab"));
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(is_loopback("127.0.0.1".parse().unwrap()));
+        assert!(is_loopback("127.0.0.5".parse().unwrap()));
+        assert!(is_loopback("::1".parse().unwrap()));
+        assert!(!is_loopback("192.168.1.1".parse().unwrap()));
+        assert!(!is_loopback("8.8.8.8".parse().unwrap()));
+    }
 }
