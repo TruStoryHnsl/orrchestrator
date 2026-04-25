@@ -100,6 +100,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             draw_project_detail(frame, app, layout[1], idx);
             draw_set_logo_path(frame, app);
         }
+        SubView::ExpandedSession(_) => {
+            // Routed through draw_panel_content's early-return so the
+            // expanded pane fills the panel-content area cleanly.
+            draw_panel_content(frame, app, layout[1]);
+        }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -163,6 +168,11 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Hypervise inline-expanded session view takes over the panel area.
+    if let crate::app::SubView::ExpandedSession(idx) = app.sub {
+        draw_expanded_session(frame, app, area, idx);
+        return;
+    }
     match app.panel {
         Panel::Design => draw_design(frame, app, area),
         Panel::Oversee => draw_projects(frame, app, area),
@@ -2854,6 +2864,71 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+/// Render the inline-expanded view of a single managed session. Captures
+/// the session's tmux pane (with ANSI color codes), parses it through the
+/// project's small ANSI-to-ratatui converter, and paints it into `area`.
+///
+/// Pane content is refreshed at most every 100ms — fast enough to feel
+/// live without burning CPU on pure capture-pane invocations every render
+/// tick. Also services the pending-Esc timeout: if the user pressed Esc
+/// once and the 500ms double-tap window has expired, the buffered Esc is
+/// forwarded to the session here.
+fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, idx: usize) {
+    use std::time::{Duration, Instant};
+    use orrch_core::windows::{capture_pane_ansi, send_raw_key};
+
+    const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+    const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(500);
+
+    // Refresh the pane snapshot if enough time has passed.
+    let now = Instant::now();
+    let needs_refresh = match app.expanded_pane_last_capture {
+        Some(t) => now.duration_since(t) >= REFRESH_INTERVAL,
+        None => true,
+    };
+
+    let session = app.managed_sessions.get(idx).cloned();
+    let Some(session) = session else {
+        // Session disappeared — exit expanded mode on next tick.
+        app.sub = crate::app::SubView::List;
+        return;
+    };
+
+    if needs_refresh {
+        // Pull last 200 scrollback lines so a tall terminal sees history.
+        app.expanded_pane_content = capture_pane_ansi(session.category, session.index, 200);
+        app.expanded_pane_last_capture = Some(now);
+    }
+
+    // Flush a stale pending Esc — if the user pressed Esc and never
+    // followed up, forward it to the session so vim/htop see it (with
+    // at most ~500ms latency).
+    if let Some(pressed_at) = app.expanded_pending_esc {
+        if now.duration_since(pressed_at) > ESC_DOUBLE_TAP_WINDOW {
+            send_raw_key(session.category, session.index, "Escape");
+            app.expanded_pending_esc = None;
+        }
+    }
+
+    let title = format!(
+        " ▣ {} [{}] — Esc Esc to collapse, every other key forwards ",
+        session.name,
+        session.status.label(),
+    );
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .style(Style::default().fg(TEXT_DIM));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = crate::ansi::parse(&app.expanded_pane_content);
+    let pane = Paragraph::new(lines)
+        .style(Style::default().bg(BG_DARK).fg(TEXT));
+    frame.render_widget(pane, inner);
+}
+
 fn draw_session_log_browser(frame: &mut Frame, app: &App, area: Rect) {
     if app.session_logs.is_empty() {
         let msg = Paragraph::new("No session logs found.\nSessions are logged to orrchestrator/.session-logs/ as they run.")
@@ -3679,6 +3754,37 @@ fn draw_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(line).style(Style::default().bg(BG_DARK)),
         area,
     );
+
+    // Tiny WebUI presence indicator on the right edge — clickable, no URL.
+    // The URL itself lives in the Esc menu now. The indicator's only job is
+    // to communicate "the WebUI is running" + provide a click target.
+    if app.webui_port.is_some() {
+        let glyph = " ⬡ ";
+        let glyph_width = unicode_display_width(glyph) as u16;
+        let badge_area = Rect {
+            x: area.x + area.width.saturating_sub(glyph_width),
+            y: area.y,
+            width: glyph_width.min(area.width),
+            height: 1,
+        };
+        app.webui_badge_area = Some(badge_area);
+        let badge = Paragraph::new(Line::from(Span::styled(
+            glyph,
+            Style::default()
+                .fg(Color::Rgb(0x1a, 0x1a, 0x2e))
+                .bg(Color::Rgb(0x4a, 0xaa, 0x99))
+                .add_modifier(Modifier::BOLD),
+        )));
+        frame.render_widget(badge, badge_area);
+    } else {
+        app.webui_badge_area = None;
+    }
+}
+
+/// Compute the on-screen display width of a string. Counts each Unicode
+/// scalar as 1 cell — adequate for the glyphs we use (BMP, no CJK).
+fn unicode_display_width(s: &str) -> usize {
+    s.chars().count()
 }
 
 /// Build a styled hint line with highlighted keys grouped by function.
@@ -3750,7 +3856,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 let has_sessions = !app.managed_sessions.is_empty();
                 if has_sessions {
                     hint_line(&[
-                        ("Enter", "focus"), ("i", "send input"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"), ("L", "logs"),
+                        ("Enter/→", "expand"), ("o", "external window"), ("i", "send line"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"), ("L", "logs"),
                     ])
                 } else {
                     hint_line(&[
@@ -3759,6 +3865,9 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 }
             }
         }
+        (_, SubView::ExpandedSession(_)) => hint_line(&[
+            ("Esc Esc", "collapse"), ("any other key", "→ session"),
+        ]),
         (_, SubView::SteerSession(_)) => hint_line(&[
             ("Enter", "send"), ("Esc", "cancel"),
         ]),

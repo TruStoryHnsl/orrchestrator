@@ -626,6 +626,65 @@ pub fn send_keys_to_session(cat: SessionCategory, window_index: u32, text: &str)
         .is_ok_and(|s| s.success())
 }
 
+/// Send a single keystroke (named tmux key like `Up`, `C-c`, `F5`, `Escape`)
+/// to a managed session's pane. Used by the Hypervise inline-expanded
+/// session view to forward individual keys without the trailing Enter
+/// that `send_keys_to_session` appends.
+///
+/// Recognizes a `LITERAL:<text>` prefix as a request to send the trailing
+/// text literally (via `send-keys -l`). This is how printable characters
+/// are forwarded — tmux otherwise interprets some printable characters
+/// (e.g. `~`, `[`) as escape codes.
+pub fn send_raw_key(cat: SessionCategory, window_index: u32, spec: &str) -> bool {
+    let target = format!("{}:{}", cat.tmux_name(), window_index);
+    if let Some(literal) = spec.strip_prefix("LITERAL:") {
+        return Command::new("tmux")
+            .args(["send-keys", "-l", "-t", &target, literal])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+    }
+    Command::new("tmux")
+        .args(["send-keys", "-t", &target, spec])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Capture the FULL visible pane of a managed session as ANSI-coded text.
+/// Used by the Hypervise inline-expanded view to render the pane
+/// faithfully (with colors via the `-e` flag).
+///
+/// `lines` controls how many lines of scrollback are included (in
+/// addition to the visible pane). Pass `0` for visible-only; pass
+/// e.g. `200` to get a couple of screens of history.
+pub fn capture_pane_ansi(cat: SessionCategory, window_index: u32, lines: u32) -> String {
+    let target = format!("{}:{}", cat.tmux_name(), window_index);
+    let start = if lines == 0 {
+        "0".to_string()
+    } else {
+        format!("-{lines}")
+    };
+    let output = Command::new("tmux")
+        .args([
+            "capture-pane",
+            "-t", &target,
+            "-e",       // include escape sequences (colors)
+            "-J",       // join wrapped lines
+            "-p",       // print to stdout instead of buffer
+            "-S", &start,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        _ => String::new(),
+    }
+}
+
 // ─── Kill All Managed Sessions ──────────────────────────────────────
 
 /// Kill all managed tmux sessions. Best-effort — logs failures but does not panic.

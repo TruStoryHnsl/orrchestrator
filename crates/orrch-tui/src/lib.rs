@@ -1,3 +1,4 @@
+pub mod ansi;
 pub mod app;
 pub mod brand;
 pub mod dashboard;
