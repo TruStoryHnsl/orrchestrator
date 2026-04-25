@@ -82,6 +82,23 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         serde_json::json!({
+            "name": "assess_development",
+            "description": "Load the assess_development operation file and return its content with dispatch preamble. On-demand audit reconciling claimed-complete plan items against actual code state (parallel audit by FT/Dev/Researcher, BT live exercise, PM reconciles PLAN.md, RM commits and merges).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project_dir": {
+                        "type": "string",
+                        "description": "Project directory to assess (defaults to current working directory)"
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of top user-facing claimed-complete features the Beta Tester should live-exercise (default 5)"
+                    }
+                }
+            }
+        }),
+        serde_json::json!({
             "name": "instruction_intake",
             "description": "Load the instruction-intake workflow skill with embedded instructions. Returns the skill content for the harness to execute. The skill writes its working state to the workspace directory provided (per-idea isolation prevents concurrent submissions from clobbering each other).",
             "inputSchema": {
@@ -461,6 +478,7 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "list_agents" => list_agents(server),
         "list_skills" => list_skills(server),
         "develop_feature" => develop_feature(server, args),
+        "assess_development" => assess_development(server, args),
         "instruction_intake" => instruction_intake(server, args),
         "workflow_status" => workflow_status(args),
         "project_state" => project_state(server, args),
@@ -692,6 +710,52 @@ fn develop_feature(_server: &OrrchMcpServer, args: &Value) -> String {
          - Files changed per task\n\
          - Any worktree paths/branches that contain the changes\n\
          - Which PLAN.md items to mark [x]"
+    )
+}
+
+fn assess_development(server: &OrrchMcpServer, args: &Value) -> String {
+    let project_dir = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let top_n = args
+        .get("top_n")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5);
+
+    let orrch_root = match server.library_dir.parent() {
+        Some(p) => p,
+        None => return "Error: cannot resolve orrchestrator root from library_dir".into(),
+    };
+    let op_path = orrch_root.join("operations/assess_development.md");
+    let op_content = match std::fs::read_to_string(&op_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read {}: {e}", op_path.display()),
+    };
+
+    format!(
+        "Assess-development workflow.\n\
+         Project: {project_dir}\n\
+         Top-N for live exercise (Beta Tester step 3): {top_n}\n\n\
+         The Hypervisor is a THIN DISPATCHER. Execute the operation step table\n\
+         below mechanically. Steps with the same index run in PARALLEL — spawn\n\
+         them in a single message with multiple Agent tool calls. Steps with\n\
+         increasing indices run sequentially; wait for all parallel agents in\n\
+         step N to return before starting step N+1.\n\n\
+         Each spawned agent receives:\n\
+         - Its agent profile (load via mcp `library_get` kind=agent or `agent_invoke`)\n\
+         - The skill named in the step (load via `library_get` kind=skill)\n\
+         - The project directory: {project_dir}\n\
+         - Outputs from prior steps it depends on (NOT outputs from sibling\n\
+           parallel verifiers — context isolation rule still applies)\n\n\
+         Do NOT:\n\
+         - Reorder steps\n\
+         - Skip the merge-to-main in step 7\n\
+         - Share verification outputs across parallel verifiers in step 2\n\
+         - Edit PLAN.md yourself (the PM does it in step 4)\n\n\
+         ---\n\n\
+         ## OPERATION FILE\n\n\
+         {op_content}"
     )
 }
 
