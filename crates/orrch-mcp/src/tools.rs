@@ -2452,8 +2452,9 @@ mod tests {
 
     #[test]
     fn test_tool_definitions_count() {
-        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools + continue_intake + incorporate_inbox = 27.
-        assert_eq!(tool_definitions().len(), 27);
+        // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools
+        // + continue_intake + incorporate_inbox + assess_development = 28.
+        assert_eq!(tool_definitions().len(), 28);
     }
 
     #[test]
