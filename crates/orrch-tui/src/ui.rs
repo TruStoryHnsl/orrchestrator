@@ -4038,13 +4038,19 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     ];
 
     // WebUI URL block — shown when the server is running. Local always
-    // appears; public only appears when TLS is configured.
+    // appears; the public TLS URL appears when TLS is configured, and the
+    // plaintext public HTTP URL appears when the secondary HTTP listener
+    // is enabled (e.g. `0.0.0.0:80` for `orrchestrator.com`).
     let local_url = app.webui_port.map(|p| format!("http://localhost:{p}"));
     let public_url = app.webui_public_url.clone();
+    let public_http_url = app.webui_public_http_url.clone();
     let mut url_lines = 0u16;
     if local_url.is_some() {
         url_lines += 2; // "WebUI:" header + local line
         if public_url.is_some() {
+            url_lines += 1;
+        }
+        if public_http_url.is_some() {
             url_lines += 1;
         }
         url_lines += 1; // spacer
@@ -4072,6 +4078,12 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
             lines.push(Line::from(vec![
                 Span::styled("  public ", Style::default().fg(TEXT_DIM)),
                 Span::styled(public.clone(), Style::default().fg(ACCENT)),
+            ]));
+        }
+        if let Some(http_public) = &public_http_url {
+            lines.push(Line::from(vec![
+                Span::styled("  http   ", Style::default().fg(TEXT_DIM)),
+                Span::styled(http_public.clone(), Style::default().fg(ACCENT)),
             ]));
         }
         lines.push(Line::raw(""));
