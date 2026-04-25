@@ -106,10 +106,14 @@ async fn main() -> Result<()> {
         Ok(srv) => {
             app.webui_port = Some(srv.port);
             app.webui_public_url = srv.public_url.clone();
+            app.webui_public_http_url = srv.public_http_url.clone();
             app.webui_token = srv.auth_token.clone();
             tracing::info!("WebUI available at http://localhost:{}", srv.port);
             if let Some(url) = &srv.public_url {
                 tracing::info!("WebUI public URL: {url}");
+            }
+            if let Some(url) = &srv.public_http_url {
+                tracing::info!("WebUI public HTTP URL: {url}");
             }
             Some(srv)
         }

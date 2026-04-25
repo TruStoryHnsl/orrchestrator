@@ -905,6 +905,13 @@ pub struct App {
     /// localhost URL. None when TLS is not configured.
     pub webui_public_url: Option<String>,
 
+    /// Plaintext public HTTP URL (e.g. `http://0.0.0.0:80`) when the
+    /// secondary public HTTP listener is enabled via
+    /// `ORRCH_WEBUI_PUBLIC_HTTP_PORT`. Independent of `webui_public_url` —
+    /// both can be present when TLS is layered on top of plaintext. Shown
+    /// as a third URL row in the Esc menu.
+    pub webui_public_http_url: Option<String>,
+
     /// Auth token required by non-localhost WebUI clients, when configured.
     /// Used to construct the bookmarkable login URL shown in the Esc menu.
     pub webui_token: Option<String>,
@@ -1147,6 +1154,7 @@ impl App {
             session_log_scroll: 0,
             webui_port: None,
             webui_public_url: None,
+            webui_public_http_url: None,
             webui_token: None,
             webui_badge_area: None,
             expanded_pane_content: String::new(),
