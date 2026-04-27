@@ -14,6 +14,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::assets;
+use crate::shell::ShellBridge;
 use crate::state::{state_hash, WebAction, WebAppState};
 
 #[derive(Clone)]
@@ -38,6 +39,10 @@ pub struct ServerState {
     /// (`127.0.0.0/8`, `::1`) is always trusted; this list extends it.
     /// Typical use: `100.64.0.0/10` to trust a Tailscale tailnet.
     pub trusted_cidrs: Vec<Cidr>,
+    /// Independent tmux-session bridge for the WebUI's swipe Page 2.
+    /// Each WS client to `/shell` subscribes to its broadcast and forwards
+    /// keystrokes back via `tmux send-keys`.
+    pub shell: ShellBridge,
 }
 
 /// A simple IPv4-or-IPv6 CIDR, parsed from `1.2.3.4/24` or `2001:db8::/32`.
@@ -126,8 +131,11 @@ pub fn build_router(srv: ServerState) -> Router {
         .route("/static/js/intentions.js", get(serve_intentions_js))
         .route("/static/js/sessions.js", get(serve_sessions_js))
         .route("/static/js/mobile.js", get(serve_mobile_js))
+        .route("/static/js/shell.js", get(serve_shell_js))
         .route("/pty", get(terminal_ws))
         .route("/state", get(state_ws))
+        .route("/shell", get(shell_ws))
+        .route("/shell/size", get(get_shell_size))
         .route("/size", get(get_size))
         .route("/action", post(handle_action))
         .layer(middleware::from_fn(move |req, next| {
@@ -285,6 +293,7 @@ async fn serve_layout_js() -> impl IntoResponse { js(assets::LAYOUT_JS) }
 async fn serve_intentions_js() -> impl IntoResponse { js(assets::INTENTIONS_JS) }
 async fn serve_sessions_js() -> impl IntoResponse { js(assets::SESSIONS_JS) }
 async fn serve_mobile_js() -> impl IntoResponse { js(assets::MOBILE_JS) }
+async fn serve_shell_js() -> impl IntoResponse { js(assets::SHELL_JS) }
 
 /// Terminal WebSocket: streams TUI output (broadcast bytes) to the client
 /// and receives keystrokes back.
@@ -387,6 +396,83 @@ async fn state_ws_handler(mut socket: WebSocket, srv: ServerState) {
             }
         }
     }
+}
+
+/// Shell-page WebSocket: an independent tmux session (Page 2 of the
+/// swipe UI). Subscribes the client to `srv.shell.tx` for outbound pane
+/// frames and forwards inbound binary messages as keystrokes via
+/// `tmux send-keys`. The poller is started lazily on first connect.
+async fn shell_ws(ws: WebSocketUpgrade, State(srv): State<ServerState>) -> Response {
+    ws.on_upgrade(move |socket| shell_ws_handler(socket, srv))
+}
+
+async fn shell_ws_handler(socket: WebSocket, srv: ServerState) {
+    // Make sure the tmux session exists and the poller is running.
+    srv.shell.ensure_session();
+    srv.shell.ensure_poller();
+
+    let (mut ws_sink, mut ws_stream) = socket.split();
+    let mut term_rx = srv.shell.tx.subscribe();
+    let session_name = srv.shell.session_name.clone();
+    let shell_for_input = srv.shell.clone();
+
+    tracing::info!(
+        "Shell WS client connected — session={} ({} total receivers)",
+        session_name,
+        srv.shell.tx.receiver_count()
+    );
+
+    // Send an immediate snapshot so a fresh client isn't blank until the
+    // pane next changes. We render via the same clear+home prefix the
+    // poller uses so xterm parses a clean frame.
+    if let Some(snapshot) = crate::shell::initial_snapshot(&session_name) {
+        let _ = ws_sink.send(Message::Binary(snapshot.into())).await;
+    }
+
+    // Outbound: pane diffs broadcast → WebSocket
+    let send_task = tokio::spawn(async move {
+        loop {
+            match term_rx.recv().await {
+                Ok(chunk) => {
+                    if ws_sink.send(Message::Binary(chunk.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
+    // Inbound: WebSocket keystrokes → tmux send-keys.
+    let recv_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = ws_stream.next().await {
+            match msg {
+                Message::Binary(bytes) => shell_for_input.send_input(&bytes),
+                Message::Text(text) => shell_for_input.send_input(text.as_bytes()),
+                Message::Close(_) => break,
+                _ => {}
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = send_task => {}
+        _ = recv_task => {}
+    }
+}
+
+async fn get_shell_size(State(srv): State<ServerState>) -> impl IntoResponse {
+    srv.shell.ensure_session();
+    let (cols, rows) = srv.shell.pane_size();
+    let body = serde_json::json!({ "cols": cols, "rows": rows });
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body.to_string(),
+    ).into_response()
 }
 
 async fn get_size(State(srv): State<ServerState>) -> impl IntoResponse {

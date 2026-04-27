@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod server;
+pub mod shell;
 pub mod state;
 pub mod tee;
 
@@ -269,6 +270,7 @@ impl WebUiServer {
         let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
         let redraw_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shell_bridge = shell::ShellBridge::from_env();
         let srv = ServerState {
             state_rx: Arc::new(state_rx),
             action_queue: Arc::clone(&action_queue),
@@ -277,6 +279,7 @@ impl WebUiServer {
             redraw_flag: Arc::clone(&redraw_flag),
             auth_token: cfg.auth_token.clone(),
             trusted_cidrs: cfg.trusted_cidrs.clone(),
+            shell: shell_bridge,
         };
         let router = build_router(srv);
 
