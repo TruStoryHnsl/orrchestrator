@@ -7,3 +7,4 @@ pub const LAYOUT_JS: &str = include_str!("../static/js/layout.js");
 pub const INTENTIONS_JS: &str = include_str!("../static/js/intentions.js");
 pub const SESSIONS_JS: &str = include_str!("../static/js/sessions.js");
 pub const MOBILE_JS: &str = include_str!("../static/js/mobile.js");
+pub const SHELL_JS: &str = include_str!("../static/js/shell.js");
