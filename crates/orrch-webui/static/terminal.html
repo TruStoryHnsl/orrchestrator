@@ -7,13 +7,27 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>orrchestrator</title>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
 <style>
+:root {
+  /* Single source of truth for the terminal's cell size. xterm.js
+     measures the canvas char-cell from the computed font-size on its
+     container, then FitAddon divides the container's pixel box by that
+     to compute cols × rows. Mobile breakpoint scales DOWN so a 390px
+     viewport still gets a usable column count. */
+  --term-font-size: 13px;
+  --term-font-family: "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+  --topbar-height: 44px;
+}
+@media (max-width: 480px) {
+  :root { --term-font-size: 12px; }
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   width: 100%; max-width: 100%;
   height: 100%; background: #050d18; color: #8fbfff;
-  font-family: monospace; overscroll-behavior: none;
+  font-family: var(--term-font-family); overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
   overflow: hidden;
 }
@@ -23,32 +37,46 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 #topbar {
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  gap: 12px; padding: 6px 8px;
+  gap: 8px; padding: 4px 6px;
   background: rgba(5,13,24,0.95);
   border-bottom: 1px solid rgba(26,58,90,0.5);
-  height: 30px;
+  height: var(--topbar-height);
   user-select: none; -webkit-user-select: none;
 }
 #topbar .label {
-  color: #556; font-size: 11px;
+  color: #8fbfff; font-size: 12px;
+  flex: 0 1 auto; text-align: center;
+  min-width: 80px;
 }
-#topbar .dots { display: flex; gap: 8px; }
+#topbar .dots { display: flex; gap: 4px; }
+/* The visible dot is small but the hit-target is 44×44 so it's tap-
+   friendly on phones. We do this by giving each dot a ::before that
+   draws the actual circle while the button itself has no fill. */
 #topbar .dot {
+  position: relative;
+  width: 44px; height: 44px;
+  background: transparent; border: none;
+  cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+#topbar .dot::before {
+  content: "";
   width: 10px; height: 10px; border-radius: 50%;
   background: rgba(26,58,90,0.6);
   border: 1px solid rgba(42,90,138,0.6);
-  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
 }
-#topbar .dot.active {
+#topbar .dot.active::before {
   background: #4af; border-color: #8fbfff;
 }
 #topbar .nav-btn {
   background: rgba(15,42,58,0.9);
   border: 1px solid rgba(26,74,106,0.7);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #8fbfff;
-  font: 11px monospace;
-  padding: 3px 10px;
+  font: 13px var(--term-font-family);
+  min-width: 44px; min-height: 36px;
+  padding: 4px 12px;
   cursor: pointer;
 }
 #topbar .nav-btn:active { background: rgba(30,60,90,0.95); }
@@ -72,11 +100,18 @@ body { display: flex; flex-direction: column; height: 100dvh; }
   position: relative;
   overflow: hidden;
 }
+/* Both terminal hosts fill their panel's body box completely. xterm.js
+   sizes its canvas to whatever this box reports via FitAddon; if it
+   ever falls back to a fixed cols/rows, we still want the host element
+   to occupy the full visible area so there are no big black voids. */
 .panel-body { width: 100%; height: 100%; position: relative; }
 .panel-body > .term {
-  position: absolute; top: 0; left: 0;
-  transform-origin: top left;
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 100%;
 }
+.term .xterm { height: 100%; width: 100%; }
+.xterm-viewport { background: #050d18 !important; }
 
 /* ── Mobile gamepad (shared between both pages) ──────────────────── */
 .pad {
@@ -91,14 +126,15 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 .pad .hint {
   flex: 1 1 0; min-width: 0;
   background: rgba(15,42,58,0.9); border: 1px solid rgba(26,74,106,0.7);
-  border-radius: 4px; color: #8fbfff; font: 11px monospace;
+  border-radius: 4px; color: #8fbfff;
+  font: 11px var(--term-font-family);
   text-align: center; padding: 8px 2px;
 }
 .pad .hint:active { background: rgba(30,60,90,0.95); }
 .pad .row { display: flex; gap: 8px; align-items: flex-end; width: 100%; }
 .pad .actions { display: flex; flex-direction: column; gap: 5px; width: 90px; flex-shrink: 0; }
 .pad .actions-top { display: flex; gap: 5px; }
-.pad .btn { flex: 1; border-radius: 5px; font: 12px monospace; text-align: center; padding: 10px 2px; border: 1px solid; }
+.pad .btn { flex: 1; border-radius: 5px; font: 12px var(--term-font-family); text-align: center; padding: 10px 2px; border: 1px solid; }
 .pad .btn:active { filter: brightness(1.3); }
 .btn-tab   { background: rgba(26,58,42,0.9); border-color: rgba(42,106,74,0.8); color: #4a9; }
 .btn-esc   { background: rgba(42,26,26,0.9); border-color: rgba(90,42,42,0.8); color: #c75; }
@@ -114,7 +150,6 @@ body { display: flex; flex-direction: column; height: 100dvh; }
   .pad .dpad { width: 96px; height: 96px; }
   .pad .actions { width: 80px; }
 }
-.xterm-viewport { background: #050d18 !important; }
 </style>
 </head>
 <body>
@@ -123,8 +158,8 @@ body { display: flex; flex-direction: column; height: 100dvh; }
   <button class="nav-btn" id="prev-page" aria-label="previous page">&#8592;</button>
   <span class="label" id="page-label">orrchestrator</span>
   <div class="dots">
-    <div class="dot active" data-page="0" title="orrchestrator TUI"></div>
-    <div class="dot" data-page="1" title="shell"></div>
+    <button class="dot active" data-page="0" title="orrchestrator TUI" aria-label="orrchestrator TUI"></button>
+    <button class="dot" data-page="1" title="shell" aria-label="shell"></button>
   </div>
   <button class="nav-btn" id="next-page" aria-label="next page">&#8594;</button>
 </div>
@@ -175,18 +210,45 @@ body { display: flex; flex-direction: column; height: 100dvh; }
 <script src="/static/js/shell.js"></script>
 <script>
 // ── Mirror page (existing /pty + xterm logic) ─────────────────────
+//
+// The orrchestrator binary's ratatui frame is rendered at whatever
+// dims the local stdout terminal reports (`crossterm::terminal::size`).
+// We can't physically force the binary to re-render at the browser's
+// dimensions — its tty is a real terminal we don't own. So:
+//
+//   * We size xterm.js to the cols × rows the server reports via
+//     /size (mirror dims) on connect.
+//   * We use xterm-addon-fit purely to recompute character cell size
+//     for the CURRENT viewport (so font-size + container box match
+//     up cleanly). We do NOT auto-resize the xterm grid — its cols ×
+//     rows must equal the upstream ratatui frame so cells line up.
+//   * When the ratatui frame's reported dims change (the operator
+//     resizes their terminal), the /state push includes term_cols /
+//     term_rows and we re-call term.resize(c, r).
+//
+// In practice this means: on a phone the ratatui frame is rendered at
+// the desktop tty's size (e.g. 200×50) and xterm.js displays it; the
+// browser viewport just shows a scaled / cropped view. That's the
+// honest behavior; faking it would require a separate render path.
 var term = null;
+var mirrorFit = null;
 
 function openMirrorTerminal(cols, rows) {
+  var fontSize = parseInt(getCSSVar('--term-font-size'), 10) || 13;
   term = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    fontSize: fontSize,
+    fontFamily: getCSSVar('--term-font-family') || 'monospace',
     cols: cols, rows: rows,
     theme: { background: '#050d18', foreground: '#8fbfff', cursor: '#4af' },
-    scrollback: 0
+    scrollback: 0,
+    allowProposedApi: true
   });
   term.open(document.getElementById('terminal'));
-  setTimeout(rescaleMirror, 50);
+  try {
+    mirrorFit = new FitAddon.FitAddon();
+    term.loadAddon(mirrorFit);
+  } catch (e) { /* fit addon optional */ }
   openMirrorWS();
   openStateWS();
 }
@@ -201,7 +263,6 @@ function openStateWS() {
       var c = s.term_cols | 0, r = s.term_rows | 0;
       if (c > 0 && r > 0 && (c !== term.cols || r !== term.rows)) {
         term.resize(c, r);
-        setTimeout(rescaleMirror, 10);
       }
     } catch (_) {}
   };
@@ -213,21 +274,10 @@ fetch('/size').then(function(r) { return r.json(); }).then(function(s) {
   var cols = s.cols && s.cols > 0 ? s.cols : 80;
   var rows = s.rows && s.rows > 0 ? s.rows : 24;
   openMirrorTerminal(cols, rows);
-}).catch(function() { openMirrorTerminal(120, 40); });
+}).catch(function() { openMirrorTerminal(80, 24); });
 
-function rescaleMirror() {
-  var wrap = document.querySelector('#panel-mirror .panel-body');
-  var el = document.getElementById('terminal');
-  if (!wrap || !el) return;
-  el.style.transform = 'none';
-  var natW = el.offsetWidth || 1;
-  var natH = el.offsetHeight || 1;
-  var availW = wrap.clientWidth;
-  var availH = wrap.clientHeight;
-  var sx = availW / natW;
-  var sy = availH / natH;
-  var scale = Math.min(sx, sy, 1);
-  el.style.transform = 'scale(' + scale + ')';
+function getCSSVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 var mirrorWs = null;
@@ -348,18 +398,22 @@ document.querySelectorAll('[data-key]').forEach(function(el) {
 });
 
 // ── Resize handling ───────────────────────────────────────────────
-window.addEventListener('resize', function() {
-  rescaleMirror();
-  Shell.rescale();
-  // Re-snap after resize so the active page stays in view.
-  scrollToPage(activePage);
-});
-window.addEventListener('orientationchange', function() {
-  setTimeout(function() {
-    rescaleMirror();
+//
+// The shell page owns its tmux pane size (it pushes resize ctrl frames
+// over /shell). The mirror page does NOT — its grid is dictated by the
+// upstream ratatui frame. So we just re-snap the swipe scroll position
+// on resize and let Shell.rescale handle pane sizing.
+var resizeTimer = null;
+function onResize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function() {
     Shell.rescale();
     scrollToPage(activePage);
-  }, 200);
+  }, 100);
+}
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', function() {
+  setTimeout(onResize, 200);
 });
 
 // Default page: 0 (orrchestrator mirror).

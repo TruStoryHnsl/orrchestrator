@@ -136,6 +136,7 @@ pub fn build_router(srv: ServerState) -> Router {
         .route("/state", get(state_ws))
         .route("/shell", get(shell_ws))
         .route("/shell/size", get(get_shell_size))
+        .route("/shell/resize", post(post_shell_resize))
         .route("/size", get(get_size))
         .route("/action", post(handle_action))
         .layer(middleware::from_fn(move |req, next| {
@@ -444,12 +445,22 @@ async fn shell_ws_handler(socket: WebSocket, srv: ServerState) {
         }
     });
 
-    // Inbound: WebSocket keystrokes → tmux send-keys.
+    // Inbound: WebSocket frames. Binary = raw keystrokes (the original
+    // path; xterm.js's `term.onData` emits Uint8Array bytes). Text =
+    // JSON control frames — we currently understand:
+    //   {"type":"resize","cols":N,"rows":N} → drives tmux pane size
+    //   {"type":"input","data":"..."}       → printable input (rare)
+    // Anything that doesn't parse as a control frame is treated as raw
+    // keystroke bytes for backwards compatibility.
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_stream.next().await {
             match msg {
                 Message::Binary(bytes) => shell_for_input.send_input(&bytes),
-                Message::Text(text) => shell_for_input.send_input(text.as_bytes()),
+                Message::Text(text) => {
+                    if !try_handle_shell_control(&shell_for_input, text.as_str()) {
+                        shell_for_input.send_input(text.as_bytes());
+                    }
+                }
                 Message::Close(_) => break,
                 _ => {}
             }
@@ -462,10 +473,79 @@ async fn shell_ws_handler(socket: WebSocket, srv: ServerState) {
     }
 }
 
+/// Try to interpret `text` as a JSON control frame for the shell WS.
+/// Returns `true` when a frame was recognized and acted on; `false` when
+/// the caller should fall back to treating the bytes as raw input.
+fn try_handle_shell_control(shell: &ShellBridge, text: &str) -> bool {
+    let trimmed = text.trim();
+    if !trimmed.starts_with('{') {
+        return false;
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return false;
+    };
+    let Some(kind) = v.get("type").and_then(|x| x.as_str()) else {
+        return false;
+    };
+    match kind {
+        "resize" => {
+            let cols = v.get("cols").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            let rows = v.get("rows").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+            if cols > 0 && rows > 0 {
+                let ok = shell.resize(cols, rows);
+                tracing::debug!("shell WS resize {cols}x{rows} → {ok}");
+            }
+            true
+        }
+        "input" => {
+            // Optional path for clients that prefer to send input as JSON
+            // (e.g. paste of large text). `data` is the raw string to
+            // forward verbatim — no base64 here, the WS frame itself
+            // handles UTF-8 transport.
+            if let Some(data) = v.get("data").and_then(|x| x.as_str()) {
+                shell.send_input(data.as_bytes());
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 async fn get_shell_size(State(srv): State<ServerState>) -> impl IntoResponse {
     srv.shell.ensure_session();
     let (cols, rows) = srv.shell.pane_size();
     let body = serde_json::json!({ "cols": cols, "rows": rows });
+    (
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body.to_string(),
+    ).into_response()
+}
+
+/// `POST /shell/resize` body: `{"cols": N, "rows": N}`.
+///
+/// Non-WebSocket way to drive the same resize that the WS control frame
+/// `{"type":"resize",...}` triggers. Useful for curl smoke tests and
+/// for clients that haven't opened the WS yet.
+async fn post_shell_resize(
+    State(srv): State<ServerState>,
+    Json(body): Json<Value>,
+) -> impl IntoResponse {
+    srv.shell.ensure_session();
+    let cols = body.get("cols").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    let rows = body.get("rows").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+    if cols == 0 || rows == 0 {
+        return (StatusCode::BAD_REQUEST, "cols and rows must be > 0").into_response();
+    }
+    let ok = srv.shell.resize(cols, rows);
+    let (cols_after, rows_after) = srv.shell.pane_size();
+    let body = serde_json::json!({
+        "ok": ok,
+        "cols": cols_after,
+        "rows": rows_after,
+    });
     (
         [
             (header::CONTENT_TYPE, "application/json"),

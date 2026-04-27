@@ -99,6 +99,15 @@ impl ShellBridge {
     pub fn send_input(&self, bytes: &[u8]) {
         send_input(&self.session_name, bytes);
     }
+
+    /// Resize the underlying tmux window to `cols × rows`. The client
+    /// computes these from the actual rendered xterm.js viewport on
+    /// connect / orientation change / window resize and pushes them
+    /// over the WebSocket as a JSON control message. Values are clamped
+    /// to a sane range inside `resize_session`.
+    pub fn resize(&self, cols: u32, rows: u32) -> bool {
+        resize_session(&self.session_name, cols, rows)
+    }
 }
 
 /// One-shot capture for new WS clients. Returns a clear-screen-prefixed
@@ -128,10 +137,13 @@ fn ensure_tmux_session(name: &str) -> bool {
     if tmux_has_session(name) {
         return true;
     }
-    // Create detached. Default size 200×50 — tmux will resize to fit
-    // whatever client attaches; the WebUI just renders the pane bytes.
+    // Create detached. Default 80×24 — the WebUI's xterm.js client will
+    // immediately drive a resize to its actual viewport dims, so this is
+    // just a placeholder. We deliberately don't set 200×50 anymore: that
+    // value used to leak through when a client failed to send a resize,
+    // smearing content across an unscrollable horizontal axis on phones.
     let ok = Command::new("tmux")
-        .args(["new-session", "-d", "-s", name, "-x", "200", "-y", "50"])
+        .args(["new-session", "-d", "-s", name, "-x", "80", "-y", "24"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -139,8 +151,42 @@ fn ensure_tmux_session(name: &str) -> bool {
         .unwrap_or(false);
     if !ok {
         tracing::warn!("failed to create tmux session {name}");
+        return false;
     }
+    // Disable the status line so pane_height == window_height. The `-g`
+    // matters: tmux reserves a row for the status line based on the
+    // GLOBAL option even when the per-session option is off, so we need
+    // both. (Quick repro: `set-option -t S status off; resize-window -y
+    // 17` gives pane height 16, but `set-option -g status off` then the
+    // same resize gives 17.) We scope it to this server-tmux instance,
+    // which is fine — the orrch-web-shell session has no status line
+    // role anyway.
+    let _ = Command::new("tmux")
+        .args(["set-option", "-g", "-t", name, "status", "off"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
     ok
+}
+
+/// Resize the tmux window backing `name` to `cols × rows`. Values are
+/// clamped to a sensible range so a malicious / buggy client can't ask
+/// tmux for a 100k-column pane. Returns `true` on success.
+fn resize_session(name: &str, cols: u32, rows: u32) -> bool {
+    let cols = cols.clamp(1, 500);
+    let rows = rows.clamp(1, 200);
+    Command::new("tmux")
+        .args([
+            "resize-window",
+            "-t", name,
+            "-x", &cols.to_string(),
+            "-y", &rows.to_string(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn capture_pane(name: &str) -> Option<Vec<u8>> {
