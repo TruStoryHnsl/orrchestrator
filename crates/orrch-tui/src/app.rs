@@ -22,6 +22,7 @@ use crate::editor::{VimKind, VimRequest, PendingEditor};
 /// pure modifier presses). Modifiers map to tmux's `C-`, `M-`, `S-`
 /// prefixes — `S-` is omitted for letter keys because the uppercase form
 /// already carries the shift meaning.
+#[allow(dead_code)] // retained for future raw-key forwarding paths; covered by unit tests below.
 fn key_to_tmux_spec(code: KeyCode, mods: KeyModifiers) -> Option<String> {
     let ctrl = mods.contains(KeyModifiers::CONTROL);
     let alt = mods.contains(KeyModifiers::ALT);
@@ -63,6 +64,7 @@ fn key_to_tmux_spec(code: KeyCode, mods: KeyModifiers) -> Option<String> {
     Some(format_key_spec(&base, ctrl, alt, shift))
 }
 
+#[allow(dead_code)] // helper for `key_to_tmux_spec`; kept paired with it.
 fn format_key_spec(base: &str, ctrl: bool, alt: bool, shift: bool) -> String {
     let mut prefix = String::new();
     if ctrl { prefix.push_str("C-"); }
@@ -315,7 +317,7 @@ pub enum SubView {
     /// Hypervise expanded view — fills the panel with a single session's
     /// live tmux pane and forwards every keypress to the session via
     /// `tmux send-keys`. Carries the flat session index.
-    ExpandedSession(usize),
+    ExpandedSession(String),
     /// VIS-001: per-scope project visibility toggle popup. Esc closes,
     /// ↑/↓ navigates, Enter/Space toggles the highlighted scope.
     ScopeVisibility,
@@ -2063,12 +2065,17 @@ impl App {
             return Ok(());
         }
 
-        // Hypervise expanded view: every key (including modifiers) routes
-        // straight to `tmux send-keys` for the active session. Handled before
-        // any global key remapping (j/k aliases, Esc-opens-menu, etc) so the
-        // session receives keys verbatim.
-        if let SubView::ExpandedSession(idx) = self.sub {
-            return self.handle_expanded_session_key(code, modifiers, idx);
+        // Hypervise expanded full-screen view: keys go to the prompt buffer
+        // by default, with double-Left to exit. Handled before any global
+        // key remapping (j/k aliases, Esc-opens-menu, etc) so typed
+        // characters reach the buffer verbatim.
+        if matches!(self.sub, SubView::ExpandedSession(_)) {
+            let name = if let SubView::ExpandedSession(ref n) = self.sub {
+                n.clone()
+            } else {
+                String::new()
+            };
+            return self.handle_expanded_session_key(code, modifiers, name);
         }
 
         // Global Esc: from List views opens app menu, from app menu closes it
@@ -6036,10 +6043,9 @@ KeyCode::Char('i') => {
                     }
                 }
             }
-            KeyCode::Enter => {
-                // On the prompt row → activate inline input. On a session
-                // header → toggle inline expand. The deeper full-screen
-                // view is bound to `Right` (or `O`) below.
+            KeyCode::Right => {
+                // Right toggles inline expand (or, when on the prompt row,
+                // opens the prompt input — same as Enter on the prompt row).
                 if self.session_focus_prompt {
                     self.session_prompt_active = true;
                     self.session_prompt_buffer.clear();
@@ -6054,17 +6060,23 @@ KeyCode::Char('i') => {
                     }
                 }
             }
-            KeyCode::Right | KeyCode::Char('O') => {
-                // Open the one-level-deeper full-screen view of the
-                // selected session. Live-refreshed and forwards every
-                // keystroke to the pane (existing ExpandedSession path).
-                if !self.managed_sessions.is_empty()
-                    && self.session_tab_selected < self.managed_sessions.len()
-                {
+            KeyCode::Enter => {
+                // Enter on the prompt row → activate inline input.
+                // Enter on a session header → open the one-level-deeper
+                // full-screen view (the only path into ExpandedSession).
+                if self.session_focus_prompt {
+                    self.session_prompt_active = true;
+                    self.session_prompt_buffer.clear();
+                    self.session_prompt_caret = 0;
+                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
                     self.expanded_pane_content.clear();
                     self.expanded_pane_last_capture = None;
                     self.expanded_pending_esc = None;
-                    self.sub = SubView::ExpandedSession(self.session_tab_selected);
+                    self.session_prompt_active = false;
+                    self.session_prompt_buffer.clear();
+                    self.session_prompt_caret = 0;
+                    self.sub = SubView::ExpandedSession(name);
                 }
             }
             KeyCode::Char('p') => {
@@ -6204,13 +6216,16 @@ KeyCode::Char('i') => {
     fn handle_expanded_session_key(
         &mut self,
         code: KeyCode,
-        modifiers: KeyModifiers,
-        idx: usize,
+        _modifiers: KeyModifiers,
+        name: String,
     ) -> Result<()> {
         use std::time::{Duration, Instant};
+        const LEFT_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(500);
 
-        // Resolve target session once. If gone, drop back to the list.
-        let Some(s) = self.managed_sessions.get(idx) else {
+        // Resolve target session by NAME (not index — the index can shift
+        // when sessions are added or removed). If it's gone, drop back to
+        // the list cleanly.
+        let Some(s) = self.managed_sessions.iter().find(|s| s.name == name) else {
             self.expanded_pending_esc = None;
             self.sub = SubView::List;
             return Ok(());
@@ -6218,40 +6233,87 @@ KeyCode::Char('i') => {
         let cat = s.category;
         let win = s.index;
 
-        const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(500);
-
-        if code == KeyCode::Esc {
+        // Double-Left within 500ms exits the focused view back to the
+        // Hypervise list. Single Left moves the prompt-buffer caret.
+        if code == KeyCode::Left {
             let now = Instant::now();
             if let Some(prev) = self.expanded_pending_esc {
-                if now.duration_since(prev) <= ESC_DOUBLE_TAP_WINDOW {
-                    // Second Esc within the window — exit expanded mode.
-                    // The first Esc was deliberately NOT forwarded; if the
-                    // user meant to send Esc to the pane they wait out the
-                    // window and tap once more (handled below).
+                if now.duration_since(prev) <= LEFT_DOUBLE_TAP_WINDOW {
                     self.expanded_pending_esc = None;
+                    self.session_prompt_buffer.clear();
+                    self.session_prompt_caret = 0;
                     self.sub = SubView::List;
                     return Ok(());
                 }
             }
-            // First Esc — start the window. Do not forward yet; if no second
-            // Esc arrives within the window, we'll flush it on the next
-            // capture-pane tick (see draw_expanded_session) so vim still gets
-            // its Esc with at most a 500ms delay.
             self.expanded_pending_esc = Some(now);
+            // Also do the caret move — the second-Left exit takes
+            // precedence above; if the user only single-taps, the caret
+            // moves and we reset the timer on the next non-Left.
+            if self.session_prompt_caret > 0 {
+                self.session_prompt_caret -= 1;
+            }
             return Ok(());
         }
 
-        // Any non-Esc key cancels a pending double-Esc and forwards both
-        // the buffered Esc (if still within the window) and the new key.
-        if let Some(_prev) = self.expanded_pending_esc.take() {
-            // Always flush the buffered Esc — the user clearly didn't want
-            // to exit (they typed something else). Forwarding Esc first
-            // preserves the order the user typed.
-            orrch_core::windows::send_raw_key(cat, win, "Escape");
-        }
+        // Any non-Left key cancels a pending double-Left.
+        self.expanded_pending_esc = None;
 
-        if let Some(spec) = key_to_tmux_spec(code, modifiers) {
-            orrch_core::windows::send_raw_key(cat, win, &spec);
+        match code {
+            KeyCode::Char(c) => {
+                let byte_pos = self
+                    .session_prompt_buffer
+                    .char_indices()
+                    .nth(self.session_prompt_caret)
+                    .map(|(b, _)| b)
+                    .unwrap_or(self.session_prompt_buffer.len());
+                self.session_prompt_buffer.insert(byte_pos, c);
+                self.session_prompt_caret += 1;
+            }
+            KeyCode::Backspace => {
+                if self.session_prompt_caret > 0 {
+                    self.session_prompt_caret -= 1;
+                    let start = self
+                        .session_prompt_buffer
+                        .char_indices()
+                        .nth(self.session_prompt_caret)
+                        .map(|(b, _)| b)
+                        .unwrap_or(0);
+                    let end = self
+                        .session_prompt_buffer
+                        .char_indices()
+                        .nth(self.session_prompt_caret + 1)
+                        .map(|(b, _)| b)
+                        .unwrap_or(self.session_prompt_buffer.len());
+                    self.session_prompt_buffer.replace_range(start..end, "");
+                }
+            }
+            KeyCode::Right => {
+                let len = self.session_prompt_buffer.chars().count();
+                if self.session_prompt_caret < len {
+                    self.session_prompt_caret += 1;
+                }
+            }
+            KeyCode::Home => self.session_prompt_caret = 0,
+            KeyCode::End => self.session_prompt_caret = self.session_prompt_buffer.chars().count(),
+            KeyCode::Enter => {
+                let buf = std::mem::take(&mut self.session_prompt_buffer);
+                self.session_prompt_caret = 0;
+                if !buf.is_empty() {
+                    let sent = orrch_core::windows::send_keys_to_session(cat, win, &buf);
+                    if sent {
+                        self.notify(format!("→ {name}: sent {} chars", buf.len()));
+                    } else {
+                        self.notify(format!("→ {name}: tmux send-keys failed"));
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                // Esc clears the prompt buffer (does NOT exit — that's Left Left).
+                self.session_prompt_buffer.clear();
+                self.session_prompt_caret = 0;
+            }
+            _ => {}
         }
         Ok(())
     }
