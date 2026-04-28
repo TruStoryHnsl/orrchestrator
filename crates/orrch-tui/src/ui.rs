@@ -172,9 +172,14 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Hypervise inline-expanded session view takes over the panel area.
-    if let crate::app::SubView::ExpandedSession(idx) = app.sub {
-        draw_expanded_session(frame, app, area, idx);
+    // Hypervise focused single-session view takes over the panel area.
+    if matches!(app.sub, crate::app::SubView::ExpandedSession(_)) {
+        let name = if let crate::app::SubView::ExpandedSession(ref n) = app.sub {
+            n.clone()
+        } else {
+            String::new()
+        };
+        draw_expanded_session(frame, app, area, &name);
         return;
     }
     match app.panel {
@@ -2712,8 +2717,9 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Pre-compute inline-expand previews up front so the render loop can
     // hold an immutable iter over `managed_sessions` without conflicting
-    // with the mutable cache lookup. ~24 lines per expanded session.
-    let mut inline_previews: std::collections::HashMap<String, Vec<String>> =
+    // with the mutable cache lookup. ~24 lines per expanded session,
+    // with ANSI parsed into colored Spans by `crate::ansi::parse`.
+    let mut inline_previews: std::collections::HashMap<String, Vec<Line<'static>>> =
         std::collections::HashMap::new();
     {
         let cache = &mut app.inline_pane_cache;
@@ -2804,22 +2810,17 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             // refreshed at most ~10 Hz from `inline_pane_cache` (see below).
             let is_expanded = app.session_inline_expanded.contains(&s.name);
             if is_expanded {
-                let empty_vec: Vec<String> = Vec::new();
+                let empty_vec: Vec<Line<'static>> = Vec::new();
                 let pane_lines = inline_previews.get(&s.name).unwrap_or(&empty_vec);
-                for output_line in pane_lines {
-                    let trimmed = output_line.trim_end();
-                    if trimmed.is_empty() { continue; }
-                    let mut remaining = trimmed;
-                    while !remaining.is_empty() {
-                        let chunk: String = remaining.chars().take(wrap_width).collect();
-                        let consumed = chunk.len().min(remaining.len());
-                        remaining = &remaining[consumed..];
-                        lines.push(Line::styled(
-                            format!("{indent}{chunk}"),
-                            Style::default().fg(TEXT),
-                        ));
-                    }
+                // Indent each parsed line by prepending an indent span,
+                // preserving ANSI colors from the parser.
+                for parsed in pane_lines {
+                    let mut spans: Vec<Span<'static>> = Vec::with_capacity(parsed.spans.len() + 1);
+                    spans.push(Span::raw(indent.to_string()));
+                    spans.extend(parsed.spans.iter().cloned());
+                    lines.push(Line::from(spans));
                 }
+                let _ = wrap_width; // wrapping handled by the Paragraph widget below
                 // Inline prompt row — clickable hint or the active textarea.
                 let on_prompt_row = selected && app.session_focus_prompt;
                 if on_prompt_row && app.session_prompt_active {
@@ -2896,11 +2897,13 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         (area, None)
     };
 
-    let items: Vec<ListItem> = lines.into_iter().map(|l| ListItem::new(l)).collect();
-    let list = List::new(items)
-        .scroll_padding(SCROLL_PAD)
+    // Paragraph (with wrap) so live pane content never gets truncated —
+    // long agent output lines flow onto the next visual row instead of
+    // being cut off mid-glyph.
+    let pane = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
         .block(Block::default().title(" Sessions ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
-    frame.render_widget(list, session_area);
+    frame.render_widget(pane, session_area);
 
     // Render workflow agent tree when a workflow is running
     if let (Some(wf_area), Some(ws)) = (workflow_area, &app.workflow_status) {
@@ -2938,18 +2941,17 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Pull the last `max` lines of a session's tmux pane for the inline-expand
-/// preview. Caches results in the supplied map with a ~150ms TTL so multiple
-/// expanded sessions don't each fork `tmux capture-pane` every draw tick.
-/// Caller must own the cache mutably; we deliberately don't take `&mut App`
-/// to avoid borrow-checker conflicts with the session list iteration.
+/// Pull the last `max` rendered lines of a session's tmux pane for the
+/// inline-expand preview, with ANSI colors preserved as ratatui Spans.
+/// Cached at ~150ms TTL per session so multiple expanded sessions don't
+/// each fork `tmux capture-pane` every draw tick.
 fn inline_pane_lines(
     cache: &mut std::collections::HashMap<String, (std::time::Instant, String)>,
     cat: orrch_core::windows::SessionCategory,
     index: u32,
     name: &str,
     max: usize,
-) -> Vec<String> {
+) -> Vec<Line<'static>> {
     use std::time::{Duration, Instant};
     const TTL: Duration = Duration::from_millis(150);
     let now = Instant::now();
@@ -2958,22 +2960,24 @@ fn inline_pane_lines(
         .map(|(t, _)| now.duration_since(*t) > TTL)
         .unwrap_or(true);
     if needs_refresh {
+        // Visible pane only (scrollback=0) — old shell history bleeding
+        // in is what made the focused view show "wrong rows" before.
         let raw = orrch_core::windows::capture_pane_ansi(cat, index, 0);
-        let plain = strip_ansi_simple(&raw);
-        cache.insert(name.to_string(), (now, plain));
+        cache.insert(name.to_string(), (now, raw));
     }
-    let cached = cache.get(name).map(|(_, c)| c.clone()).unwrap_or_default();
-    let lines: Vec<String> = cached.lines().map(|l| l.to_string()).collect();
-    let start = lines.len().saturating_sub(max);
-    lines[start..].to_vec()
+    let raw = cache.get(name).map(|(_, c)| c.clone()).unwrap_or_default();
+    let parsed = crate::ansi::parse(&raw);
+    let start = parsed.len().saturating_sub(max);
+    parsed[start..].to_vec()
 }
 
-/// Strip CSI / OSC ANSI escape sequences. Lossy but adequate for the
-/// inline-expand preview text — the deeper full-screen view uses the full
-/// ANSI parser instead.
+/// Strip CSI / OSC ANSI escape sequences while preserving multi-byte
+/// UTF-8 verbatim. The inline-expand preview text uses this; the focused
+/// full-screen view uses the full ANSI parser instead.
+#[allow(dead_code)] // kept as a fallback ANSI stripper for any future plain-text path.
 fn strip_ansi_simple(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut out = String::with_capacity(bytes.len());
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == 0x1b && i + 1 < bytes.len() {
@@ -2998,78 +3002,100 @@ fn strip_ansi_simple(input: &str) -> String {
                 _ => { i += 2; continue; }
             }
         }
-        let b = bytes[i];
-        if b == b'\n' || b == b'\t' || b >= 0x20 {
-            out.push(b as char);
-        }
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    // Outside ESC sequences we copied bytes verbatim, so the result is
+    // still a valid UTF-8 substring of the input.
+    String::from_utf8(out).unwrap_or_default()
 }
 
-/// Render the inline-expanded view of a single managed session. Captures
-/// the session's tmux pane (with ANSI color codes), parses it through the
-/// project's small ANSI-to-ratatui converter, and paints it into `area`.
+/// Render the focused single-session "IDE" view: live pane on top, an
+/// always-available prompt input at the bottom. `Left Left` (within 500ms)
+/// exits back to the Hypervise list; Enter sends the buffer to the
+/// session via `tmux send-keys`.
 ///
-/// Pane content is refreshed at most every 100ms — fast enough to feel
-/// live without burning CPU on pure capture-pane invocations every render
-/// tick. Also services the pending-Esc timeout: if the user pressed Esc
-/// once and the 500ms double-tap window has expired, the buffered Esc is
-/// forwarded to the session here.
-fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, idx: usize) {
+/// The session is looked up by name, not index, so adding or removing
+/// sessions while the view is open never displays the wrong pane.
+fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, name: &str) {
     use std::time::{Duration, Instant};
-    use orrch_core::windows::{capture_pane_ansi, send_raw_key};
+    use orrch_core::windows::capture_pane_ansi;
 
     const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
-    const ESC_DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(500);
 
-    // Refresh the pane snapshot if enough time has passed.
+    let session = app.managed_sessions.iter().find(|s| s.name == name).cloned();
+    let Some(session) = session else {
+        // Session vanished — drop back to the list cleanly.
+        app.sub = crate::app::SubView::List;
+        return;
+    };
+
     let now = Instant::now();
     let needs_refresh = match app.expanded_pane_last_capture {
         Some(t) => now.duration_since(t) >= REFRESH_INTERVAL,
         None => true,
     };
-
-    let session = app.managed_sessions.get(idx).cloned();
-    let Some(session) = session else {
-        // Session disappeared — exit expanded mode on next tick.
-        app.sub = crate::app::SubView::List;
-        return;
-    };
-
     if needs_refresh {
-        // Pull last 200 scrollback lines so a tall terminal sees history.
-        app.expanded_pane_content = capture_pane_ansi(session.category, session.index, 200);
+        // Visible pane only (scrollback=0). Showing scrollback caused the
+        // "wrong rows" complaint — pre-agent shell history bleeding in.
+        app.expanded_pane_content = capture_pane_ansi(session.category, session.index, 0);
         app.expanded_pane_last_capture = Some(now);
     }
 
-    // Flush a stale pending Esc — if the user pressed Esc and never
-    // followed up, forward it to the session so vim/htop see it (with
-    // at most ~500ms latency).
-    if let Some(pressed_at) = app.expanded_pending_esc {
-        if now.duration_since(pressed_at) > ESC_DOUBLE_TAP_WINDOW {
-            send_raw_key(session.category, session.index, "Escape");
-            app.expanded_pending_esc = None;
-        }
-    }
+    // Layout: header strip (1 line) + pane (flex) + prompt input (3 lines).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(5),
+            Constraint::Length(3),
+        ])
+        .split(area);
 
-    let title = format!(
-        " ▣ {} [{}] — Esc Esc to collapse, every other key forwards ",
-        session.name,
-        session.status.label(),
-    );
+    // Header strip
+    let header = Line::from(vec![
+        Span::styled("▣ ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(&session.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("  [{}]", session.status.label()), Style::default().fg(match session.status {
+            orrch_core::windows::SessionStatus::Working => CYAN,
+            orrch_core::windows::SessionStatus::Idle => TEXT_MUTED,
+            orrch_core::windows::SessionStatus::WaitingForInput => WAITING_COLOR,
+            orrch_core::windows::SessionStatus::Dead => Color::Red,
+        })),
+        Span::styled("    ", Style::default()),
+        Span::styled("← ← to exit · Enter sends · Esc clears", Style::default().fg(TEXT_DIM)),
+    ]);
+    frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    let block = Block::default()
-        .title(title)
+    // Pane block
+    let pane_block = Block::default()
         .borders(Borders::ALL)
         .style(Style::default().fg(TEXT_DIM));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
+    let pane_inner = pane_block.inner(chunks[1]);
+    frame.render_widget(pane_block, chunks[1]);
     let lines = crate::ansi::parse(&app.expanded_pane_content);
     let pane = Paragraph::new(lines)
         .style(Style::default().bg(BG_DARK).fg(TEXT));
-    frame.render_widget(pane, inner);
+    frame.render_widget(pane, pane_inner);
+
+    // Prompt input
+    let mut shown = app.session_prompt_buffer.clone();
+    let caret_byte = shown
+        .char_indices()
+        .nth(app.session_prompt_caret)
+        .map(|(b, _)| b)
+        .unwrap_or(shown.len());
+    shown.insert(caret_byte, '█');
+    let prompt_title = format!(" ✎ Send to {} — Enter to submit ", session.name);
+    let prompt_block = Block::default()
+        .title(Span::styled(prompt_title, Style::default().fg(ACCENT)))
+        .borders(Borders::ALL)
+        .style(Style::default().fg(TEXT_DIM));
+    let prompt = Paragraph::new(Line::from(shown))
+        .style(Style::default().fg(TEXT).bg(BG_HIGHLIGHT))
+        .wrap(Wrap { trim: false })
+        .block(prompt_block);
+    frame.render_widget(prompt, chunks[2]);
 }
 
 fn draw_session_log_browser(frame: &mut Frame, app: &App, area: Rect) {
@@ -4009,7 +4035,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             }
         }
         (_, SubView::ExpandedSession(_)) => hint_line(&[
-            ("Esc Esc", "collapse"), ("any other key", "→ session"),
+            ("← ←", "back to list"), ("Enter", "send prompt"), ("Esc", "clear"),
         ]),
         (_, SubView::SteerSession(_)) => hint_line(&[
             ("Enter", "send"), ("Esc", "cancel"),
