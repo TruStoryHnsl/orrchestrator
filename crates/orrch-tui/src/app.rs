@@ -942,6 +942,30 @@ pub struct App {
     /// second Esc within 500ms exits expanded mode; otherwise the first
     /// Esc is forwarded to the session.
     pub expanded_pending_esc: Option<std::time::Instant>,
+
+    /// Hypervise inline-expand: which session names are currently expanded
+    /// in-place under the Hypervise list. NOT a sub-view — the list keeps
+    /// rendering, just with extra preview + prompt rows under each entry.
+    pub session_inline_expanded: std::collections::HashSet<String>,
+    /// Cursor position is on the inline prompt row of the currently-selected
+    /// session (only meaningful when that session is in
+    /// `session_inline_expanded`).
+    pub session_focus_prompt: bool,
+    /// User is actively typing into an inline prompt input (the row below
+    /// an expanded session). Keystrokes accumulate into
+    /// `session_prompt_buffer` until Enter (sends) or Esc (cancels).
+    pub session_prompt_active: bool,
+    /// Buffered text for the active inline prompt input.
+    pub session_prompt_buffer: String,
+    /// Char-index caret position into `session_prompt_buffer`.
+    pub session_prompt_caret: usize,
+    /// Per-session pane snapshot for inline-expand rendering. Refreshed at
+    /// most ~10 Hz to avoid running `tmux capture-pane` every draw tick.
+    /// Key = session name; Value = (last capture instant, ANSI pane text).
+    pub inline_pane_cache: std::collections::HashMap<
+        String,
+        (std::time::Instant, String),
+    >,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1172,6 +1196,12 @@ impl App {
             expanded_pane_content: String::new(),
             expanded_pane_last_capture: None,
             expanded_pending_esc: None,
+            session_inline_expanded: std::collections::HashSet::new(),
+            session_focus_prompt: false,
+            session_prompt_active: false,
+            session_prompt_buffer: String::new(),
+            session_prompt_caret: 0,
+            inline_pane_cache: std::collections::HashMap::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1299,17 +1329,6 @@ impl App {
                 category: s.category.label().to_string(),
                 goal: String::new(),
                 attach_cmd: format!("tmux attach -t {}:{}", s.category.tmux_name(), s.name),
-                index: s.index,
-                status: s.status.label().to_string(),
-                cwd: s.cwd.clone(),
-                preview: orrch_core::windows::capture_pane_text(s.category, s.index, 0)
-                    .into_iter()
-                    .rev()
-                    .take(60)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect(),
             }).collect(),
             projects: self.projects.iter().map(|p| orrch_webui::WebProject {
                 name: p.name.clone(),
@@ -2072,7 +2091,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction || self.session_prompt_active;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -5966,6 +5985,11 @@ KeyCode::Char('i') => {
     // ─── Sessions Tab ────────────────────────────────────────────
 
     fn key_sessions_tab(&mut self, key: KeyCode) -> Result<()> {
+        // While the inline prompt input is active, every keystroke goes to
+        // the buffer rather than the list.
+        if self.session_prompt_active {
+            return self.key_sessions_prompt_input(key);
+        }
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('R') => {
@@ -5973,17 +5997,67 @@ KeyCode::Char('i') => {
                 self.notify("Sessions refreshed".into());
             }
             KeyCode::Up => {
-                if self.session_tab_selected == 0 { self.focus_depth = 0; }
-                else { self.session_tab_selected -= 1; }
-            }
-            KeyCode::Down => {
-                if !self.managed_sessions.is_empty() && self.session_tab_selected < self.managed_sessions.len() - 1 {
-                    self.session_tab_selected += 1;
+                // On a prompt row → up moves back to the session header.
+                if self.session_focus_prompt {
+                    self.session_focus_prompt = false;
+                } else if self.session_tab_selected == 0 {
+                    self.focus_depth = 0;
+                } else {
+                    self.session_tab_selected -= 1;
+                    // Land on the prompt row of the previous session if it's
+                    // expanded — keeps Up reversible with Down.
+                    if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                        if self.session_inline_expanded.contains(&s.name) {
+                            self.session_focus_prompt = true;
+                        }
+                    }
                 }
             }
-            KeyCode::Enter | KeyCode::Right => {
-                // Expand the selected session inline. Replaces the old
-                // external-window focus behavior — `o` preserves that.
+            KeyCode::Down => {
+                if self.session_focus_prompt {
+                    self.session_focus_prompt = false;
+                    if !self.managed_sessions.is_empty()
+                        && self.session_tab_selected < self.managed_sessions.len() - 1
+                    {
+                        self.session_tab_selected += 1;
+                    }
+                } else {
+                    // On a session header — drop to its prompt row if
+                    // expanded, else move to the next session.
+                    let is_expanded = self.managed_sessions.get(self.session_tab_selected)
+                        .map(|s| self.session_inline_expanded.contains(&s.name))
+                        .unwrap_or(false);
+                    if is_expanded {
+                        self.session_focus_prompt = true;
+                    } else if !self.managed_sessions.is_empty()
+                        && self.session_tab_selected < self.managed_sessions.len() - 1
+                    {
+                        self.session_tab_selected += 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                // On the prompt row → activate inline input. On a session
+                // header → toggle inline expand. The deeper full-screen
+                // view is bound to `Right` (or `O`) below.
+                if self.session_focus_prompt {
+                    self.session_prompt_active = true;
+                    self.session_prompt_buffer.clear();
+                    self.session_prompt_caret = 0;
+                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    if self.session_inline_expanded.contains(&name) {
+                        self.session_inline_expanded.remove(&name);
+                        self.session_focus_prompt = false;
+                    } else {
+                        self.session_inline_expanded.insert(name);
+                    }
+                }
+            }
+            KeyCode::Right | KeyCode::Char('O') => {
+                // Open the one-level-deeper full-screen view of the
+                // selected session. Live-refreshed and forwards every
+                // keystroke to the pane (existing ExpandedSession path).
                 if !self.managed_sessions.is_empty()
                     && self.session_tab_selected < self.managed_sessions.len()
                 {
@@ -5991,6 +6065,17 @@ KeyCode::Char('i') => {
                     self.expanded_pane_last_capture = None;
                     self.expanded_pending_esc = None;
                     self.sub = SubView::ExpandedSession(self.session_tab_selected);
+                }
+            }
+            KeyCode::Char('p') => {
+                // Shortcut: expand + jump to prompt input for selected session.
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    self.session_inline_expanded.insert(name);
+                    self.session_focus_prompt = true;
+                    self.session_prompt_active = true;
+                    self.session_prompt_buffer.clear();
+                    self.session_prompt_caret = 0;
                 }
             }
             KeyCode::Char('o') => {
@@ -6028,6 +6113,81 @@ KeyCode::Char('i') => {
                 self.session_logs_selected = 0;
                 self.session_log_view = !self.session_log_view;
                 self.session_log_scroll = 0;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle a keystroke while the inline-prompt textarea is active. Keys
+    /// accumulate into `session_prompt_buffer`; Enter sends the buffer to
+    /// the target session (via `tmux send-keys`, which appends Enter so the
+    /// session treats it as a submitted message); Esc cancels.
+    fn key_sessions_prompt_input(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char(c) => {
+                let byte_pos = self
+                    .session_prompt_buffer
+                    .char_indices()
+                    .nth(self.session_prompt_caret)
+                    .map(|(b, _)| b)
+                    .unwrap_or(self.session_prompt_buffer.len());
+                self.session_prompt_buffer.insert(byte_pos, c);
+                self.session_prompt_caret += 1;
+            }
+            KeyCode::Backspace => {
+                if self.session_prompt_caret > 0 {
+                    self.session_prompt_caret -= 1;
+                    let start = self
+                        .session_prompt_buffer
+                        .char_indices()
+                        .nth(self.session_prompt_caret)
+                        .map(|(b, _)| b)
+                        .unwrap_or(0);
+                    let end = self
+                        .session_prompt_buffer
+                        .char_indices()
+                        .nth(self.session_prompt_caret + 1)
+                        .map(|(b, _)| b)
+                        .unwrap_or(self.session_prompt_buffer.len());
+                    self.session_prompt_buffer.replace_range(start..end, "");
+                }
+            }
+            KeyCode::Left => {
+                if self.session_prompt_caret > 0 {
+                    self.session_prompt_caret -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let len = self.session_prompt_buffer.chars().count();
+                if self.session_prompt_caret < len {
+                    self.session_prompt_caret += 1;
+                }
+            }
+            KeyCode::Home => self.session_prompt_caret = 0,
+            KeyCode::End => self.session_prompt_caret = self.session_prompt_buffer.chars().count(),
+            KeyCode::Enter => {
+                let buf = std::mem::take(&mut self.session_prompt_buffer);
+                self.session_prompt_caret = 0;
+                self.session_prompt_active = false;
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let cat = s.category;
+                    let idx = s.index;
+                    let name = s.name.clone();
+                    if !buf.is_empty() {
+                        let sent = orrch_core::windows::send_keys_to_session(cat, idx, &buf);
+                        if sent {
+                            self.notify(format!("→ {name}: sent {} chars", buf.len()));
+                        } else {
+                            self.notify(format!("→ {name}: tmux send-keys failed"));
+                        }
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                self.session_prompt_active = false;
+                self.session_prompt_buffer.clear();
+                self.session_prompt_caret = 0;
             }
             _ => {}
         }

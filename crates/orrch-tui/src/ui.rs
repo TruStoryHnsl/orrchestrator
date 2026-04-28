@@ -2710,6 +2710,21 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         .filter(|s| matches!(s.status, SessionStatus::Working | SessionStatus::WaitingForInput))
         .find_map(|s| orrch_core::load_workflow_status(std::path::Path::new(&s.cwd)));
 
+    // Pre-compute inline-expand previews up front so the render loop can
+    // hold an immutable iter over `managed_sessions` without conflicting
+    // with the mutable cache lookup. ~24 lines per expanded session.
+    let mut inline_previews: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let cache = &mut app.inline_pane_cache;
+        for s in &app.managed_sessions {
+            if app.session_inline_expanded.contains(&s.name) {
+                let lines_for = inline_pane_lines(cache, s.category, s.index, &s.name, 24);
+                inline_previews.insert(s.name.clone(), lines_for);
+            }
+        }
+    }
+
     let mut lines: Vec<Line> = Vec::new();
     let mut flat_idx: usize = 0;
 
@@ -2784,18 +2799,73 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             // Show recent output lines with line-wrapping so text is not cut off
             let indent = "      ";
             let wrap_width = (area.width as usize).saturating_sub(indent.len() + 2).max(20);
-            for output_line in s.last_output.lines().take(2) {
-                let trimmed = output_line.trim();
-                if trimmed.is_empty() { continue; }
-                // Wrap the line at wrap_width
-                let mut remaining = trimmed;
-                while !remaining.is_empty() {
-                    let chunk: String = remaining.chars().take(wrap_width).collect();
-                    remaining = &remaining[chunk.len().min(remaining.len())..];
-                    lines.push(Line::styled(
-                        format!("{indent}{chunk}"),
-                        Style::default().fg(TEXT_MUTED),
-                    ));
+            // Inline-expand: show ~20 lines of the live pane instead of the
+            // 2 cached preview lines. Uses the per-session pane snapshot
+            // refreshed at most ~10 Hz from `inline_pane_cache` (see below).
+            let is_expanded = app.session_inline_expanded.contains(&s.name);
+            if is_expanded {
+                let empty_vec: Vec<String> = Vec::new();
+                let pane_lines = inline_previews.get(&s.name).unwrap_or(&empty_vec);
+                for output_line in pane_lines {
+                    let trimmed = output_line.trim_end();
+                    if trimmed.is_empty() { continue; }
+                    let mut remaining = trimmed;
+                    while !remaining.is_empty() {
+                        let chunk: String = remaining.chars().take(wrap_width).collect();
+                        let consumed = chunk.len().min(remaining.len());
+                        remaining = &remaining[consumed..];
+                        lines.push(Line::styled(
+                            format!("{indent}{chunk}"),
+                            Style::default().fg(TEXT),
+                        ));
+                    }
+                }
+                // Inline prompt row — clickable hint or the active textarea.
+                let on_prompt_row = selected && app.session_focus_prompt;
+                if on_prompt_row && app.session_prompt_active {
+                    // Active textarea: render buffer with caret marker.
+                    let mut shown = app.session_prompt_buffer.clone();
+                    // Insert the caret block after `caret` chars.
+                    let caret_byte = shown
+                        .char_indices()
+                        .nth(app.session_prompt_caret)
+                        .map(|(b, _)| b)
+                        .unwrap_or(shown.len());
+                    shown.insert(caret_byte, '█');
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{indent}▸ "), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                        Span::styled(shown, Style::default().fg(TEXT).bg(BG_HIGHLIGHT)),
+                        Span::styled("  [Enter sends, Esc cancels]", Style::default().fg(TEXT_DIM)),
+                    ]));
+                } else {
+                    let prompt_style = if on_prompt_row {
+                        Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(TEXT_DIM)
+                    };
+                    let marker = if on_prompt_row { "▸ " } else { "  " };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{indent}{marker}"), Style::default().fg(ACCENT)),
+                        Span::styled(
+                            format!("✎ Enter to send a prompt to {}", s.name),
+                            prompt_style,
+                        ),
+                    ]));
+                }
+            } else {
+                for output_line in s.last_output.lines().take(2) {
+                    let trimmed = output_line.trim();
+                    if trimmed.is_empty() { continue; }
+                    let mut remaining = trimmed;
+                    while !remaining.is_empty() {
+                        let chunk: String = remaining.chars().take(wrap_width).collect();
+                        let consumed = chunk.len().min(remaining.len());
+                        remaining = &remaining[consumed..];
+                        lines.push(Line::styled(
+                            format!("{indent}{chunk}"),
+                            Style::default().fg(TEXT_MUTED),
+                        ));
+                    }
                 }
             }
 
@@ -2866,6 +2936,75 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             );
         frame.render_widget(tree_block, wf_area);
     }
+}
+
+/// Pull the last `max` lines of a session's tmux pane for the inline-expand
+/// preview. Caches results in the supplied map with a ~150ms TTL so multiple
+/// expanded sessions don't each fork `tmux capture-pane` every draw tick.
+/// Caller must own the cache mutably; we deliberately don't take `&mut App`
+/// to avoid borrow-checker conflicts with the session list iteration.
+fn inline_pane_lines(
+    cache: &mut std::collections::HashMap<String, (std::time::Instant, String)>,
+    cat: orrch_core::windows::SessionCategory,
+    index: u32,
+    name: &str,
+    max: usize,
+) -> Vec<String> {
+    use std::time::{Duration, Instant};
+    const TTL: Duration = Duration::from_millis(150);
+    let now = Instant::now();
+    let needs_refresh = cache
+        .get(name)
+        .map(|(t, _)| now.duration_since(*t) > TTL)
+        .unwrap_or(true);
+    if needs_refresh {
+        let raw = orrch_core::windows::capture_pane_ansi(cat, index, 0);
+        let plain = strip_ansi_simple(&raw);
+        cache.insert(name.to_string(), (now, plain));
+    }
+    let cached = cache.get(name).map(|(_, c)| c.clone()).unwrap_or_default();
+    let lines: Vec<String> = cached.lines().map(|l| l.to_string()).collect();
+    let start = lines.len().saturating_sub(max);
+    lines[start..].to_vec()
+}
+
+/// Strip CSI / OSC ANSI escape sequences. Lossy but adequate for the
+/// inline-expand preview text — the deeper full-screen view uses the full
+/// ANSI parser instead.
+fn strip_ansi_simple(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'[' => {
+                    i += 2;
+                    while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() { i += 1; }
+                    continue;
+                }
+                b']' => {
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != 0x07 && bytes[i] != 0x1b {
+                        i += 1;
+                    }
+                    if i < bytes.len() && bytes[i] == 0x1b { i += 1; }
+                    if i < bytes.len() { i += 1; }
+                    continue;
+                }
+                _ => { i += 2; continue; }
+            }
+        }
+        let b = bytes[i];
+        if b == b'\n' || b == b'\t' || b >= 0x20 {
+            out.push(b as char);
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Render the inline-expanded view of a single managed session. Captures
