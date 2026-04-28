@@ -2725,7 +2725,11 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         let cache = &mut app.inline_pane_cache;
         for s in &app.managed_sessions {
             if app.session_inline_expanded.contains(&s.name) {
-                let lines_for = inline_pane_lines(cache, s.category, s.index, &s.name, 24);
+                let scroll = *app
+                    .session_preview_scroll
+                    .get(&s.name)
+                    .unwrap_or(&0);
+                let lines_for = inline_pane_lines(cache, s.category, s.index, &s.name, scroll);
                 inline_previews.insert(s.name.clone(), lines_for);
             }
         }
@@ -2812,6 +2816,16 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
             if is_expanded {
                 let empty_vec: Vec<Line<'static>> = Vec::new();
                 let pane_lines = inline_previews.get(&s.name).unwrap_or(&empty_vec);
+                let scroll_offset = *app.session_preview_scroll.get(&s.name).unwrap_or(&0);
+                if scroll_offset > 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{indent}"), Style::default()),
+                        Span::styled(
+                            format!("▲ scrolled back {} line(s) — Down to return to live tail, Home jumps", scroll_offset),
+                            Style::default().fg(WAITING_COLOR),
+                        ),
+                    ]));
+                }
                 // Indent each parsed line by prepending an indent span,
                 // preserving ANSI colors from the parser.
                 for parsed in pane_lines {
@@ -2941,34 +2955,42 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Pull the last `max` rendered lines of a session's tmux pane for the
-/// inline-expand preview, with ANSI colors preserved as ratatui Spans.
-/// Cached at ~150ms TTL per session so multiple expanded sessions don't
-/// each fork `tmux capture-pane` every draw tick.
+/// Capture (and cache, ~150ms TTL) up to ~200 scrollback lines of a
+/// session's tmux pane for the inline-expand preview, then return a
+/// 16-line viewport offset by `scroll` lines from the bottom. ANSI colors
+/// are preserved as ratatui Spans via `crate::ansi::parse`.
+///
+/// `scroll = 0` shows the live tail. Higher values show progressively
+/// older content. The viewport size is fixed (16 lines) so the surrounding
+/// list layout stays predictable; users can scroll within an expanded
+/// session via Up/Down arrows on its header.
 fn inline_pane_lines(
     cache: &mut std::collections::HashMap<String, (std::time::Instant, String)>,
     cat: orrch_core::windows::SessionCategory,
     index: u32,
     name: &str,
-    max: usize,
+    scroll: usize,
 ) -> Vec<Line<'static>> {
     use std::time::{Duration, Instant};
     const TTL: Duration = Duration::from_millis(150);
+    const SCROLLBACK: u32 = 200;
+    const VIEWPORT: usize = 16;
     let now = Instant::now();
     let needs_refresh = cache
         .get(name)
         .map(|(t, _)| now.duration_since(*t) > TTL)
         .unwrap_or(true);
     if needs_refresh {
-        // Visible pane only (scrollback=0) — old shell history bleeding
-        // in is what made the focused view show "wrong rows" before.
-        let raw = orrch_core::windows::capture_pane_ansi(cat, index, 0);
+        let raw = orrch_core::windows::capture_pane_ansi(cat, index, SCROLLBACK);
         cache.insert(name.to_string(), (now, raw));
     }
     let raw = cache.get(name).map(|(_, c)| c.clone()).unwrap_or_default();
     let parsed = crate::ansi::parse(&raw);
-    let start = parsed.len().saturating_sub(max);
-    parsed[start..].to_vec()
+    let total = parsed.len();
+    // Window: [end - VIEWPORT - scroll .. end - scroll]
+    let end = total.saturating_sub(scroll);
+    let start = end.saturating_sub(VIEWPORT);
+    parsed[start..end].to_vec()
 }
 
 /// Strip CSI / OSC ANSI escape sequences while preserving multi-byte
@@ -4025,7 +4047,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
                 let has_sessions = !app.managed_sessions.is_empty();
                 if has_sessions {
                     hint_line(&[
-                        ("Enter/→", "expand"), ("o", "external window"), ("i", "send line"), ("m", "minimize"), ("x", "kill"), ("R", "refresh"), ("L", "logs"),
+                        ("→", "expand"), ("Enter", "focus"), ("↑↓", "scroll preview"), ("PgUp/PgDn", "fast"), ("p", "prompt"), ("o", "external window"), ("x", "kill"), ("R", "refresh"),
                     ])
                 } else {
                     hint_line(&[

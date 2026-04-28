@@ -968,6 +968,12 @@ pub struct App {
         String,
         (std::time::Instant, String),
     >,
+    /// Per-session vertical scroll offset for the inline-expand preview.
+    /// Counts lines OFF THE BOTTOM (0 = newest content visible at the
+    /// bottom of the viewport). Up arrow on an expanded session header
+    /// increments this; Down decrements. Persisted per-session so a
+    /// collapsed-and-re-expanded view keeps its place.
+    pub session_preview_scroll: std::collections::HashMap<String, usize>,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1204,6 +1210,7 @@ impl App {
             session_prompt_buffer: String::new(),
             session_prompt_caret: 0,
             inline_pane_cache: std::collections::HashMap::new(),
+            session_preview_scroll: std::collections::HashMap::new(),
         };
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -5991,6 +5998,21 @@ KeyCode::Char('i') => {
 
     // ─── Sessions Tab ────────────────────────────────────────────
 
+    /// Largest meaningful scroll offset for an inline-expanded session's
+    /// preview. Equal to `total_captured_lines - viewport_lines`. The
+    /// renderer treats the cached pane content (200 scrollback lines)
+    /// as the upper bound; with a fixed 16-line viewport the user can
+    /// see ~184 lines of history before hitting the top.
+    pub fn preview_max_scroll(&self, name: &str) -> usize {
+        const VIEWPORT: usize = 16;
+        let line_count = self
+            .inline_pane_cache
+            .get(name)
+            .map(|(_, raw)| raw.lines().count())
+            .unwrap_or(0);
+        line_count.saturating_sub(VIEWPORT)
+    }
+
     fn key_sessions_tab(&mut self, key: KeyCode) -> Result<()> {
         // While the inline prompt input is active, every keystroke goes to
         // the buffer rather than the list.
@@ -6004,20 +6026,33 @@ KeyCode::Char('i') => {
                 self.notify("Sessions refreshed".into());
             }
             KeyCode::Up => {
-                // On a prompt row → up moves back to the session header.
+                // Prompt row → back to the session header.
                 if self.session_focus_prompt {
                     self.session_focus_prompt = false;
+                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    let is_expanded = self.session_inline_expanded.contains(&name);
+                    // On an expanded session header → scroll the preview
+                    // upward (showing older lines). When we hit the top,
+                    // fall through to "previous session" navigation.
+                    let max_scroll = self.preview_max_scroll(&name);
+                    let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
+                    if is_expanded && cur < max_scroll {
+                        self.session_preview_scroll.insert(name, (cur + 1).min(max_scroll));
+                    } else if self.session_tab_selected > 0 {
+                        self.session_tab_selected -= 1;
+                        if let Some(prev) = self.managed_sessions.get(self.session_tab_selected) {
+                            if self.session_inline_expanded.contains(&prev.name) {
+                                // Land on the prompt row of the previous
+                                // expanded session — Up reverses Down.
+                                self.session_focus_prompt = true;
+                            }
+                        }
+                    } else {
+                        self.focus_depth = 0;
+                    }
                 } else if self.session_tab_selected == 0 {
                     self.focus_depth = 0;
-                } else {
-                    self.session_tab_selected -= 1;
-                    // Land on the prompt row of the previous session if it's
-                    // expanded — keeps Up reversible with Down.
-                    if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                        if self.session_inline_expanded.contains(&s.name) {
-                            self.session_focus_prompt = true;
-                        }
-                    }
                 }
             }
             KeyCode::Down => {
@@ -6028,18 +6063,61 @@ KeyCode::Char('i') => {
                     {
                         self.session_tab_selected += 1;
                     }
-                } else {
-                    // On a session header — drop to its prompt row if
-                    // expanded, else move to the next session.
-                    let is_expanded = self.managed_sessions.get(self.session_tab_selected)
-                        .map(|s| self.session_inline_expanded.contains(&s.name))
-                        .unwrap_or(false);
-                    if is_expanded {
+                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    let is_expanded = self.session_inline_expanded.contains(&name);
+                    let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
+                    if is_expanded && cur > 0 {
+                        // Scrolled up earlier — Down brings us back toward
+                        // the live tail.
+                        self.session_preview_scroll.insert(name, cur - 1);
+                    } else if is_expanded {
+                        // At the bottom of the preview → focus the prompt row.
                         self.session_focus_prompt = true;
                     } else if !self.managed_sessions.is_empty()
                         && self.session_tab_selected < self.managed_sessions.len() - 1
                     {
                         self.session_tab_selected += 1;
+                    }
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    if self.session_inline_expanded.contains(&name) {
+                        let max = self.preview_max_scroll(&name);
+                        let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
+                        self.session_preview_scroll
+                            .insert(name, (cur + 10).min(max));
+                    }
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    if self.session_inline_expanded.contains(&name) {
+                        let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
+                        self.session_preview_scroll
+                            .insert(name, cur.saturating_sub(10));
+                    }
+                }
+            }
+            KeyCode::Home => {
+                // Snap to the live tail (newest content) on the current preview.
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    if self.session_inline_expanded.contains(&name) {
+                        self.session_preview_scroll.insert(name, 0);
+                    }
+                }
+            }
+            KeyCode::End => {
+                // Snap to the oldest captured content.
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                    let name = s.name.clone();
+                    if self.session_inline_expanded.contains(&name) {
+                        let max = self.preview_max_scroll(&name);
+                        self.session_preview_scroll.insert(name, max);
                     }
                 }
             }
