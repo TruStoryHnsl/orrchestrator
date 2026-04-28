@@ -105,6 +105,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             // expanded pane fills the panel-content area cleanly.
             draw_panel_content(frame, app, layout[1]);
         }
+        SubView::ScopeVisibility => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_scope_visibility(frame, app);
+        }
     }
 
     draw_status_bar(frame, app, layout[2]);
@@ -2149,7 +2153,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 
         let list = List::new(items)
             .scroll_padding(SCROLL_PAD)
-            .block(Block::default().title(" Projects ").borders(Borders::ALL).style(Style::default().fg(ACCENT)))
+            .block(Block::default().title(projects_title(app)).borders(Borders::ALL).style(Style::default().fg(ACCENT)))
             .highlight_style(Style::default().bg(BG_HIGHLIGHT))
             .highlight_symbol("▶ ")
             .highlight_spacing(HighlightSpacing::Always);
@@ -2164,7 +2168,7 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         let list = List::new(items)
             .scroll_padding(SCROLL_PAD)
-            .block(Block::default().title(" Projects ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)))
+            .block(Block::default().title(projects_title(app)).borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)))
             .highlight_style(Style::default().bg(BG_HIGHLIGHT))
             .highlight_symbol("▶ ")
             .highlight_spacing(HighlightSpacing::Always);
@@ -3811,7 +3815,7 @@ fn build_hint_line(app: &App) -> Line<'static> {
             } else {
                 hint_line(&[
                     ("→/Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
-                    ("l", "lifecycle"),
+                    ("l", "lifecycle"), ("V", "visibility"),
                     ("|", ""),
                     ("↑↓", "select"), ("q", "quit"),
                 ])
@@ -4029,6 +4033,32 @@ fn draw_commit_correcting(frame: &mut Frame, app: &App) {
 
 // ─── App Menu (Esc) ──────────────────────────────────────────────────
 
+/// OPT-018: shrink a URL to fit `max` columns by replacing a middle slice
+/// with `…`. Keeps the scheme/host head and the path/port tail visible so
+/// the user can still recognize what they're looking at.
+///
+/// - Returns the input unchanged when it already fits.
+/// - When `max <= 1`, returns just `…`.
+/// - Char-aware (no panics on multi-byte input).
+fn truncate_url(s: &str, max: usize) -> String {
+    let len = s.chars().count();
+    if len <= max {
+        return s.to_string();
+    }
+    if max <= 1 {
+        return "…".to_string();
+    }
+    // Reserve 1 col for the ellipsis. Split the remaining budget
+    // into a head (slightly larger) and tail.
+    let budget = max - 1;
+    let head_len = (budget + 1) / 2;
+    let tail_len = budget - head_len;
+    let chars: Vec<char> = s.chars().collect();
+    let head: String = chars[..head_len].iter().collect();
+    let tail: String = chars[len - tail_len..].iter().collect();
+    format!("{head}…{tail}")
+}
+
 fn draw_app_menu(frame: &mut Frame, app: &App) {
     let items = &[
         ("q", "Quit orrchestrator"),
@@ -4066,24 +4096,29 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     ];
 
     if let Some(local) = &local_url {
+        // OPT-018: app-menu popup is 56 cols wide; subtract 2 for border and
+        // ~9 chars for the inline label prefix (`  public `) leaves ~45 cols
+        // for the URL itself. Truncate longer URLs with a horizontal ellipsis
+        // so they never wrap or overflow the popup edge.
+        const URL_MAX: usize = 45;
         lines.push(Line::styled(
             "WebUI",
             Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD),
         ));
         lines.push(Line::from(vec![
             Span::styled("  local  ", Style::default().fg(TEXT_DIM)),
-            Span::styled(local.clone(), Style::default().fg(ACCENT)),
+            Span::styled(truncate_url(local, URL_MAX), Style::default().fg(ACCENT)),
         ]));
         if let Some(public) = &public_url {
             lines.push(Line::from(vec![
                 Span::styled("  public ", Style::default().fg(TEXT_DIM)),
-                Span::styled(public.clone(), Style::default().fg(ACCENT)),
+                Span::styled(truncate_url(public, URL_MAX), Style::default().fg(ACCENT)),
             ]));
         }
         if let Some(http_public) = &public_http_url {
             lines.push(Line::from(vec![
                 Span::styled("  http   ", Style::default().fg(TEXT_DIM)),
-                Span::styled(http_public.clone(), Style::default().fg(ACCENT)),
+                Span::styled(truncate_url(http_public, URL_MAX), Style::default().fg(ACCENT)),
             ]));
         }
         lines.push(Line::raw(""));
@@ -4170,6 +4205,77 @@ fn draw_new_project_name(frame: &mut Frame, app: &App) {
         .block(Block::default().title(" New Project ").borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
         .wrap(Wrap { trim: false }), popup);
+}
+
+/// VIS-001: build the Oversee panel block title, appending a `(N hidden)`
+/// badge when any scopes are filtered out.
+fn projects_title(app: &App) -> String {
+    let n = app.hidden_project_count();
+    if n == 0 {
+        " Projects ".to_string()
+    } else {
+        format!(" Projects  ({n} hidden, V to toggle) ")
+    }
+}
+
+/// VIS-001: render the scope-visibility toggle popup. Mirrors
+/// `draw_new_project_scope` styling.
+fn draw_scope_visibility(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 60, 12);
+    frame.render_widget(Clear, popup);
+
+    let scopes = orrch_core::Scope::ALL;
+
+    let mut lines = vec![
+        Line::styled(
+            "Toggle scopes hidden from Oversee:",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+    ];
+    for (i, scope) in scopes.iter().enumerate() {
+        let sel = i == app.scope_visibility_selected;
+        let hidden = app.hidden_scopes.contains(scope);
+        let checkbox = if hidden { "[ ] " } else { "[x] " };
+        let cursor = if sel { "▶ " } else { "  " };
+        let label_style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else if hidden {
+            Style::default().fg(TEXT_MUTED)
+        } else {
+            Style::default().fg(TEXT)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(cursor, Style::default().fg(ACCENT)),
+            Span::styled(checkbox, Style::default().fg(if hidden { TEXT_MUTED } else { GREEN })),
+            Span::styled(scope.label(), label_style),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    let n = app.hidden_project_count();
+    let summary = if n == 0 {
+        "all projects visible".to_string()
+    } else {
+        format!("{n} project(s) hidden")
+    };
+    lines.push(Line::styled(format!("  {summary}"), Style::default().fg(TEXT_DIM)));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        "  ↑↓ select   Enter/Space toggle   Esc close",
+        Style::default().fg(TEXT_DIM),
+    ));
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" Project Visibility ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+            )
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
 }
 
 fn draw_new_project_scope(frame: &mut Frame, app: &App) {
@@ -4324,3 +4430,37 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
 }
 
 use orrch_core::BackendKind;
+
+#[cfg(test)]
+mod ui_tests {
+    use super::truncate_url;
+
+    #[test]
+    fn truncate_url_passthrough_when_fits() {
+        assert_eq!(truncate_url("http://localhost:8484", 45), "http://localhost:8484");
+    }
+
+    #[test]
+    fn truncate_url_elides_middle() {
+        let long = "http://very-long-orrchestrator-host.example.com:8484/login";
+        let out = truncate_url(long, 30);
+        assert!(out.chars().count() <= 30, "got {} ({} chars)", out, out.chars().count());
+        assert!(out.starts_with("http://"));
+        assert!(out.contains('…'));
+        // Tail (path) should still be present.
+        assert!(out.ends_with("/login") || out.ends_with("login"));
+    }
+
+    #[test]
+    fn truncate_url_handles_tiny_max() {
+        assert_eq!(truncate_url("anything", 1), "…");
+        assert_eq!(truncate_url("anything", 0), "…");
+    }
+
+    #[test]
+    fn truncate_url_unicode_safe() {
+        let s = "http://é.example.com/foo";
+        let out = truncate_url(s, 10);
+        assert!(out.chars().count() <= 10);
+    }
+}

@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::backend::BackendsConfig;
+use crate::project::Scope;
 
 /// Top-level orrchestrator configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,10 @@ pub struct Config {
     /// Defaults to "orrion" if not set.
     #[serde(default)]
     pub primary_hostname: Option<String>,
+    /// VIS-001: scopes whose projects are hidden from the Oversee project list.
+    /// Empty = all scopes visible. Default empty.
+    #[serde(default)]
+    pub hidden_scopes: HashSet<Scope>,
 }
 
 impl Default for Config {
@@ -36,6 +42,7 @@ impl Default for Config {
             library_repo_url: None,
             projects_dir: default_projects_dir(),
             primary_hostname: None,
+            hidden_scopes: HashSet::new(),
         }
     }
 }
@@ -114,5 +121,43 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         let parsed: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(cfg.projects_dir, parsed.projects_dir);
+    }
+
+    #[test]
+    fn test_hidden_scopes_default_empty() {
+        let cfg = Config::default();
+        assert!(cfg.hidden_scopes.is_empty());
+    }
+
+    #[test]
+    fn test_hidden_scopes_round_trip() {
+        let mut cfg = Config::default();
+        cfg.hidden_scopes.insert(Scope::Personal);
+        cfg.hidden_scopes.insert(Scope::Public);
+        let json = serde_json::to_string(&cfg).unwrap();
+        // Stored as lowercase strings (rename_all = "lowercase")
+        assert!(json.contains("personal"));
+        assert!(json.contains("public"));
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.hidden_scopes.len(), 2);
+        assert!(parsed.hidden_scopes.contains(&Scope::Personal));
+        assert!(parsed.hidden_scopes.contains(&Scope::Public));
+        assert!(!parsed.hidden_scopes.contains(&Scope::Private));
+    }
+
+    #[test]
+    fn test_hidden_scopes_legacy_config_loads() {
+        // Older config.json files won't have the `hidden_scopes` field at
+        // all. serde(default) must let them deserialize cleanly. We compose
+        // the legacy payload by serializing a default config and then
+        // stripping the `hidden_scopes` key, so the test stays robust to
+        // changes elsewhere in the Config schema.
+        let cfg = Config::default();
+        let mut value: serde_json::Value = serde_json::to_value(&cfg).unwrap();
+        value.as_object_mut().unwrap().remove("hidden_scopes");
+        let legacy = serde_json::to_string(&value).unwrap();
+        assert!(!legacy.contains("hidden_scopes"));
+        let parsed: Config = serde_json::from_str(&legacy).unwrap();
+        assert!(parsed.hidden_scopes.is_empty());
     }
 }
