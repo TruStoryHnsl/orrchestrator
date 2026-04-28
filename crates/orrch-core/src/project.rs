@@ -24,12 +24,23 @@ impl RoadmapItem {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Scope {
     Personal,
     Private,
     Public,
     Commercial,
+}
+
+impl Scope {
+    /// Iteration order for UI listings — matches `cycle()` order.
+    pub const ALL: [Scope; 4] = [
+        Scope::Personal,
+        Scope::Private,
+        Scope::Public,
+        Scope::Commercial,
+    ];
 }
 
 impl Scope {
