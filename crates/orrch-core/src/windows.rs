@@ -685,6 +685,73 @@ pub fn capture_pane_ansi(cat: SessionCategory, window_index: u32, lines: u32) ->
     }
 }
 
+/// Capture the visible pane of a managed session as plain text (ANSI stripped),
+/// returned as a list of lines with trailing whitespace removed and trailing
+/// blank lines collapsed. Used by the WebUI Hypervise inline-expand preview.
+pub fn capture_pane_text(cat: SessionCategory, window_index: u32, lines: u32) -> Vec<String> {
+    let target = format!("{}:{}", cat.tmux_name(), window_index);
+    let start = if lines == 0 { "0".to_string() } else { format!("-{lines}") };
+    let output = Command::new("tmux")
+        .args(["capture-pane", "-t", &target, "-J", "-p", "-S", &start])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let raw = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).into_owned(),
+        _ => return Vec::new(),
+    };
+    let mut out: Vec<String> = raw
+        .lines()
+        .map(|l| strip_ansi(l).trim_end().to_string())
+        .collect();
+    while out.last().is_some_and(|l| l.is_empty()) {
+        out.pop();
+    }
+    out
+}
+
+/// Strip CSI / OSC ANSI escape sequences from a single line. Lossy but
+/// adequate for the inline-expand preview — full color goes through xterm.js
+/// in the focus-view path instead.
+fn strip_ansi(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'[' => {
+                    i += 2;
+                    while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
+                        i += 1;
+                    }
+                    if i < bytes.len() { i += 1; }
+                    continue;
+                }
+                b']' => {
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != 0x07 && bytes[i] != 0x1b {
+                        i += 1;
+                    }
+                    if i < bytes.len() && bytes[i] == 0x1b { i += 1; }
+                    if i < bytes.len() { i += 1; }
+                    continue;
+                }
+                _ => {
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        let b = bytes[i];
+        if b >= 0x20 || b == b'\t' {
+            out.push(b as char);
+        }
+        i += 1;
+    }
+    out
+}
+
 // ─── Kill All Managed Sessions ──────────────────────────────────────
 
 /// Kill all managed tmux sessions. Best-effort — logs failures but does not panic.
