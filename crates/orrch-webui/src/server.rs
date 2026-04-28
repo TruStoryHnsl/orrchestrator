@@ -425,7 +425,8 @@ async fn shell_ws_handler(socket: WebSocket, srv: ServerState) {
     // Send an immediate snapshot so a fresh client isn't blank until the
     // pane next changes. We render via the same clear+home prefix the
     // poller uses so xterm parses a clean frame.
-    if let Some(snapshot) = crate::shell::initial_snapshot(&session_name) {
+    let _ = &session_name; // identifier kept for log clarity
+    if let Some(snapshot) = srv.shell.snapshot() {
         let _ = ws_sink.send(Message::Binary(snapshot.into())).await;
     }
 
@@ -444,12 +445,24 @@ async fn shell_ws_handler(socket: WebSocket, srv: ServerState) {
         }
     });
 
-    // Inbound: WebSocket keystrokes → tmux send-keys.
+    // Inbound: keystrokes (Binary) and JSON control frames (Text).
+    // Text frames whose body parses as `{"type":"resize","cols":N,"rows":M}`
+    // resize the PTY; anything else is forwarded as raw input bytes.
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_stream.next().await {
             match msg {
                 Message::Binary(bytes) => shell_for_input.send_input(&bytes),
-                Message::Text(text) => shell_for_input.send_input(text.as_bytes()),
+                Message::Text(text) => {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("resize") {
+                            let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(0) as u16;
+                            let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(0) as u16;
+                            shell_for_input.resize(cols, rows);
+                            continue;
+                        }
+                    }
+                    shell_for_input.send_input(text.as_bytes());
+                }
                 Message::Close(_) => break,
                 _ => {}
             }
