@@ -537,10 +537,6 @@ async fn run_loop(
         // WebUI sync — push state and drain actions every ~1s
         if last_webui_sync.elapsed() > Duration::from_secs(1) {
             if let Some(ref srv) = webui {
-                // Refresh managed sessions so the WebUI Hypervise list and
-                // its inline previews see live tmux state without the user
-                // having to switch panels in the TUI.
-                app.managed_sessions = orrch_core::windows::list_all_sessions();
                 srv.update_state(app.web_snapshot());
                 for action in srv.drain_actions() {
                     use orrch_webui::WebAction;
@@ -568,24 +564,6 @@ async fn run_loop(
                             let vault = orrch_core::vault::vault_dir(&app.projects_dir);
                             let _ = orrch_core::vault::update_pipeline_progress(&vault, filename, 0);
                             app.ideas = orrch_core::vault::load_ideas(&vault);
-                        }
-                        WebAction::SendPrompt { ref session_name, ref text } => {
-                            if let Some(s) = app.managed_sessions.iter()
-                                .find(|s| &s.name == session_name)
-                            {
-                                let _ = orrch_core::windows::send_keys_to_session(
-                                    s.category, s.index, text,
-                                );
-                            }
-                        }
-                        WebAction::SendRawKey { ref session_name, ref key } => {
-                            if let Some(s) = app.managed_sessions.iter()
-                                .find(|s| &s.name == session_name)
-                            {
-                                let _ = orrch_core::windows::send_raw_key(
-                                    s.category, s.index, key,
-                                );
-                            }
                         }
                     }
                 }

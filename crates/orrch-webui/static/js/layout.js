@@ -31,10 +31,7 @@ var Layout = (function() {
     var el = document.getElementById('panel-' + name);
     if (el) el.classList.add('active');
     var ls = WS.getLastState();
-    if (ls && Object.keys(ls).length) {
-      if (name === 'design') Intentions.render(ls);
-      if (name === 'hypervise') Sessions.render(ls);
-    }
+    if (name === 'design' && ls && Object.keys(ls).length) Intentions.render(ls);
   }
 
   function syncFromServer(state) {
