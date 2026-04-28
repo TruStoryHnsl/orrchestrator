@@ -40,6 +40,12 @@ var Shell = (function() {
     var proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(proto + '://' + location.host + '/shell');
     ws.binaryType = 'arraybuffer';
+    ws.onopen = function() {
+      // Tell the server our terminal size so vim / tmux / fzf inside
+      // the PTY render correctly. xterm.js reports cols/rows after
+      // attach; the server's PtyState resizes the master accordingly.
+      sendResize();
+    };
     ws.onmessage = function(e) {
       if (e.data instanceof ArrayBuffer) {
         term.write(new Uint8Array(e.data));
@@ -52,7 +58,7 @@ var Shell = (function() {
       }
     };
     ws.onclose = function() {
-      if (term) term.write('\r\n\x1b[31m[shell disconnected — reconnecting]\x1b[0m\r\n');
+      if (term) term.write('\r\n\x1b[31m[shell disconnected - reconnecting]\x1b[0m\r\n');
       setTimeout(openWebSocket, 2000);
     };
     ws.onerror = function() { try { ws.close(); } catch (_) {} };
@@ -62,6 +68,13 @@ var Shell = (function() {
         ws.send(new TextEncoder().encode(d));
       }
     });
+  }
+
+  function sendResize() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !term) return;
+    try {
+      ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    } catch (_) {}
   }
 
   function rescale() {
