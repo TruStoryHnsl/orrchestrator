@@ -316,6 +316,9 @@ pub enum SubView {
     /// live tmux pane and forwards every keypress to the session via
     /// `tmux send-keys`. Carries the flat session index.
     ExpandedSession(usize),
+    /// VIS-001: per-scope project visibility toggle popup. Esc closes,
+    /// ↑/↓ navigates, Enter/Space toggles the highlighted scope.
+    ScopeVisibility,
 }
 
 /// Sub-panels within the Design panel.
@@ -619,6 +622,13 @@ pub struct App {
     pub roadmap_scroll: usize,
     pub expanded_projects: HashSet<usize>,
     pub show_deprecated: bool,      // toggled in facilities section
+
+    /// VIS-001: scopes hidden from Oversee list. Mirrors `Config::hidden_scopes`
+    /// and is persisted via `Config::save()` whenever it changes.
+    pub hidden_scopes: HashSet<orrch_core::Scope>,
+    /// VIS-001: cursor index inside the visibility-toggle popup
+    /// (`SubView::ScopeVisibility`). 0..Scope::ALL.len().
+    pub scope_visibility_selected: usize,
 
     // Inline directory tree in expanded project rows
     /// Project index → set of expanded directory paths (relative to project root).
@@ -1004,6 +1014,8 @@ impl App {
             roadmap_scroll: 0,
             expanded_projects: HashSet::new(),
             show_deprecated: false,
+            hidden_scopes: config.hidden_scopes.clone(),
+            scope_visibility_selected: 0,
             app_menu_selected: 0,
             managed_sessions: Vec::new(),
             session_tab_selected: 0,
@@ -1300,12 +1312,57 @@ impl App {
         self.cold_indices.clear();
         self.ignored_indices.clear();
         for (i, proj) in self.projects.iter().enumerate() {
+            // VIS-001: skip projects whose scope is hidden.
+            if self.hidden_scopes.contains(&proj.scope) {
+                continue;
+            }
             match proj.temperature {
                 orrch_core::Temperature::Hot => self.hot_indices.push(i),
                 orrch_core::Temperature::Cold => self.cold_indices.push(i),
                 orrch_core::Temperature::Ignored => self.ignored_indices.push(i),
             }
         }
+    }
+
+    /// VIS-001: count of projects currently hidden by `hidden_scopes`.
+    /// Used by the Oversee header `(N hidden)` badge.
+    pub fn hidden_project_count(&self) -> usize {
+        if self.hidden_scopes.is_empty() {
+            return 0;
+        }
+        self.projects.iter()
+            .filter(|p| self.hidden_scopes.contains(&p.scope))
+            .count()
+    }
+
+    /// VIS-001: persist `hidden_scopes` to `~/.config/orrchestrator/config.json`.
+    /// Reloads the existing config so we don't clobber other fields the user
+    /// may have edited out-of-band.
+    pub fn save_hidden_scopes(&self) {
+        let mut cfg = orrch_core::Config::load();
+        cfg.hidden_scopes = self.hidden_scopes.clone();
+        if let Err(e) = cfg.save() {
+            eprintln!("orrchestrator: failed to persist hidden_scopes: {e}");
+        }
+    }
+
+    /// VIS-001: toggle visibility of a scope. Recomputes the visible-index
+    /// caches and persists to disk.
+    pub fn toggle_scope_visibility(&mut self, scope: orrch_core::Scope) {
+        if self.hidden_scopes.contains(&scope) {
+            self.hidden_scopes.remove(&scope);
+        } else {
+            self.hidden_scopes.insert(scope);
+        }
+        self.categorize_projects();
+        // Selection may now point past end of visible list; clamp.
+        let map_len = self.build_list_map().len();
+        if map_len == 0 {
+            self.project_selected = 0;
+        } else if self.project_selected >= map_len {
+            self.project_selected = map_len - 1;
+        }
+        self.save_hidden_scopes();
     }
 
     // ─── Inline Tree Methods ──────────────────────────────────────
@@ -2151,7 +2208,34 @@ impl App {
             // ExpandedSession is intercepted in handle_key before the j/k/h/l
             // remap; it never reaches this dispatch table.
             SubView::ExpandedSession(_) => Ok(()),
+            SubView::ScopeVisibility => self.key_scope_visibility(key),
         }
+    }
+
+    /// VIS-001: keypress handler for the scope-visibility toggle popup.
+    fn key_scope_visibility(&mut self, key: KeyCode) -> Result<()> {
+        let n = orrch_core::Scope::ALL.len();
+        match key {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('V') => {
+                self.sub = SubView::List;
+            }
+            KeyCode::Up => {
+                self.scope_visibility_selected = if self.scope_visibility_selected == 0 {
+                    n - 1
+                } else {
+                    self.scope_visibility_selected - 1
+                };
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.scope_visibility_selected = (self.scope_visibility_selected + 1) % n;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let scope = orrch_core::Scope::ALL[self.scope_visibility_selected];
+                self.toggle_scope_visibility(scope);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn key_deprecated_browser(&mut self, key: KeyCode) -> Result<()> {
@@ -3716,6 +3800,11 @@ KeyCode::Char('i') => {
                 if let Some(pidx) = self.selected_project_index() {
                     self.sub = SubView::ConfirmDeprecate(pidx);
                 }
+            }
+            KeyCode::Char('V') => {
+                // VIS-001: open the scope-visibility toggle popup.
+                self.scope_visibility_selected = 0;
+                self.sub = SubView::ScopeVisibility;
             }
             KeyCode::Char('C') => {
                 if let Some(pidx) = self.selected_project_index() {
