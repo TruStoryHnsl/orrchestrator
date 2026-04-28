@@ -28,7 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
 regex = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 libc = "0.2"
 nix = { version = "0.31", features = ["process", "signal", "term", "fs", "ioctl"] }
 ratatui = "0.29"
