@@ -1299,17 +1299,6 @@ impl App {
                 category: s.category.label().to_string(),
                 goal: String::new(),
                 attach_cmd: format!("tmux attach -t {}:{}", s.category.tmux_name(), s.name),
-                index: s.index,
-                status: s.status.label().to_string(),
-                cwd: s.cwd.clone(),
-                preview: orrch_core::windows::capture_pane_text(s.category, s.index, 0)
-                    .into_iter()
-                    .rev()
-                    .take(60)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect(),
             }).collect(),
             projects: self.projects.iter().map(|p| orrch_webui::WebProject {
                 name: p.name.clone(),
