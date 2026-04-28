@@ -1,0 +1,69 @@
+name: Feature request
+description: Propose a new capability, panel, workforce, agent, or behavior change.
+title: "feat: <one-line summary>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Token efficiency is the design constraint. If the request adds context-size cost, say so up front and explain why it's worth it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you're trying to do and where orrchestrator gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Concrete behavior. What does the user see / press / receive? Sketch the panel, keybind, workforce step, or MCP tool.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why this one wins.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Who is this for?
+      options:
+        - just-me (single-user / personal home-lab)
+        - would-like-to-share (other solo devs would benefit)
+        - commercial-fit (looks like productizable functionality)
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Design > Intentions
+        - Design > Workforce
+        - Design > Library
+        - Design > Plans
+        - Oversee
+        - Hypervise
+        - Analyze
+        - Publish
+        - WebUI
+        - egui window
+        - Web node editor
+        - MCP server (orrch-mcp)
+        - Agent profiles / workforces / operations
+        - Cross-cutting / multiple
+    validations:
+      required: true
+  - type: textarea
+    id: token_cost
+    attributes:
+      label: Token / context impact
+      description: Will this add to per-session context size, agent prompts, or compression overhead? Estimate honestly.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context

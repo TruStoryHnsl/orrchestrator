@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/TruStoryHnsl/orrchestrator/discussions
+    about: Open-ended questions, design conversations, "is this in scope" checks. Use this instead of an issue for anything that isn't a confirmed bug or concrete feature ask.
+  - name: Maintainer contact
+    url: mailto:colton.j.orr@gmail.com
+    about: Direct mail for security disclosures or anything that doesn't belong in a public tracker.

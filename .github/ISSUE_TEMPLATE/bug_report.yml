@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in orrchestrator misbehaves — TUI, WebUI, workforce dispatch, agent execution, or build.
+title: "bug: <one-line summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Concise > complete. Fragments fine. Logs win arguments.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences. What's wrong.
+      placeholder: "Hypervise panel session row stops updating after workflow group expands."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What you thought would happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happened instead. Quote exact output where useful.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimum sequence to trigger it.
+      placeholder: |
+        1. cargo run
+        2. open Hypervise panel
+        3. expand a workflow group
+        4. ...
+    validations:
+      required: true
+  - type: input
+    id: orrch_version
+    attributes:
+      label: orrchestrator version / commit
+      description: "`orrchestrator --version` or `git rev-parse --short HEAD`"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Where the bug appeared.
+      options:
+        - TUI
+        - WebUI
+        - egui native window
+        - Web node editor
+        - MCP server (orrch-mcp)
+        - Workforce dispatch / agent execution
+        - Build / cargo
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: "CachyOS 7.0.1, Ubuntu 24.04, macOS 14.4 (orrpheus), etc."
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal / harness (if relevant)
+      placeholder: "alacritty, kitty, konsole, gnome-terminal, tmux 3.4, claude-code 1.x"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: |
+        Paste relevant stderr, panic output, RUST_LOG=debug excerpts, or `.orrch/` artifacts.
+        Trim to the failing region.
+      render: shell
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Anything else — guesses at root cause, links to related issues, etc.
