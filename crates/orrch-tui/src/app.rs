@@ -5524,22 +5524,30 @@ KeyCode::Char('i') => {
 
         match (&self.panel, &self.sub) {
             (Panel::Oversee, SubView::List) => {
-                items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
-                items.push(ActionItem { key: 'N', label: "Spawn all open roadmap items".into(), action: ActionKind::SpawnAll });
+                // Project-specific actions only if a real project is selected
+                // (cursor on a section header → no project, hide them so users
+                // don't pick a "Cycle scope" that silently no-ops).
+                let pidx = self.selected_project_index();
+                if pidx.is_some() {
+                    items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
+                    items.push(ActionItem { key: 'N', label: "Spawn all open roadmap items".into(), action: ActionKind::SpawnAll });
+                    items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
+                    items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
+                    items.push(ActionItem { key: 's', label: "Toggle hot/cold".into(), action: ActionKind::CycleTemp });
+                    items.push(ActionItem { key: 'i', label: "Toggle ignored".into(), action: ActionKind::IgnoreProject });
+                    items.push(ActionItem { key: 'l', label: "Cycle lifecycle stage".into(), action: ActionKind::CycleLifecycle });
+                    items.push(ActionItem { key: 'D', label: "Deprecate project".into(), action: ActionKind::DeprecateProject });
+                    items.push(ActionItem { key: 'C', label: "Mark complete (v1)".into(), action: ActionKind::CompleteProject });
+                    items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
+                    if let Some(idx) = pidx {
+                        items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(idx) });
+                    }
+                }
+                // Always-available global actions
                 items.push(ActionItem { key: 'P', label: "Create new project".into(), action: ActionKind::NewProject });
                 items.push(ActionItem { key: 'f', label: "Write feedback".into(), action: ActionKind::WriteFeedback });
-                items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
-                items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
-                items.push(ActionItem { key: 's', label: "Toggle hot/cold".into(), action: ActionKind::CycleTemp });
-                items.push(ActionItem { key: 'i', label: "Toggle ignored".into(), action: ActionKind::IgnoreProject });
-                items.push(ActionItem { key: 'l', label: "Cycle lifecycle stage".into(), action: ActionKind::CycleLifecycle });
-                items.push(ActionItem { key: 'D', label: "Deprecate project".into(), action: ActionKind::DeprecateProject });
-                items.push(ActionItem { key: 'C', label: "Mark complete (v1)".into(), action: ActionKind::CompleteProject });
                 items.push(ActionItem { key: 'r', label: "Reload project list".into(), action: ActionKind::ReloadProjects });
-                items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
                 items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
-                items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(self.selected_project_index().unwrap_or(self.project_selected)) });
-
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
