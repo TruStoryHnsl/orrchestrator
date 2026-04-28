@@ -139,7 +139,7 @@ pub fn parse_status_marker(s: &str) -> Option<(FeatureStatus, usize)> {
         let len = "[✓]".len(); // 5 bytes
         return Some((FeatureStatus::UserConfirmed, len));
     }
-    if s.len() >= 3 {
+    if s.len() >= 3 && s.is_char_boundary(3) {
         let marker = &s[..3];
         let status = match marker {
             "[x]" | "[X]" => FeatureStatus::Done,
@@ -967,5 +967,15 @@ mod tests {
         assert_eq!(phases[1].features[1].status, FeatureStatus::Deprecated);
         assert_eq!(phases[2].features.len(), 1);
         assert_eq!(phases[2].features[0].id, Some(44));
+    }
+
+    #[test]
+    fn test_parse_status_marker_handles_leading_multibyte_char() {
+        // Regression: PLAN.md lines beginning with a 4-byte emoji like 🟢
+        // previously panicked at `&s[..3]` because byte 3 lands inside the
+        // codepoint. Observed crash on 2026-04-27 against the line
+        // "🟢 WebUI port: PM proposes 8492. ..." in PLAN.md.
+        assert_eq!(parse_status_marker("🟢 WebUI port: PM proposes 8492."), None);
+        assert_eq!(parse_status_marker("é foo"), None);
     }
 }
