@@ -1,0 +1,6 @@
+[    1644ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8484/favicon.ico:0
+[    4483ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/terminal:195
+[    4495ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/shell' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/shell.js:40
+[    6549ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/terminal:195
+[    6632ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/shell' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/shell.js:40
+[    8551ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/terminal:195

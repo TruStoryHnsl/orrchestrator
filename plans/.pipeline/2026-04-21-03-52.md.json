@@ -1,10 +1,10 @@
 {
-  "progress": 50,
+  "progress": 100,
   "targets": [
     {
       "project": "orrapus",
       "instruction_count": 4,
-      "implemented_count": 0,
+      "implemented_count": 4,
       "codes": [
         "INS-002",
         "INS-003",

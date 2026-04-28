@@ -1,0 +1,9 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - button "Design" [ref=e3] [cursor=pointer]
+    - button "Oversee" [ref=e4] [cursor=pointer]
+    - button "Hypervise" [ref=e5] [cursor=pointer]
+    - button "Analyze" [ref=e6] [cursor=pointer]
+  - main [ref=e7]
+  - link "terminal ⇗" [ref=e11] [cursor=pointer]:
+    - /url: /

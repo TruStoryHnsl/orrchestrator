@@ -1,0 +1,19 @@
+[     250ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:8484/favicon.ico:0
+[    3427ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[    5431ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[    7473ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[    9486ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   12035ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   14082ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   16085ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   18099ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   20101ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   22107ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   24113ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   26119ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   28125ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   30138ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   32168ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   34189ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   36215ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
+[   38272ms] [ERROR] WebSocket connection to 'ws://127.0.0.1:8484/state' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8484/static/js/ws.js:7
