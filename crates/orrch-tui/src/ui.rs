@@ -4150,14 +4150,26 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
 // ─── Action Menu ─────────────────────────────────────────────────────
 
 fn draw_action_menu(frame: &mut Frame, app: &App) {
-    let height = (app.action_items.len() as u16 + 4).min(20);
-    let popup = centered_popup(frame.area(), 45, height);
+    // Reserve room for header (1 line) + "for <project>" subtitle (1 line if any) + spacer + items + borders.
+    let project_label = app
+        .selected_project_index()
+        .and_then(|idx| app.projects.get(idx))
+        .map(|p| p.name.clone());
+    let subtitle_lines: u16 = if project_label.is_some() { 1 } else { 0 };
+    let height = (app.action_items.len() as u16 + 4 + subtitle_lines).min(22);
+    let popup = centered_popup(frame.area(), 50, height);
     frame.render_widget(Clear, popup);
 
     let mut lines = vec![
         Line::styled("Actions", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Line::raw(""),
     ];
+    if let Some(ref name) = project_label {
+        lines.push(Line::from(vec![
+            Span::styled("for ", Style::default().fg(TEXT_DIM)),
+            Span::styled(name, Style::default().fg(ACCENT)),
+        ]));
+    }
+    lines.push(Line::raw(""));
 
     for (i, item) in app.action_items.iter().enumerate() {
         let sel = i == app.action_selected;
