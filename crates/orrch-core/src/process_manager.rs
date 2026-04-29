@@ -109,9 +109,9 @@ impl ProcessManager {
                 libc::close(master_fd);
                 libc::setsid();
                 // ioctl's request parameter type varies: c_ulong on
-                // glibc + macOS/BSD, c_int on musl. Cast through
-                // libc::Ioctl which is the correct alias on each target.
-                libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::Ioctl, 0);
+                // glibc + macOS/BSD, c_int on musl. try_into() adapts
+                // the constant to whatever the local libc expects.
+                libc::ioctl(slave_fd, libc::TIOCSCTTY.try_into().unwrap(), 0);
                 libc::dup2(slave_fd, 0);
                 libc::dup2(slave_fd, 1);
                 libc::dup2(slave_fd, 2);
