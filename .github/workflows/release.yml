@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag/version (e.g. v0.1.0) for manual builds'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  RELEASES_REPO: TruStoryHnsl/orrchestrator-releases
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux)
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.target }}-
+
+      - name: Build release binary
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$MATRIX_TARGET" -p orrchestrator
+
+      - name: Package archive
+        id: package
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN_NAME=orrchestrator
+          STAGE="orrchestrator-${MATRIX_TARGET}"
+          mkdir -p "dist/${STAGE}"
+          cp "target/${MATRIX_TARGET}/release/${BIN_NAME}" "dist/${STAGE}/"
+          cp LICENSE "dist/${STAGE}/" 2>/dev/null || true
+          [ -f README.md ] && cp README.md "dist/${STAGE}/" || true
+          (cd dist && tar -czf "${STAGE}.tar.gz" "${STAGE}")
+          (cd dist && shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256")
+          echo "archive=dist/${STAGE}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${STAGE}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to releases repo
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "Could not resolve tag" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la artifacts/
+
+      - name: Publish release in releases repo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASES_REPO_NAME: ${{ env.RELEASES_REPO }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "RELEASES_REPO_TOKEN secret is not set in this repository." >&2
+            echo "Create a fine-grained PAT scoped to ${RELEASES_REPO_NAME} with Contents: Read and write," >&2
+            echo "then add it as the RELEASES_REPO_TOKEN secret." >&2
+            exit 1
+          fi
+          if ! gh release view "$TAG" -R "$RELEASES_REPO_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$RELEASES_REPO_NAME" \
+              --title "$TAG" \
+              --notes "Build artifacts for orrchestrator $TAG.
+
+Source is proprietary and not publicly available.
+Binaries are licensed for personal, non-commercial use only — see LICENSE inside each archive."
+          fi
+          for f in artifacts/*; do
+            [ -f "$f" ] || continue
+            echo "Uploading $f"
+            gh release upload "$TAG" "$f" -R "$RELEASES_REPO_NAME" --clobber
+          done
