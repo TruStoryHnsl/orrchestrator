@@ -139,13 +139,9 @@ jobs:
             echo "then add it as the RELEASES_REPO_TOKEN secret." >&2
             exit 1
           fi
+          NOTES=$(printf 'Build artifacts for orrchestrator %s.\n\nSource is proprietary and not publicly available.\nBinaries are licensed for personal, non-commercial use only — see LICENSE inside each archive.\n' "$TAG")
           if ! gh release view "$TAG" -R "$RELEASES_REPO_NAME" >/dev/null 2>&1; then
-            gh release create "$TAG" -R "$RELEASES_REPO_NAME" \
-              --title "$TAG" \
-              --notes "Build artifacts for orrchestrator $TAG.
-
-Source is proprietary and not publicly available.
-Binaries are licensed for personal, non-commercial use only — see LICENSE inside each archive."
+            gh release create "$TAG" -R "$RELEASES_REPO_NAME" --title "$TAG" --notes "$NOTES"
           fi
           for f in artifacts/*; do
             [ -f "$f" ] || continue
