@@ -136,6 +136,152 @@ async fn shell_js_asset_served() {
     cleanup_session(&session);
 }
 
+/// User-visible regression check: the asset-served HTML must include the
+/// FitAddon script so xterm.js can compute its viewport-fit dimensions.
+/// Without this, the /shell page falls back to a fixed cols × rows that
+/// doesn't match the phone viewport — exactly the bug being fixed.
+#[tokio::test]
+async fn terminal_html_loads_xterm_fit_addon() {
+    let port = free_port();
+    let session = set_unique_session_env();
+    let cfg = WebUiConfig {
+        local_port: port,
+        ..Default::default()
+    };
+    let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
+
+    let body = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request")
+        .text()
+        .await
+        .expect("body");
+
+    assert!(
+        body.contains("xterm-addon-fit"),
+        "terminal.html missing xterm-addon-fit script — viewport-fit broken"
+    );
+    assert!(
+        body.contains("--term-font-size"),
+        "terminal.html missing --term-font-size CSS variable"
+    );
+
+    cleanup_session(&session);
+}
+
+/// `POST /shell/resize` round-trip: the endpoint must drive tmux so a
+/// follow-up `tmux display-message` reports the new dims. This is the
+/// non-WS path; the WS control frame uses the same code path.
+#[tokio::test]
+async fn shell_resize_post_drives_tmux() {
+    if !tmux_available() {
+        eprintln!("tmux not on PATH — skipping shell_resize_post_drives_tmux");
+        return;
+    }
+    let port = free_port();
+    let session = set_unique_session_env();
+    let cfg = WebUiConfig {
+        local_port: port,
+        ..Default::default()
+    };
+    let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
+
+    // Hit /shell/size first to materialize the session.
+    let _ = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/shell/size"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request");
+
+    // Now drive a specific size.
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/shell/resize"))
+        .json(&serde_json::json!({ "cols": 42, "rows": 17 }))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(resp.status(), 200, "/shell/resize must succeed");
+
+    // Verify with tmux directly.
+    let dims_out = std::process::Command::new("tmux")
+        .args([
+            "display-message", "-p", "-t", &session,
+            "#{pane_width}x#{pane_height}",
+        ])
+        .output()
+        .expect("tmux display-message");
+    let dims = String::from_utf8_lossy(&dims_out.stdout).trim().to_string();
+    assert_eq!(
+        dims, "42x17",
+        "tmux pane dims didn't follow /shell/resize — got {dims:?}"
+    );
+
+    cleanup_session(&session);
+}
+
+/// WebSocket JSON control frame must drive the same resize.
+#[tokio::test]
+async fn shell_ws_resize_control_frame_drives_tmux() {
+    if !tmux_available() {
+        eprintln!("tmux not on PATH — skipping shell_ws_resize_control_frame_drives_tmux");
+        return;
+    }
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let port = free_port();
+    let session = set_unique_session_env();
+    let cfg = WebUiConfig {
+        local_port: port,
+        ..Default::default()
+    };
+    let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
+
+    // Materialize the session first via HTTP — the WS handler does too,
+    // but doing it ahead of the WS write makes the test deterministic.
+    let _ = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/shell/size"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .expect("request");
+
+    let url = format!("ws://127.0.0.1:{port}/shell");
+    let (mut ws, _resp) = tokio_tungstenite::connect_async(&url)
+        .await
+        .expect("ws connect");
+
+    // Drive a specific size via the JSON control frame the browser uses.
+    ws.send(Message::Text(
+        r#"{"type":"resize","cols":33,"rows":19}"#.to_string(),
+    ))
+    .await
+    .expect("ws send");
+
+    // Give tmux a moment to settle.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let dims_out = std::process::Command::new("tmux")
+        .args([
+            "display-message", "-p", "-t", &session,
+            "#{pane_width}x#{pane_height}",
+        ])
+        .output()
+        .expect("tmux display-message");
+    let dims = String::from_utf8_lossy(&dims_out.stdout).trim().to_string();
+    assert_eq!(
+        dims, "33x19",
+        "tmux pane dims didn't follow WS resize — got {dims:?}"
+    );
+
+    cleanup_session(&session);
+}
+
 #[tokio::test]
 async fn shell_size_endpoint_returns_pane_dims() {
     if !tmux_available() {
