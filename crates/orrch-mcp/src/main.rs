@@ -1,8 +1,5 @@
-mod server;
-mod tools;
-mod protocol;
-
-use server::OrrchMcpServer;
+use orrch_mcp::protocol;
+use orrch_mcp::server::OrrchMcpServer;
 
 #[tokio::main]
 async fn main() {
