@@ -136,6 +136,11 @@ pub fn vim_title_args_pub(title: &str) -> Vec<String> {
 ///
 /// The terminal process is detached (new session via setsid) so it survives
 /// orrchestrator crashes or restarts. Orphaned windows are re-adopted on startup.
+///
+/// nvim is launched with `--listen <socket>` at a deterministic path
+/// derived from `file`. orrch's intake submit handler sends `:w` over
+/// this socket before reading the file from disk, so unsaved buffer
+/// content can never be silently bypassed.
 pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::process::Child> {
     use std::os::unix::process::CommandExt;
 
@@ -144,15 +149,23 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
     let file_str = file.to_str()?;
     let vim_args = vim_title_args(title);
 
+    // Pre-bind a deterministic --listen socket so orrch can request a
+    // remote :w before submission. Stale socket from a prior nvim that
+    // exited uncleanly would block the new bind, so remove it first.
+    let socket = orrch_core::vault::nvim_socket_for(file);
+    let _ = std::fs::remove_file(&socket);
+    let socket_str = socket.to_string_lossy().into_owned();
+    let listen_args: [&str; 2] = ["--listen", &socket_str];
+
     let mut cmd = Command::new(&terminal);
 
     // Each terminal has different syntax for "run this command"
     match terminal.as_str() {
-        "gnome-terminal" => { cmd.arg("--title").arg(title).arg("--").arg("nvim").args(&vim_args).arg(file_str); }
-        "kitty" => { cmd.arg("--title").arg(title).arg("nvim").args(&vim_args).arg(file_str); }
-        "xterm" => { cmd.arg("-T").arg(title).arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
-        "konsole" => { cmd.arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
-        _ => { cmd.arg("--title").arg(title).arg("-e").arg("nvim").args(&vim_args).arg(file_str); }
+        "gnome-terminal" => { cmd.arg("--title").arg(title).arg("--").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
+        "kitty" => { cmd.arg("--title").arg(title).arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
+        "xterm" => { cmd.arg("-T").arg(title).arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
+        "konsole" => { cmd.arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
+        _ => { cmd.arg("--title").arg(title).arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
     }
 
     // Detach: new session so the terminal survives orrchestrator exit/crash.

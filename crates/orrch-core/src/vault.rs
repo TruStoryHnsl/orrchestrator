@@ -235,6 +235,133 @@ pub fn save_pipeline_state(vault_dir: &Path, filename: &str, state: &PipelineSta
     fs::write(state_file, json)
 }
 
+// ─── Editor coordination ────────────────────────────────────────────
+//
+// The intake pipeline reads idea files from disk by path. If a user has
+// nvim open with unsaved edits, the on-disk content is stale and the
+// pipeline submits the wrong thing. We defend against this in two layers:
+//
+//   Layer 1 — detect: scan nvim's centralized swap directory for a swap
+//   file matching the target path AND a process holding it open. This
+//   catches any nvim instance regardless of how it was launched.
+//
+//   Layer 2 — save: orrch-spawned nvim instances are launched with
+//   `--listen <socket>` at a deterministic path. Before submission we
+//   shell out to `nvim --server <socket> --remote-expr "execute('write')"`
+//   to flush the buffer to disk.
+//
+// On submit: try Layer 2; if it fails, fall back to Layer 1 refusal.
+
+/// Encode an absolute path the way nvim names its swap files: replace `/`
+/// with `%`. So `/home/user/foo.md` → `%home%corr%foo.md`.
+fn nvim_swap_encoded(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "%")
+}
+
+/// Centralized nvim swap directory (`$XDG_STATE_HOME/nvim/swap`, falling
+/// back to `~/.local/state/nvim/swap`).
+fn nvim_swap_dir() -> PathBuf {
+    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
+        return PathBuf::from(xdg).join("nvim").join("swap");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".local/state/nvim/swap");
+    }
+    PathBuf::from("/tmp/nvim-swap")
+}
+
+/// All possible swap file paths nvim might use for `file`. nvim cycles
+/// suffixes from `.swp` (first session) through `.swo`, `.swn`, … `.swa`
+/// when multiple instances open the same file simultaneously.
+fn nvim_swap_candidates(file: &Path) -> Vec<PathBuf> {
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let encoded = nvim_swap_encoded(&canonical);
+    let dir = nvim_swap_dir();
+    (b'a'..=b'p')
+        .rev()
+        .map(|c| dir.join(format!("{}.sw{}", encoded, c as char)))
+        .collect()
+}
+
+/// Find a process currently holding `path` open (any fd). Linux-only:
+/// scans `/proc/*/fd/`. Returns the first matching pid, or None.
+fn process_holding_file(path: &Path) -> Option<u32> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+    let proc_dir = std::fs::read_dir("/proc").ok()?;
+    for entry in proc_dir.flatten() {
+        let pid: u32 = match entry.file_name().to_string_lossy().parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let fd_dir = entry.path().join("fd");
+        let fds = match std::fs::read_dir(&fd_dir) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for fd in fds.flatten() {
+            if let Ok(link) = std::fs::read_link(fd.path()) {
+                if link == canonical {
+                    return Some(pid);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Layer 1 detection: returns `(swap_path, holding_pid)` if a vim/nvim
+/// process is currently holding a swap file for `file`. Used to refuse
+/// submission when the on-disk content might not reflect the editor's
+/// in-memory buffer.
+pub fn detect_live_editor_for(file: &Path) -> Option<(PathBuf, u32)> {
+    for candidate in nvim_swap_candidates(file) {
+        if let Some(pid) = process_holding_file(&candidate) {
+            return Some((candidate, pid));
+        }
+    }
+    None
+}
+
+/// Deterministic nvim `--listen` socket path for `file`. orrch-spawned
+/// nvim instances bind here so we can send `:w` over RPC before reading
+/// the file at submit time.
+pub fn nvim_socket_for(file: &Path) -> PathBuf {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let mut hasher = DefaultHasher::new();
+    canonical.hash(&mut hasher);
+    let h = hasher.finish();
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    runtime.join(format!("orrch-nvim-{:x}.sock", h))
+}
+
+/// Layer 2 save: ask the nvim listening on `nvim_socket_for(file)` to
+/// `:write`. Returns `true` if the remote command succeeded, meaning the
+/// editor's buffer has been flushed and disk is now authoritative.
+///
+/// Failure modes (all return false): no socket bound (nvim not launched
+/// by orrch, or already exited), nvim binary missing, RPC error.
+pub fn request_nvim_save(file: &Path) -> bool {
+    let socket = nvim_socket_for(file);
+    if !socket.exists() {
+        return false;
+    }
+    let socket_str = match socket.to_str() {
+        Some(s) => s,
+        None => return false,
+    };
+    std::process::Command::new("nvim")
+        .args(["--server", socket_str, "--remote-expr", "execute('silent write')"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Submit an idea to the instruction intake pipeline.
 /// Sets progress to 1 (processing started) and records the timestamp.
 pub fn submit_to_pipeline(vault_dir: &Path, idea: &Idea) -> std::io::Result<PipelineState> {

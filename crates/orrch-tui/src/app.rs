@@ -3390,6 +3390,26 @@ impl App {
                     if idea.pipeline.is_submitted() {
                         self.notify(format!("Already submitted ({}%)", idea.pipeline.progress));
                     } else {
+                        // Layer 2: ask any orrch-spawned nvim listening on
+                        // the per-file socket to flush its buffer to disk.
+                        let saved = orrch_core::vault::request_nvim_save(&idea.path);
+
+                        // Layer 1: if Layer 2 didn't take (no socket, or
+                        // user opened nvim outside orrch), refuse to submit
+                        // when a live editor still holds a swap file. This
+                        // prevents the silent stale-disk submission bug.
+                        if !saved {
+                            if let Some((_swap, pid)) =
+                                orrch_core::vault::detect_live_editor_for(&idea.path)
+                            {
+                                self.notify(format!(
+                                    "Submit blocked: nvim (pid {pid}) has '{}' open with possibly-unsaved edits. Save (:w) and retry.",
+                                    idea.filename
+                                ));
+                                return Ok(());
+                            }
+                        }
+
                         let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                         let idea_path = idea.path.clone();
                         let idea_filename = idea.filename.clone();
