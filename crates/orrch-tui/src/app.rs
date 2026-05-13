@@ -481,20 +481,28 @@ pub enum SectionCursor {
     Browser,
 }
 
-/// Sub-tabs for the Publish panel (item 98).
+/// Sub-tabs for the Publish panel (item 98 + overhaul point 11).
+/// Publish is the marketing & distribution face of a shipped project.
+/// `Brands` (NEW) holds brand profile .md files used as style guides.
+/// `Compliance` is being progressively migrated to Analyze (overhaul
+/// point 12); for now it remains here for back-compat — the Analyze
+/// panel re-renders the same data sources alongside its own Licensing
+/// and Legal sub-tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublishTab {
     Packaging,
     Distribution,
+    Brands,
     Compliance,
     Marketing,
     History,
 }
 
 impl PublishTab {
-    pub const ALL: [PublishTab; 5] = [
+    pub const ALL: [PublishTab; 6] = [
         PublishTab::Packaging,
         PublishTab::Distribution,
+        PublishTab::Brands,
         PublishTab::Compliance,
         PublishTab::Marketing,
         PublishTab::History,
@@ -504,9 +512,93 @@ impl PublishTab {
         match self {
             Self::Packaging => "Packaging",
             Self::Distribution => "Distribution",
+            Self::Brands => "Brands",
             Self::Compliance => "Compliance",
             Self::Marketing => "Marketing",
             Self::History => "History",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+/// Sub-tabs for the Hypervise panel (overhaul points 8 + 10).
+/// Sessions is the original list view; Loops is for autonomous workflow loops
+/// orrchestrator manages programmatically; TokenUsage tracks cumulative
+/// session/token usage for orrchestrator-managed sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HyperviseSub {
+    Sessions,
+    Loops,
+    TokenUsage,
+}
+
+impl HyperviseSub {
+    pub const ALL: [HyperviseSub; 3] = [
+        HyperviseSub::Sessions,
+        HyperviseSub::Loops,
+        HyperviseSub::TokenUsage,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Sessions => "Sessions",
+            Self::Loops => "Loops",
+            Self::TokenUsage => "Token Usage",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL.iter().position(|t| *t == *self).unwrap_or(0)
+    }
+
+    pub fn next(&self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+}
+
+/// Sub-tabs for the Analyze panel (overhaul point 12).
+/// Analyze is for assessing projects for market-ready status:
+/// CodeReview, Licensing, Legal, Monetization, Patents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalyzeTab {
+    CodeReview,
+    Licensing,
+    Legal,
+    Monetization,
+    Patents,
+}
+
+impl AnalyzeTab {
+    pub const ALL: [AnalyzeTab; 5] = [
+        AnalyzeTab::CodeReview,
+        AnalyzeTab::Licensing,
+        AnalyzeTab::Legal,
+        AnalyzeTab::Monetization,
+        AnalyzeTab::Patents,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CodeReview => "Code Review",
+            Self::Licensing => "Licensing",
+            Self::Legal => "Legal",
+            Self::Monetization => "Monetization",
+            Self::Patents => "Patents",
         }
     }
 
@@ -580,6 +672,7 @@ pub struct ActionItem {
 pub enum ActionKind {
     SpawnSession,
     SpawnAll,       // N — multi-spawn
+    StartLoop,      // L — register an autonomous loop schedule for this project
     NewProject,
     WriteFeedback,
     WriteProjectFeedback(usize),
@@ -731,8 +824,22 @@ pub struct App {
     /// True when focus is on the right (tree) pane; false = left (project list).
     pub plans_focus_right: bool,
 
-    // Publish panel (item 98)
+    // Publish panel (item 98 + overhaul point 11)
     pub publish_tab: PublishTab,
+    /// Cached brand profile files for the Brands tab.
+    pub brand_profiles: Vec<(String, PathBuf)>,
+    /// Selected brand profile index in the Brands tab.
+    pub brand_selected: usize,
+
+    // Hypervise sub-tabs (overhaul point 8)
+    pub hypervise_sub: HyperviseSub,
+    /// Loaded loop schedules for the Hypervise > Loops tab.
+    pub loop_schedules: Vec<orrch_core::LoopSchedule>,
+    /// Selected loop in the list.
+    pub loop_selected: usize,
+
+    // Analyze sub-tabs (overhaul point 12)
+    pub analyze_tab: AnalyzeTab,
     /// Cached release notes markdown (regenerated when entering Packaging tab).
     pub release_notes_preview: Option<String>,
     /// Pre-release checklist results: (label, passed).
@@ -1014,7 +1121,7 @@ impl App {
             &library_root.join("mcp_servers"),
             Some(&projects_dir.join("orrchestrator")),
         );
-        let library_skills = scan_md_dir(&library_root.join("skills"));
+        let library_skills = scan_skills_dir_filtered(&library_root.join("skills"));
         let library_tools = scan_md_dir(&library_root.join("tools"));
         let library_profiles = scan_md_dir(&library_root.join("profiles"));
         let library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
@@ -1113,6 +1220,12 @@ impl App {
             plans_tree_selected: 0,
             plans_focus_right: false,
             publish_tab: PublishTab::Packaging,
+            brand_profiles: Vec::new(), // populated in `new()` after self exists; see post-construction step below
+            brand_selected: 0,
+            hypervise_sub: HyperviseSub::Sessions,
+            loop_schedules: Vec::new(), // populated post-construction
+            loop_selected: 0,
+            analyze_tab: AnalyzeTab::CodeReview,
             release_notes_preview: None,
             checklist_results: Vec::new(),
             build_targets: Vec::new(),
@@ -1212,6 +1325,12 @@ impl App {
             inline_pane_cache: std::collections::HashMap::new(),
             session_preview_scroll: std::collections::HashMap::new(),
         };
+        // Populate fields that need projects_dir AFTER struct construction
+        // (struct moves projects_dir into self.projects_dir).
+        app.brand_profiles = scan_md_dir(
+            &app.projects_dir.join("orrchestrator").join("brands"),
+        );
+        app.loop_schedules = orrch_core::load_loops(&app.projects_dir);
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
         app.expanded_projects = (0..app.projects.len()).collect();
@@ -2191,10 +2310,33 @@ impl App {
                     if self.session_log_view {
                         self.key_session_log_browser(key)
                     } else {
-                        self.key_sessions_tab(key)
+                        // Sub-tab nav (Tab cycles Sessions → Loops → TokenUsage).
+                        if key == KeyCode::Tab {
+                            self.hypervise_sub = self.hypervise_sub.next();
+                            return Ok(());
+                        }
+                        if key == KeyCode::BackTab {
+                            self.hypervise_sub = self.hypervise_sub.prev();
+                            return Ok(());
+                        }
+                        match self.hypervise_sub {
+                            HyperviseSub::Sessions => self.key_sessions_tab(key),
+                            HyperviseSub::Loops => self.key_hypervise_loops(key),
+                            HyperviseSub::TokenUsage => self.key_placeholder(key),
+                        }
                     }
                 }
-                Panel::Analyze => self.key_placeholder(key),
+                Panel::Analyze => {
+                    if key == KeyCode::Tab {
+                        self.analyze_tab = self.analyze_tab.next();
+                        return Ok(());
+                    }
+                    if key == KeyCode::BackTab {
+                        self.analyze_tab = self.analyze_tab.prev();
+                        return Ok(());
+                    }
+                    self.key_placeholder(key)
+                }
                 Panel::Publish => self.key_publish(key),
             },
             SubView::ProjectDetail(_) => self.key_project_detail(key),
@@ -2961,7 +3103,7 @@ impl App {
             &library_root.join("mcp_servers"),
             Some(&orrch_dir),
         );
-        self.library_skills = scan_md_dir(&library_root.join("skills"));
+        self.library_skills = scan_skills_dir_filtered(&library_root.join("skills"));
         self.library_tools = scan_md_dir(&library_root.join("tools"));
         self.library_profiles = scan_md_dir(&library_root.join("profiles"));
         self.library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
@@ -3189,6 +3331,52 @@ impl App {
         Ok(())
     }
 
+    /// Key handler for the Hypervise > Loops sub-tab (overhaul point 8).
+    /// Minimal: arrow keys navigate the loop list; `t` toggles enabled;
+    /// `Del` removes the selected loop; `r` reloads from disk.
+    fn key_hypervise_loops(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Up => {
+                if self.loop_selected > 0 {
+                    self.loop_selected -= 1;
+                } else {
+                    self.focus_depth = 0;
+                }
+            }
+            KeyCode::Down => {
+                if self.loop_selected + 1 < self.loop_schedules.len() {
+                    self.loop_selected += 1;
+                }
+            }
+            KeyCode::Char('r') => {
+                self.loop_schedules = orrch_core::load_loops(&self.projects_dir);
+                if self.loop_selected >= self.loop_schedules.len() {
+                    self.loop_selected = self.loop_schedules.len().saturating_sub(1);
+                }
+            }
+            KeyCode::Char('t') => {
+                if let Some(s) = self.loop_schedules.get(self.loop_selected) {
+                    let id = s.id.clone();
+                    let _ = orrch_core::toggle_loop(&self.projects_dir, &id);
+                    self.loop_schedules = orrch_core::load_loops(&self.projects_dir);
+                }
+            }
+            KeyCode::Delete => {
+                if let Some(s) = self.loop_schedules.get(self.loop_selected) {
+                    let id = s.id.clone();
+                    let _ = orrch_core::delete_loop(&self.projects_dir, &id);
+                    self.loop_schedules = orrch_core::load_loops(&self.projects_dir);
+                    if self.loop_selected >= self.loop_schedules.len() {
+                        self.loop_selected = self.loop_schedules.len().saturating_sub(1);
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Key handler for the Publish panel (item 98).
     fn key_publish(&mut self, key: KeyCode) -> Result<()> {
         match key {
@@ -3255,6 +3443,12 @@ impl App {
                     PublishTab::Marketing => {
                         self.marketing_scroll = self.marketing_scroll.saturating_add(1);
                     }
+                    PublishTab::Brands => {
+                        let len = self.brand_profiles.len();
+                        if len > 0 {
+                            self.brand_selected = (self.brand_selected + 1).min(len - 1);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -3268,6 +3462,9 @@ impl App {
                     }
                     PublishTab::Marketing => {
                         self.marketing_scroll = self.marketing_scroll.saturating_sub(1);
+                    }
+                    PublishTab::Brands => {
+                        self.brand_selected = self.brand_selected.saturating_sub(1);
                     }
                     _ => {}
                 }
@@ -3309,6 +3506,13 @@ impl App {
         match self.publish_tab {
             PublishTab::Packaging => self.refresh_packaging_data(),
             PublishTab::Compliance => self.refresh_compliance_data(),
+            PublishTab::Brands => {
+                let dir = self.projects_dir.join("orrchestrator").join("brands");
+                self.brand_profiles = scan_md_dir(&dir);
+                if self.brand_selected >= self.brand_profiles.len() {
+                    self.brand_selected = self.brand_profiles.len().saturating_sub(1);
+                }
+            }
             PublishTab::Distribution => {
                 let dir = self.projects_dir.join("orrchestrator");
                 if dir.exists() {
@@ -5595,6 +5799,7 @@ KeyCode::Char('i') => {
                 if pidx.is_some() {
                     items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
                     items.push(ActionItem { key: 'N', label: "Spawn all open roadmap items".into(), action: ActionKind::SpawnAll });
+                    items.push(ActionItem { key: 'L', label: "Start loop (continuous workflow)".into(), action: ActionKind::StartLoop });
                     items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
                     items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
                     items.push(ActionItem { key: 's', label: "Toggle hot/cold".into(), action: ActionKind::CycleTemp });
@@ -5725,6 +5930,31 @@ KeyCode::Char('i') => {
                     let mut spawned = 0;
                     for goal in items { if self.spawn_session(&path, BackendKind::Claude, Some(&goal)).is_ok() { spawned += 1; } }
                     self.notify(format!("{name}: {spawned}/{count} pipelines"));
+                }
+            }
+            ActionKind::StartLoop => {
+                if let Some(pidx) = pidx {
+                    let proj = &self.projects[pidx];
+                    // First-cut: register a single-workflow loop using the
+                    // general_software_development workforce. Future iterations
+                    // open a workflow-picker overlay first; for now this is the
+                    // "one-tap toggle" behavior described in overhaul point 9.
+                    let schedule = orrch_core::LoopSchedule::new(
+                        format!("{} continuous dev", proj.name),
+                        proj.path.clone(),
+                        vec!["general_software_development".to_string()],
+                    );
+                    let id = schedule.id.clone();
+                    match orrch_core::upsert_loop(&self.projects_dir, schedule) {
+                        Ok(loops) => {
+                            self.loop_schedules = loops;
+                            // Auto-enable the freshly-created loop.
+                            let _ = orrch_core::toggle_loop(&self.projects_dir, &id);
+                            self.loop_schedules = orrch_core::load_loops(&self.projects_dir);
+                            self.notify(format!("Loop registered for {}", proj.name));
+                        }
+                        Err(e) => self.notify(format!("Loop save failed: {e}")),
+                    }
                 }
             }
             ActionKind::NewProject => {
@@ -7469,6 +7699,48 @@ fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
     items
 }
 
+/// Variant of `scan_md_dir` that filters out skills tagged `internal: true`
+/// in YAML frontmatter or matching the auto-served harness patterns
+/// (agent-*, develop-feature, develop-aio). These skills are auto-created to
+/// serve orrchestrator harness instructions over MCP and should not appear
+/// in the user-facing Library > Skills menu — the user interacts with them
+/// via the Workforce > Agents/Teams/Workflows tabs.
+pub fn scan_skills_dir_filtered(dir: &Path) -> Vec<(String, PathBuf)> {
+    scan_md_dir(dir)
+        .into_iter()
+        .filter(|(_, path)| !is_internal_skill_path(path))
+        .collect()
+}
+
+/// True if the skill at `path` should be hidden from the user-facing skills
+/// menu. Checks YAML frontmatter `internal: true` first; falls back to a
+/// stem-pattern match for back-compat.
+fn is_internal_skill_path(path: &Path) -> bool {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
+    // Pattern fallback — covers files that haven't yet had `internal: true`
+    // appended to their frontmatter.
+    if stem.starts_with("agent-") || stem == "develop-feature" || stem == "develop-aio" {
+        return true;
+    }
+    // Frontmatter check
+    if let Ok(content) = std::fs::read_to_string(path) {
+        let trimmed = content.trim_start();
+        if trimmed.starts_with("---") {
+            let after_first = &trimmed[3..].trim_start_matches(['\r', '\n']);
+            if let Some(end) = after_first.find("\n---") {
+                let frontmatter = &after_first[..end];
+                for line in frontmatter.lines() {
+                    let stripped = line.trim();
+                    if let Some(rest) = stripped.strip_prefix("internal:") {
+                        return rest.trim().eq_ignore_ascii_case("true");
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Extract a display name from markdown content.
 ///
 /// Precedence: (a) YAML frontmatter `name:` field, (b) first `# Heading`,
@@ -7711,6 +7983,38 @@ fn detect_current_output() -> Option<String> {
 #[cfg(test)]
 mod app_tests {
     use super::*;
+
+    #[test]
+    fn skill_filter_excludes_internal_and_pattern_matched() {
+        // Use the live library/skills directory if available, otherwise skip.
+        let library = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("library").join("skills"));
+        let Some(skills_dir) = library else { return };
+        if !skills_dir.exists() {
+            return;
+        }
+        let filtered = scan_skills_dir_filtered(&skills_dir);
+        let names: Vec<&str> = filtered.iter().map(|(_, p)| {
+            p.file_stem().and_then(|s| s.to_str()).unwrap_or("")
+        }).collect();
+        // T8 acceptance: agent-pm and develop-feature must NOT appear.
+        assert!(!names.iter().any(|n| *n == "agent-pm"),
+            "agent-pm should be filtered; got: {names:?}");
+        assert!(!names.iter().any(|n| *n == "develop-feature"),
+            "develop-feature should be filtered; got: {names:?}");
+        assert!(!names.iter().any(|n| *n == "develop-aio"),
+            "develop-aio should be filtered; got: {names:?}");
+        // Non-internal skills (e.g. release, scope) MUST still appear.
+        // Only assert positive presence if those skills exist on disk.
+        for expected in ["release", "scope"] {
+            if skills_dir.join(format!("{expected}.md")).exists() {
+                assert!(names.iter().any(|n| *n == expected),
+                    "non-internal '{expected}' skill must still appear; got: {names:?}");
+            }
+        }
+    }
 
     #[test]
     fn tmux_spec_for_arrow_keys() {

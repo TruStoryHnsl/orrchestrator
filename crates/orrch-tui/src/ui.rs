@@ -185,10 +185,164 @@ fn draw_panel_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.panel {
         Panel::Design => draw_design(frame, app, area),
         Panel::Oversee => draw_projects(frame, app, area),
-        Panel::Hypervise => draw_sessions_tab(frame, app, area),
+        Panel::Hypervise => draw_hypervise(frame, app, area),
         Panel::Analyze => draw_analyze(frame, app, area),
         Panel::Publish => draw_publish(frame, app, area),
     }
+}
+
+/// Hypervise panel with sub-tabs (overhaul point 8).
+/// Sub-bar above the body: Sessions | Loops | Token Usage. Tab cycles.
+fn draw_hypervise(frame: &mut Frame, app: &mut App, area: Rect) {
+    use crate::app::HyperviseSub;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Sub-tab bar
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, tab) in HyperviseSub::ALL.iter().enumerate() {
+        if i > 0 { spans.push(Span::raw("  ")); }
+        let sel = *tab == app.hypervise_sub;
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        };
+        spans.push(Span::styled(tab.label(), style));
+    }
+    spans.push(Span::raw("    "));
+    spans.push(Span::styled("[Tab]=cycle", Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
+
+    match app.hypervise_sub {
+        HyperviseSub::Sessions => draw_sessions_tab(frame, app, chunks[1]),
+        HyperviseSub::Loops => draw_hypervise_loops_tab(frame, app, chunks[1]),
+        HyperviseSub::TokenUsage => draw_hypervise_token_usage_tab(frame, app, chunks[1]),
+    }
+}
+
+/// Hypervise > Loops tab body (overhaul point 8).
+/// Lists registered loop schedules. Empty-state guidance when none exist.
+fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
+    if app.loop_schedules.is_empty() {
+        let msg = "No loop schedules registered.\n\n\
+                   A loop is a sequence of workflows that orrchestrator runs\n\
+                   automatically — when one workflow's cleanup team writes\n\
+                   `cleanup_summary.md`, the loop closes that workflow's sessions\n\
+                   and starts the next workflow in the list, repeating when the\n\
+                   final workflow finishes.\n\n\
+                   To add a loop, go to Oversee, select a project, open the\n\
+                   action menu and choose 'Start Loop'.\n\n\
+                   Keys: [t]=toggle enabled  [Del]=remove  [r]=reload";
+        let p = Paragraph::new(msg)
+            .style(Style::default().fg(TEXT_DIM))
+            .wrap(Wrap { trim: false })
+            .block(Block::default()
+                .title(" Loops (empty) ")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)));
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let header = Row::new(vec![
+        Cell::from("On").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Name").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Project").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Workflows").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    ]).height(1).bottom_margin(1);
+
+    let rows: Vec<Row> = app
+        .loop_schedules
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let on = if s.enabled { "●" } else { "○" };
+            let on_color = if s.enabled { GREEN } else { TEXT_DIM };
+            let name_color = if i == app.loop_selected { ACCENT } else { TEXT };
+            let proj = s.project_dir.file_name().map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| "?".into());
+            let wfs = s.workflows.join(" → ");
+            Row::new(vec![
+                Cell::from(on).style(Style::default().fg(on_color).add_modifier(Modifier::BOLD)),
+                Cell::from(s.name.clone()).style(Style::default().fg(name_color)),
+                Cell::from(proj).style(Style::default().fg(TEXT_DIM)),
+                Cell::from(wfs).style(Style::default().fg(TEXT)),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(3),
+        Constraint::Min(20),
+        Constraint::Length(20),
+        Constraint::Min(30),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default()
+            .title(format!(" Loops ({}) — [t]=toggle  [Del]=remove  [r]=reload ", app.loop_schedules.len()))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(2);
+    frame.render_widget(table, area);
+}
+
+/// Hypervise > Token Usage tab body (overhaul point 10).
+/// Renders a per-session table of token usage. Initial cut shows session
+/// count + duration aggregated from the existing UsageTracker; per-session
+/// token columns show "n/a" pending the token-tracking subsystem (TOK-001).
+fn draw_hypervise_token_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
+    use orrch_core::usage;
+
+    let summary = app.usage_tracker.summary();
+
+    let header = Row::new(vec![
+        Cell::from("Provider").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Sessions").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Tokens").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    ]).height(1).bottom_margin(1);
+
+    let rows: Vec<Row> = if summary.per_provider.is_empty() {
+        vec![Row::new(vec![
+            Cell::from("(no usage tracked yet)").style(Style::default().fg(TEXT_DIM)),
+            Cell::from(""), Cell::from(""), Cell::from(""), Cell::from(""),
+        ])]
+    } else {
+        summary.per_provider.iter().map(|p| {
+            let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
+            Row::new(vec![
+                Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
+                Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
+                Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
+                Cell::from(last).style(Style::default().fg(TEXT_DIM)),
+                Cell::from("n/a (TOK-001)").style(Style::default().fg(TEXT_MUTED)),
+            ])
+        }).collect()
+    };
+
+    let widths = [
+        Constraint::Length(14),
+        Constraint::Length(10),
+        Constraint::Length(12),
+        Constraint::Length(12),
+        Constraint::Length(18),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default()
+            .title(format!(" Token Usage (last {}h) ", summary.period_hours))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)))
+        .column_spacing(2);
+    frame.render_widget(table, area);
 }
 
 // ─── Deprecated Panel ─────────────────────────────────────────────────
@@ -261,7 +415,44 @@ fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
     frame.render_widget(msg, area);
 }
 
+/// Analyze panel — assesses projects for market-ready status (overhaul
+/// point 12). Sub-bar above the body cycles through CodeReview / Licensing /
+/// Legal / Monetization / Patents.
 fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::AnalyzeTab;
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Sub-tab bar
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, tab) in AnalyzeTab::ALL.iter().enumerate() {
+        if i > 0 { spans.push(Span::raw("  ")); }
+        let sel = *tab == app.analyze_tab;
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        };
+        spans.push(Span::styled(tab.label(), style));
+    }
+    spans.push(Span::raw("    "));
+    spans.push(Span::styled("[Tab]=cycle", Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
+
+    match app.analyze_tab {
+        AnalyzeTab::CodeReview => draw_analyze_code_review(frame, app, chunks[1]),
+        AnalyzeTab::Licensing => draw_analyze_licensing(frame, app, chunks[1]),
+        AnalyzeTab::Legal => draw_analyze_legal(frame, app, chunks[1]),
+        AnalyzeTab::Monetization => draw_analyze_placeholder(frame, "Monetization", chunks[1]),
+        AnalyzeTab::Patents => draw_analyze_placeholder(frame, "Patents", chunks[1]),
+    }
+}
+
+/// Analyze > Code Review — original draw_analyze body (provider/project usage).
+fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
     use orrch_core::usage;
 
     let summary = app.usage_tracker.summary();
@@ -394,6 +585,120 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(budget_bar, chunks[2]);
 }
 
+/// Analyze > Licensing — re-renders the license_report data source from
+/// orrch-core::compliance. Same source as Publish > Compliance; both panels
+/// can render it during the migration window.
+fn draw_analyze_licensing(frame: &mut Frame, app: &App, area: Rect) {
+    let rows: Vec<Row> = match &app.license_report {
+        None => vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from(""),
+            Cell::from("Switch to Publish > Compliance to populate this data, then return.")
+                .style(Style::default().fg(TEXT_DIM)),
+        ])],
+        Some(report) if report.deps.is_empty() => vec![Row::new(vec![
+            Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+            Cell::from(""),
+            Cell::from("No Cargo.lock found").style(Style::default().fg(TEXT_DIM)),
+        ])],
+        Some(report) => report
+            .deps
+            .iter()
+            .map(|dep| {
+                let (status_color, status_label) = match dep.status {
+                    orrch_core::LicenseStatus::Permissive => (GREEN, dep.status.label()),
+                    orrch_core::LicenseStatus::Copyleft => (WAITING_COLOR, dep.status.label()),
+                    orrch_core::LicenseStatus::Unknown => (TEXT_DIM, dep.status.label()),
+                };
+                Row::new(vec![
+                    Cell::from(dep.name.clone()).style(Style::default().fg(TEXT)),
+                    Cell::from(dep.spdx.clone()).style(Style::default().fg(TEXT_DIM)),
+                    Cell::from(status_label)
+                        .style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                ])
+            })
+            .collect(),
+    };
+
+    let title = match &app.license_report {
+        Some(r) => format!(
+            " Licensing ({} deps, {} permissive, {} copyleft, {} unknown) ",
+            r.total, r.permissive, r.copyleft, r.unknown
+        ),
+        None => " Licensing ".to_string(),
+    };
+    let table = Table::new(rows, [
+        Constraint::Percentage(35),
+        Constraint::Percentage(45),
+        Constraint::Percentage(20),
+    ])
+    .block(Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .style(Style::default().fg(TEXT_MUTED)))
+    .column_spacing(1);
+    frame.render_widget(table, area);
+}
+
+/// Analyze > Legal — re-renders the copyright_report data source from
+/// orrch-core::compliance. Mirrors Publish > Compliance.
+fn draw_analyze_legal(frame: &mut Frame, app: &App, area: Rect) {
+    let body = match &app.copyright_report {
+        None => "No copyright scan available.\n\
+                 Switch to Publish > Compliance to populate, then return."
+            .to_string(),
+        Some(report) => {
+            let mut s = format!(
+                "Files scanned: {}\nWith copyright header: {}\nMissing header: {}\n\n",
+                report.scanned,
+                report.with_header,
+                report.missing.len()
+            );
+            if !report.missing.is_empty() {
+                s.push_str("Files missing copyright header:\n");
+                for entry in report.missing.iter().take(50) {
+                    s.push_str("- ");
+                    s.push_str(&entry.path);
+                    s.push('\n');
+                }
+                if report.missing.len() > 50 {
+                    s.push_str(&format!(
+                        "... ({} more)\n",
+                        report.missing.len() - 50
+                    ));
+                }
+            }
+            s
+        }
+    };
+    let p = Paragraph::new(body)
+        .style(Style::default().fg(TEXT))
+        .wrap(Wrap { trim: false })
+        .block(Block::default()
+            .title(" Legal — Copyright Header Audit ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(p, area);
+}
+
+/// Analyze placeholder for Monetization / Patents — these are stubs in this
+/// sprint; the deeper analyses (revenue model assessments, patent landscape
+/// scans) ship in a follow-up.
+fn draw_analyze_placeholder(frame: &mut Frame, label: &str, area: Rect) {
+    let msg = format!(
+        "{label}\n\nThis sub-tab is a stub.\n\nFollow-up will land in a later \
+         sprint as part of the Analyze panel buildout (overhaul point 12)."
+    );
+    let p = Paragraph::new(msg)
+        .style(Style::default().fg(TEXT_DIM))
+        .wrap(Wrap { trim: false })
+        .block(Block::default()
+            .title(format!(" {label} (coming soon) "))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(p, area);
+}
+
 /// Publish panel: tab bar + per-tab placeholder content (item 98).
 fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     use crate::app::PublishTab;
@@ -440,10 +745,59 @@ fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.publish_tab {
         PublishTab::Packaging => draw_packaging_tab(frame, app, chunks[1]),
         PublishTab::Distribution => draw_distribution_tab(frame, app, chunks[1]),
+        PublishTab::Brands => draw_brands_tab(frame, app, chunks[1]),
         PublishTab::Compliance => draw_compliance_tab(frame, app, chunks[1]),
         PublishTab::Marketing => draw_marketing_tab(frame, app, chunks[1]),
         PublishTab::History => draw_history_tab(frame, app, chunks[1]),
     }
+}
+
+/// Publish > Brands — lists brand profile .md files in `brands/` with a
+/// markdown preview pane on the right (overhaul point 11).
+fn draw_brands_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let hsplit = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(area);
+
+    let rows: Vec<Row> = if app.brand_profiles.is_empty() {
+        vec![Row::new(vec![
+            Cell::from("(no brand profiles)").style(Style::default().fg(TEXT_DIM)),
+        ])]
+    } else {
+        app.brand_profiles
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                let style = if i == app.brand_selected {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                };
+                Row::new(vec![Cell::from(name.clone()).style(style)])
+            })
+            .collect()
+    };
+    let list_table = Table::new(rows, [Constraint::Min(15)])
+        .block(Block::default()
+            .title(format!(" Brand Profiles ({}) ", app.brand_profiles.len()))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(list_table, hsplit[0]);
+
+    let preview = if let Some((_, path)) = app.brand_profiles.get(app.brand_selected) {
+        std::fs::read_to_string(path).unwrap_or_else(|e| format!("Error reading: {e}"))
+    } else {
+        "No brand profile selected. Add .md files under `brands/` and press 'r' to reload."
+            .to_string()
+    };
+    let preview_widget = Paragraph::new(crate::markdown::markdown_to_lines(&preview))
+        .wrap(Wrap { trim: false })
+        .block(Block::default()
+            .title(" Brand Style Guide ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(preview_widget, hsplit[1]);
 }
 
 fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {

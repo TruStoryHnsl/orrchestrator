@@ -9,6 +9,7 @@ pub mod git;
 pub mod intake_review;
 pub mod output_parser;
 pub mod pi_rpc;
+pub mod loops;
 pub mod plan_parser;
 pub mod process_manager;
 pub mod project;
@@ -39,6 +40,7 @@ pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_cl
 pub use session_brief::{SESSION_BRIEFS_SUBDIR, SessionBrief, SessionBriefInput, list_session_briefs, write_session_brief};
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
+pub use loops::{LoopSchedule, load_loops, save_loops, upsert_loop, toggle_loop, delete_loop, loops_path};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};
 pub use compliance::{scan_licenses, check_copyright, LicenseReport, LicenseDep, LicenseStatus, CopyrightReport, MissingHeader};
 pub use release::{BumpKind, BuildTarget, BuildTargetKind, BuildResult, BuildStatus, detect_build_targets, build_artifact, bump_version, generate_changelog_entry, next_version_string};
