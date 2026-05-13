@@ -13,6 +13,64 @@ pub struct Workforce {
     pub connections: Vec<Connection>,
     /// Operation modules this workforce can execute.
     pub operations: Vec<String>, // references to Operation names
+    /// Ordered list of teams this workforce runs (workforce/team architectural
+    /// split). Each entry references a team .md file in `teams/`.
+    /// The cleanup team is the bottom entry in every workforce.
+    /// Empty for workforces predating the team split — back-compat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teams: Vec<TeamRef>,
+}
+
+/// A reference to a team .md file inside a workforce's ordered team list.
+/// Multiple entries with the same `team` name are allowed (e.g., a workforce
+/// may run `develop_feature` three times in sequence).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamRef {
+    /// Order index (1-based) — sets the sequential execution order.
+    pub order: u32,
+    /// Team file stem (e.g., "develop_feature", "cleanup").
+    pub team: String,
+    /// Optional one-line description of why this team appears here.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// A team — a single, complete unit of work with its own agent roster
+/// and step pipeline. Teams are the unit a workforce composes; teams
+/// themselves are compiled from `teams/<name>.md`.
+///
+/// Schema mirrors `Workforce` but adds an explicit `steps` table so the
+/// compiler can produce a deterministic dispatch script without needing
+/// to look up an external operation file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Team {
+    /// Team name (e.g., "Cleanup", "Develop Feature").
+    pub name: String,
+    /// Short description.
+    pub description: String,
+    /// Agents in this team.
+    pub agents: Vec<AgentNode>,
+    /// Connections between team agents.
+    pub connections: Vec<Connection>,
+    /// Ordered step pipeline. Steps with the same `index` run in parallel.
+    pub steps: Vec<TeamStep>,
+    /// Optional summary text appended at the bottom of the team's md file.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+}
+
+/// A single step in a team's pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamStep {
+    /// Index — string to allow "1", "1B", "2.1" etc.
+    pub index: String,
+    /// Agent profile name that executes this step.
+    pub agent: String,
+    /// Optional tool or skill identifier (e.g. "tool:list_files",
+    /// "skill:plan_tasks", "mcp:workflow_init"). `None` = agent decides.
+    pub tool_or_skill: Option<String>,
+    /// Natural-language description of what this step does.
+    pub operation: String,
 }
 
 /// An agent's place in a workforce.
@@ -74,6 +132,7 @@ mod tests {
                 Connection { from: "pm".into(), to: "dev".into(), data_type: DataFlow::Instructions },
             ],
             operations: vec!["DEVELOP FEATURE".into()],
+            teams: vec![],
         };
         assert_eq!(wf.agents.len(), 2);
         assert!(wf.agents[0].user_facing);

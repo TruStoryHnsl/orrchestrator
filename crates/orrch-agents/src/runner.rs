@@ -882,6 +882,7 @@ mod tests {
                 data_type: DataFlow::Instructions,
             }],
             operations: vec!["BUILD FEATURE".into()],
+            teams: vec![],
         };
 
         let operations = vec![

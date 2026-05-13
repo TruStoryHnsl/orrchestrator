@@ -328,6 +328,28 @@ pub fn load_workforces(dir: &std::path::Path) -> Vec<crate::template::Workforce>
     workforces
 }
 
+/// Load team templates from markdown files in a directory (e.g. `teams/`).
+/// Sorted alphabetically by team name for deterministic ordering.
+pub fn load_teams(dir: &std::path::Path) -> Vec<crate::template::Team> {
+    let mut teams = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut paths: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "md"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Some(team) = crate::parser::parse_team_markdown(&content) {
+                    teams.push(team);
+                }
+            }
+        }
+    }
+    teams
+}
+
 /// Serialize a workforce to markdown and write it to `path`.
 ///
 /// Overwrites any existing file at `path` without prompting.
@@ -550,6 +572,7 @@ operations:
             agents,
             connections: vec![],
             operations: vec![],
+            teams: vec![],
         }
     }
 

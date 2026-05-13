@@ -1,5 +1,5 @@
 use crate::operation::{Operation, Step, TriggerCondition};
-use crate::template::{Workforce, AgentNode, Connection, DataFlow};
+use crate::template::{Workforce, AgentNode, Connection, DataFlow, Team, TeamRef, TeamStep};
 
 /// Parse YAML frontmatter delimited by `---` lines.
 /// Returns (frontmatter_text, body_text).
@@ -101,12 +101,14 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
 
     let mut agents = Vec::new();
     let mut connections = Vec::new();
+    let mut teams: Vec<TeamRef> = Vec::new();
 
     #[derive(PartialEq)]
     enum Section {
         None,
         Agents,
         Connections,
+        Teams,
     }
     let mut section = Section::None;
 
@@ -120,14 +122,18 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
                 section = Section::Agents;
             } else if heading == "connections" {
                 section = Section::Connections;
+            } else if heading == "teams" {
+                section = Section::Teams;
             } else {
                 section = Section::None;
             }
             continue;
         }
 
-        // Skip header/separator rows in pipe tables
-        if trimmed.starts_with('|') && (trimmed.contains("---") || trimmed.contains("ID") || trimmed.contains("From")) {
+        // Skip header/separator rows in pipe tables. Detect by "---" (separator),
+        // by header keywords for the active section, or by leading `|` with a
+        // header-like first cell ("Order", "ID", "From").
+        if trimmed.starts_with('|') && (trimmed.contains("---") || trimmed.contains("ID") || trimmed.contains("From") || trimmed.contains("Order")) {
             continue;
         }
 
@@ -175,10 +181,26 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
                         });
                     }
                 }
+                Section::Teams if parts.len() >= 2 => {
+                    // Schema: | Order | Team | Description |
+                    let order: u32 = parts[0].parse().unwrap_or((teams.len() + 1) as u32);
+                    let team_name = parts[1].to_string();
+                    let desc = parts.get(2).map(|s| s.to_string()).unwrap_or_default();
+                    if !team_name.is_empty() {
+                        teams.push(TeamRef {
+                            order,
+                            team: team_name,
+                            description: desc,
+                        });
+                    }
+                }
                 _ => {}
             }
         }
     }
+
+    // Sort teams by order to honor the workforce's intended sequencing.
+    teams.sort_by_key(|t| t.order);
 
     if name.is_empty() {
         return None;
@@ -190,7 +212,179 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
         agents,
         connections,
         operations,
+        teams,
     })
+}
+
+/// Parse a team .md file into a Team. Mirrors the workforce md schema with
+/// an extra `## Steps` section listing the team's pipeline.
+pub fn parse_team_markdown(content: &str) -> Option<Team> {
+    let (frontmatter, body) = parse_frontmatter(content)?;
+
+    let name = extract_field(&frontmatter, "name")?;
+    let description = extract_field(&frontmatter, "description").unwrap_or_default();
+
+    let mut agents = Vec::new();
+    let mut connections = Vec::new();
+    let mut steps: Vec<TeamStep> = Vec::new();
+    let mut summary_lines: Vec<String> = Vec::new();
+
+    #[derive(PartialEq)]
+    enum Section {
+        None,
+        Agents,
+        Connections,
+        Steps,
+        Summary,
+    }
+    let mut section = Section::None;
+
+    for line in body.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("## ") {
+            let heading = trimmed[3..].trim().to_lowercase();
+            section = match heading.as_str() {
+                "agents" => Section::Agents,
+                "connections" => Section::Connections,
+                "steps" => Section::Steps,
+                "summary" => Section::Summary,
+                _ => Section::None,
+            };
+            continue;
+        }
+
+        // Header / separator rows in pipe tables
+        if trimmed.starts_with('|')
+            && (trimmed.contains("---")
+                || trimmed.contains("ID")
+                || trimmed.contains("From")
+                || trimmed.contains("Index"))
+        {
+            continue;
+        }
+
+        if section == Section::Summary {
+            summary_lines.push(line.to_string());
+            continue;
+        }
+
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            let parts: Vec<&str> = trimmed
+                .trim_matches('|')
+                .split('|')
+                .map(|s| s.trim())
+                .collect();
+
+            match section {
+                Section::Agents if parts.len() >= 3 => {
+                    let id = parts[0].to_string();
+                    let agent_profile = parts[1].to_string();
+                    let user_facing = parts[2].to_lowercase() == "yes";
+                    let nested_workforce = if parts.len() >= 4 {
+                        let v = parts[3].trim();
+                        if v.is_empty() || v == "-" { None } else { Some(v.to_string()) }
+                    } else {
+                        None
+                    };
+                    if !id.is_empty() {
+                        agents.push(AgentNode {
+                            id,
+                            agent_profile,
+                            user_facing,
+                            nested_workforce,
+                        });
+                    }
+                }
+                Section::Connections if parts.len() >= 3 => {
+                    let from = parts[0].to_string();
+                    let to = parts[1].to_string();
+                    let data_type = parse_data_flow(parts[2]);
+                    if !from.is_empty() {
+                        connections.push(Connection { from, to, data_type });
+                    }
+                }
+                Section::Steps if parts.len() >= 4 => {
+                    // Schema: | Index | Agent | Tool/Skill | Operation |
+                    let index = parts[0].to_string();
+                    let agent = parts[1].to_string();
+                    let tool_raw = parts[2];
+                    let tool = if tool_raw == "*" || tool_raw == "?" || tool_raw.is_empty() {
+                        None
+                    } else {
+                        Some(tool_raw.to_string())
+                    };
+                    let operation = parts[3..].join(" | ").to_string();
+                    if !index.is_empty() && !agent.is_empty() {
+                        steps.push(TeamStep { index, agent, tool_or_skill: tool, operation });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let summary = summary_lines.join("\n").trim().to_string();
+
+    Some(Team {
+        name,
+        description,
+        agents,
+        connections,
+        steps,
+        summary,
+    })
+}
+
+/// Serialize a Team back to markdown. Round-trips with `parse_team_markdown`.
+pub fn serialize_team_markdown(team: &Team) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+
+    out.push_str("---\n");
+    let _ = writeln!(out, "name: {}", team.name);
+    let _ = writeln!(out, "description: {}", team.description);
+    out.push_str("---\n\n");
+
+    out.push_str("## Agents\n\n");
+    out.push_str("| ID | Agent Profile | User-Facing | Nested Workforce |\n");
+    out.push_str("|---|---|---|---|\n");
+    for a in &team.agents {
+        let uf = if a.user_facing { "yes" } else { "no" };
+        let nested = a.nested_workforce.as_deref().unwrap_or("-");
+        let _ = writeln!(out, "| {} | {} | {} | {} |", a.id, a.agent_profile, uf, nested);
+    }
+    out.push('\n');
+
+    out.push_str("## Connections\n\n");
+    out.push_str("| From | To | Data Type |\n");
+    out.push_str("|------|----|-----------|\n");
+    for c in &team.connections {
+        let _ = writeln!(out, "| {} | {} | {} |", c.from, c.to, data_flow_token(&c.data_type));
+    }
+    out.push('\n');
+
+    out.push_str("## Steps\n\n");
+    out.push_str("| Index | Agent | Tool/Skill | Operation |\n");
+    out.push_str("|-------|-------|------------|-----------|\n");
+    for s in &team.steps {
+        let tool = s.tool_or_skill.as_deref().unwrap_or("*");
+        let _ = writeln!(out, "| {} | {} | {} | {} |", s.index, s.agent, tool, s.operation);
+    }
+
+    if !team.summary.is_empty() {
+        out.push_str("\n## Summary\n\n");
+        out.push_str(&team.summary);
+        if !team.summary.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+
+    out
 }
 
 /// Convert a DataFlow variant into its lowercase token string used by the parser.
@@ -841,6 +1035,69 @@ operations:
     }
 
     #[test]
+    fn test_real_teams_parse() {
+        let root = workspace_root();
+        for stem in ["cleanup", "develop_feature", "develop_aio"] {
+            let path = root.join(format!("teams/{}.md", stem));
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+            let team = parse_team_markdown(&content)
+                .unwrap_or_else(|| panic!("teams/{}.md must parse", stem));
+            assert!(!team.name.is_empty());
+            assert!(!team.steps.is_empty(), "teams/{}.md has no steps", stem);
+        }
+    }
+
+    #[test]
+    fn test_team_round_trip() {
+        let team = Team {
+            name: "Test Team".into(),
+            description: "round-trip check".into(),
+            agents: vec![AgentNode {
+                id: "pm".into(),
+                agent_profile: "Project Manager".into(),
+                user_facing: true,
+                nested_workforce: None,
+            }],
+            connections: vec![],
+            steps: vec![TeamStep {
+                index: "1".into(),
+                agent: "Project Manager".into(),
+                tool_or_skill: Some("skill:plan_tasks".into()),
+                operation: "decompose goal into tasks".into(),
+            }],
+            summary: "A short summary line.".into(),
+        };
+        let serialized = serialize_team_markdown(&team);
+        let parsed = parse_team_markdown(&serialized).expect("round-trip parse");
+        assert_eq!(parsed.name, team.name);
+        assert_eq!(parsed.description, team.description);
+        assert_eq!(parsed.agents.len(), 1);
+        assert_eq!(parsed.steps.len(), 1);
+        assert_eq!(parsed.steps[0].tool_or_skill.as_deref(), Some("skill:plan_tasks"));
+        assert_eq!(parsed.summary.trim(), "A short summary line.");
+    }
+
+    #[test]
+    fn test_workforces_parse_team_section() {
+        let root = workspace_root();
+        let path = root.join("workforces/commercial_software_development.md");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let wf = parse_workforce_markdown(&content).unwrap();
+        assert!(!wf.teams.is_empty(), "expected ## Teams section parsed");
+        assert!(
+            wf.teams.iter().any(|t| t.team == "cleanup"),
+            "expected cleanup team in commercial workforce"
+        );
+        // cleanup must be the LAST team in the workforce's declaration.
+        assert_eq!(
+            wf.teams.last().unwrap().team,
+            "cleanup",
+            "cleanup team must be last in workforce"
+        );
+    }
+
+    #[test]
     fn test_serialize_empty_workforce_round_trip() {
         let wf = Workforce {
             name: "Empty".into(),
@@ -848,6 +1105,7 @@ operations:
             agents: vec![],
             connections: vec![],
             operations: vec![],
+            teams: vec![],
         };
         let serialized = serialize_workforce_markdown(&wf);
         let parsed = parse_workforce_markdown(&serialized).expect("parse empty");
@@ -879,6 +1137,7 @@ operations:
             ],
             connections: vec![],
             operations: vec![],
+            teams: vec![],
         };
         let serialized = serialize_workforce_markdown(&wf);
         let parsed = parse_workforce_markdown(&serialized).expect("parse nested");
