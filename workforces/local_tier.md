@@ -23,3 +23,10 @@ operations:
 | dev | pt | deliverable |
 | ft | pm | report |
 | pt | pm | report |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_aio | local-tier all-in-one cycle (smaller agent set, tight verification) |
+| 2 | cleanup | MANDATORY workforce-scale reconciliation |

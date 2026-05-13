@@ -58,3 +58,12 @@ operations:
 | ci | pm | report |
 | mentor | pm | instructions |
 | irm | pm | instructions |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_feature | primary feature implementation cycle |
+| 2 | develop_feature | secondary feature cycle (parallel-track features) |
+| 3 | develop_feature | tertiary feature cycle (refinements, follow-ups) |
+| 4 | cleanup | MANDATORY workforce-scale reconciliation: review all branches/PRs from teams 1-3, run build+test, classify merge/rework/escalate, run merge_to_main, write cleanup_summary.md + DEVLOG entry |

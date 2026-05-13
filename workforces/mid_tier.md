@@ -27,3 +27,10 @@ operations:
 | ft | pm | report |
 | dev | spec | deliverable |
 | spec | pm | report |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_feature | mid-tier structured feature cycle |
+| 2 | cleanup | MANDATORY workforce-scale reconciliation |

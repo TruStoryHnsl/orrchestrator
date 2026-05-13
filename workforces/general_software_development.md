@@ -43,3 +43,11 @@ operations:
 | eng | dev | instructions |
 | res | eng | research |
 | pm | rm | deliverable |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_feature | primary feature implementation cycle |
+| 2 | develop_feature | secondary feature cycle (follow-up work) |
+| 3 | cleanup | MANDATORY workforce-scale reconciliation: review all branches/PRs, run build+test, classify, run merge_to_main, write cleanup_summary.md + DEVLOG entry |

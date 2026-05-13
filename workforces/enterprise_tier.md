@@ -24,3 +24,10 @@ operations:
 | pm | res | research |
 | dev | ft | deliverable |
 | ft | pm | report |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_feature | enterprise-tier feature cycle (loose guidance, broad scope) |
+| 2 | cleanup | MANDATORY workforce-scale reconciliation |

@@ -34,3 +34,10 @@ operations:
 | ft | pm | report |
 | bt | pm | report |
 | pm | rm | deliverable |
+
+## Teams
+
+| Order | Team | Description |
+|-------|------|-------------|
+| 1 | develop_aio | lightweight all-in-one cycle for quick fixes and config tweaks |
+| 2 | cleanup | MANDATORY workforce-scale reconciliation |
