@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Resource Optimizer agent — annotates dev plans with model/harness optimization suggestions
 argument-hint: "<development plan to optimize>"
 allowed-tools: Bash, Read, Glob, Grep

@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Feature Tester agent — designs and runs tests against deliverables, reports results
 argument-hint: "<what to test, e.g. 'test the new tab navigation in orrchestrator TUI'>"
 allowed-tools: Bash, Read, Glob, Grep

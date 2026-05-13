@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Executive Assistant agent — triages user input, routes dev work to COO, handles non-dev requests directly
 argument-hint: "<user message or feedback to triage>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit

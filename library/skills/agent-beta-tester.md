@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Beta Tester agent — tries to break features through adversarial usage and edge cases
 argument-hint: "<feature to stress-test and try to break>"
 allowed-tools: Bash, Read, Glob, Grep

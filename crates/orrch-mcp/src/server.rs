@@ -13,6 +13,11 @@ pub struct OrrchMcpServer {
     /// library (`<library_dir>/skills/`) so every `.md` under that tree
     /// is reachable via `list_skills` and `skill_invoke`.
     pub skills_dir: PathBuf,
+    /// Workforce templates directory (e.g. ~/projects/orrchestrator/workforces/).
+    pub workforces_dir: PathBuf,
+    /// Teams directory (e.g. ~/projects/orrchestrator/teams/) — single-team
+    /// units that workforces compose. Source for the .md → script compiler.
+    pub teams_dir: PathBuf,
 }
 
 impl OrrchMcpServer {
@@ -26,6 +31,8 @@ impl OrrchMcpServer {
         Self {
             agents_dir: orrch_dir.join("agents"),
             skills_dir: library_dir.join("skills"),
+            workforces_dir: orrch_dir.join("workforces"),
+            teams_dir: orrch_dir.join("teams"),
             library_dir,
             projects_dir,
         }

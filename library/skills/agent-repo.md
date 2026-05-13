@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Repository Manager agent — handles git operations, commits, branches, releases
 argument-hint: "<task, e.g. 'commit the workforce tab changes' or 'release orrchestrator patch'>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit

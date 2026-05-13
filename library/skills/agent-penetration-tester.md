@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Penetration Tester agent — performs security testing, threat modeling, and OWASP Top 10 sweeps
 argument-hint: "<feature or codebase area to security-test>"
 allowed-tools: Bash, Read, Glob, Grep

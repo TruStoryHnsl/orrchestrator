@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Software Engineer agent — designs implementations, produces technical specs
 argument-hint: "<design task, e.g. 'design the agent tree visualization for the Hypervise panel'>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent

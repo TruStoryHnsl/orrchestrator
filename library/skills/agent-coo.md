@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the COO agent — optimizes raw instructions into token-efficient prompts, routes to projects
 argument-hint: "<raw instructions or path to instruction file>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit

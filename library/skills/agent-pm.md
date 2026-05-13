@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Project Manager agent — plans, delegates, reviews deliverables, manages the dev loop
 argument-hint: "<task description, e.g. 'synthesize instructions into plan for concord'>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent

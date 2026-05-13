@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Feature Tester agent — designs test cases and verifies features against acceptance criteria
 argument-hint: "<feature description and acceptance criteria to test>"
 allowed-tools: Bash, Read, Glob, Grep

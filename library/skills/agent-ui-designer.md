@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the UI Designer agent — designs TUI interfaces, component layouts, and visual states
 argument-hint: "<interface component or panel to design>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit

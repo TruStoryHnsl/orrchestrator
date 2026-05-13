@@ -466,6 +466,54 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["project_dir"]
             }
         }),
+        serde_json::json!({
+            "name": "develop_aio",
+            "description": "Load the legacy all-in-one develop-feature skill (preserved verbatim from the pre-overhaul pipeline). Use when a single-session pipeline is preferable to the multi-team workforce. The new `develop_feature` tool now invokes the compiled multi-team pipeline; `develop_aio` remains the upgrade target for accumulated heuristic optimizations (file-cluster bundling, light-vs-full verification, tiered-merge invocation).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "The development goal or feature description"},
+                    "project_dir": {"type": "string", "description": "Optional project directory path"}
+                },
+                "required": ["goal"]
+            }
+        }),
+        serde_json::json!({
+            "name": "team_call",
+            "description": "Compile and dispatch a single team. Loads `teams/<name>.md`, runs the deterministic .md→script compiler (no LLM, no network), and returns the rendered dispatch script with all step descriptors, agent prompts, and execution metadata embedded. The harness reads the returned script top-to-bottom and executes each step. Use this to spawn one cohesive team-level work unit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "team": {"type": "string", "description": "Team name or filename stem (e.g. 'develop_feature', 'cleanup', 'develop_aio')"},
+                    "goal": {"type": "string", "description": "Optional goal/instruction text injected into the dispatch preamble"},
+                    "project_dir": {"type": "string", "description": "Optional absolute path to the target project directory"}
+                },
+                "required": ["team"]
+            }
+        }),
+        serde_json::json!({
+            "name": "workflow_call",
+            "description": "Compile and dispatch a full workflow (workforce). Loads `workforces/<name>.md`, expands every team referenced in its `## Teams` table into a single ordered dispatch script, ALWAYS appending the cleanup team at the end. The harness spawns ONE session per team sequentially while keeping prior sessions OPEN IN PARALLEL until the workforce-scale cleanup team writes `cleanup_summary.md`. Pure deterministic compilation — no LLM, no network.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow": {"type": "string", "description": "Workforce name or filename stem (e.g. 'commercial_software_development', 'general_software_development')"},
+                    "goal": {"type": "string", "description": "Optional goal/instruction text injected into the dispatch preamble"},
+                    "project_dir": {"type": "string", "description": "Optional absolute path to the target project directory"}
+                },
+                "required": ["workflow"]
+            }
+        }),
+        serde_json::json!({
+            "name": "team_list",
+            "description": "List all team .md files registered in the orrchestrator teams/ directory. Returns name, description, agent count, step count for each team.",
+            "inputSchema": {"type": "object", "properties": {}}
+        }),
+        serde_json::json!({
+            "name": "workflow_list",
+            "description": "List all workforce .md files registered in the orrchestrator workforces/ directory. Returns name, description, team count for each workforce.",
+            "inputSchema": {"type": "object", "properties": {}}
+        }),
     ]
 }
 
@@ -501,6 +549,11 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "create_workflow" => create_library_entry(server, args, "workflow"),
         "continue_intake" => continue_intake(server, args),
         "incorporate_inbox" => incorporate_inbox(args),
+        "develop_aio" => develop_aio(server, args),
+        "team_call" => team_call(server, args),
+        "workflow_call" => workflow_call(server, args),
+        "team_list" => team_list(server),
+        "workflow_list" => workflow_list(server),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -621,11 +674,22 @@ fn list_skills(server: &OrrchMcpServer) -> String {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "md") {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let desc = if let Ok(content) = std::fs::read_to_string(&path) {
-                extract_frontmatter_field(&content, "description").unwrap_or_default()
+            let (desc, internal) = if let Ok(content) = std::fs::read_to_string(&path) {
+                let desc = extract_frontmatter_field(&content, "description").unwrap_or_default();
+                let internal = extract_frontmatter_field(&content, "internal")
+                    .map(|v| v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                (desc, internal)
             } else {
-                String::new()
+                (String::new(), false)
             };
+            // Skills auto-served as MCP harness instructions (agent-*, develop-*)
+            // are tagged `internal: true` and excluded from the user-facing menu.
+            // They remain reachable via skill_invoke / develop_feature / team_call
+            // / workflow_call etc.
+            if internal || is_internal_skill_stem(&stem) {
+                continue;
+            }
             skills.push(format!("- {stem}: {desc}"));
         }
     }
@@ -639,78 +703,201 @@ fn list_skills(server: &OrrchMcpServer) -> String {
     }
 }
 
-fn develop_feature(_server: &OrrchMcpServer, args: &Value) -> String {
-    let goal = args
-        .get("goal")
-        .and_then(|v| v.as_str())
-        .unwrap_or("continue development");
-    let project_dir = args
-        .get("project_dir")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".");
+/// Pattern-based fallback for the user-facing skills menu filter. Used when
+/// a skill file lacks the explicit `internal: true` frontmatter tag.
+pub fn is_internal_skill_stem(stem: &str) -> bool {
+    stem.starts_with("agent-")
+        || stem == "develop-feature"
+        || stem == "develop-aio"
+}
+
+fn develop_feature(server: &OrrchMcpServer, args: &Value) -> String {
+    // Restructured (orrchestrator overhaul): `develop_feature` is now a thin
+    // alias for `team_call("develop_feature", ...)`. The real pipeline is
+    // compiled deterministically from `teams/develop_feature.md`. The legacy
+    // all-in-one skill remains available as `develop_aio`.
+    let team_args = serde_json::json!({
+        "team": "develop_feature",
+        "goal": args.get("goal").cloned().unwrap_or_else(|| serde_json::Value::String("continue development".into())),
+        "project_dir": args.get("project_dir").cloned().unwrap_or_else(|| serde_json::Value::String(".".into())),
+    });
+    team_call(server, &team_args)
+}
+
+/// Load the legacy AIO skill and return its content with the goal preamble.
+fn develop_aio(server: &OrrchMcpServer, args: &Value) -> String {
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("continue development");
+    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+    let skill_path = server.skills_dir.join("develop-aio.md");
+    let body = match std::fs::read_to_string(&skill_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read develop-aio.md: {e}"),
+    };
+    format!(
+        "## Goal\n\n{goal}\n\n## Project\n\n{project_dir}\n\n---\n\n{body}",
+    )
+}
+
+/// Compile the named team's markdown and return the deterministic dispatch
+/// script. Pure local Rust — no LLM, no network.
+fn team_call(server: &OrrchMcpServer, args: &Value) -> String {
+    let team_name = match args.get("team").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return "Error: 'team' parameter is required".into(),
+    };
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+
+    let teams = orrch_workforce::load_teams(&server.teams_dir);
+    let team = match teams.iter().find(|t| {
+        t.name.eq_ignore_ascii_case(team_name)
+            || normalize_stem(&t.name) == team_name.to_lowercase()
+    }) {
+        Some(t) => t,
+        None => {
+            return format!(
+                "Error: team '{team_name}' not found in {}. Available: {}",
+                server.teams_dir.display(),
+                teams.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
+            )
+        }
+    };
+
+    let agent_profiles = load_agent_profile_bodies(&server.agents_dir);
+    let compiled = orrch_workforce::compile_team(team, &agent_profiles);
+    let body = compiled.render();
 
     format!(
-        "Develop-feature workflow for: {goal}\n\
-         Project: {project_dir}\n\n\
-         The Hypervisor is a THIN DISPATCHER. Execute exactly these steps:\n\n\
-         1. Call MCP tool `workflow_init` with project_dir=\"{project_dir}\"\n\
-         2. Ensure you are on the main branch at HEAD before spawning any worktree agents.\n\
-            Run `git checkout main` if needed.\n\
-         3. Spawn a SINGLE PM agent (subagent_type: general-purpose) with:\n\
-            - The full codebase brief + unchecked items from step 1\n\
-            - The goal: \"{goal}\"\n\
-            - The PM instructions below\n\
-         4. When the PM returns, take its final output and commit.\n\
-            Update PLAN.md with [x] for completed items. Commit with conventional format.\n\n\
-         That's it. The PM manages the entire dev loop. Do NOT:\n\
-         - Cluster tasks yourself (PM does it)\n\
-         - Spawn developer agents yourself (PM does it)\n\
-         - Spawn tester agents yourself (PM does it)\n\
-         - Evaluate pass/fail yourself (PM does it)\n\
-         - Second-guess or filter the PM's task selection\n\n\
-         ---\n\n\
-         ## PM AGENT INSTRUCTIONS\n\n\
-         You are the Project Manager. You own the entire dev loop for this sprint.\n\n\
-         ### Phase 1: Task Selection\n\
-         Read the unchecked items from the codebase brief. Select the next batch of\n\
-         actionable items (no artificial limit — pick everything that's unblocked).\n\
-         Output each as a TASK block:\n\n\
-         ```\n\
-         TASK <id>: <description>\n\
-         Agent: <role>\n\
-         Files: <comma-separated paths>\n\
-         Work: <2-3 sentences>\n\
-         Acceptance: <one measurable criterion>\n\
-         Depends: <task ids or none>\n\
-         ```\n\n\
-         ### Phase 2: Clustering\n\
-         Call MCP tool `workflow_cluster` with your TASK blocks.\n\
-         The cluster tool groups tasks by shared files and assigns execution waves.\n\n\
-         ### Phase 3: Agent Dispatch\n\
-         For EACH cluster, spawn a Developer agent (using the Agent tool with\n\
-         isolation: \"worktree\") with:\n\
-         - All tasks in that cluster\n\
-         - The codebase brief for context\n\
-         - Instruction to run `cargo build` and `cargo test` after changes\n\
-         Spawn clusters in the same wave IN PARALLEL (multiple Agent calls in one message).\n\
-         Wait for wave N to complete before starting wave N+1.\n\
-         Dispatch ALL tasks. Do not skip or defer any.\n\n\
-         ### Phase 4: Compression\n\
-         Call MCP tool `workflow_compress` on each developer agent's output.\n\n\
-         ### Phase 5: Testing (conditional)\n\
-         Spawn tester agents ONLY if the work involves significant structural changes:\n\
-         new crates, new traits, modified auth/security code, or completing a full phase.\n\
-         Otherwise, the developer's own `cargo test` is sufficient.\n\n\
-         ### Phase 6: Evaluation\n\
-         Review all compressed outputs. Determine: PASS / REWORK / SHIP_WITH_ISSUES.\n\
-         If REWORK: spawn a Developer agent with the fix list (max 3 rework cycles).\n\n\
-         ### Phase 7: Report\n\
-         Return a final report listing:\n\
-         - Each task ID and whether it passed\n\
-         - Files changed per task\n\
-         - Any worktree paths/branches that contain the changes\n\
-         - Which PLAN.md items to mark [x]"
+        "# Team Dispatch — {team_name}\n\n\
+         **Goal:** {goal}\n\
+         **Project:** {project_dir}\n\n\
+         The orrchestrator harness compiled this dispatch script DETERMINISTICALLY \
+         from `teams/{stem}.md` via the in-process .md→script compiler — no LLM \
+         was involved in the translation. Execute the steps below mechanically.\n\n\
+         ---\n\n{body}",
+        stem = normalize_stem(&team.name),
     )
+}
+
+/// Compile the named workflow (workforce) and return the deterministic
+/// dispatch script with embedded team execution order. Pure local Rust.
+fn workflow_call(server: &OrrchMcpServer, args: &Value) -> String {
+    let workflow_name = match args.get("workflow").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return "Error: 'workflow' parameter is required".into(),
+    };
+    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
+    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+
+    let workforces = orrch_workforce::load_workforces(&server.workforces_dir);
+    let workforce = match workforces.iter().find(|w| {
+        w.name.eq_ignore_ascii_case(workflow_name)
+            || normalize_stem(&w.name) == workflow_name.to_lowercase()
+    }) {
+        Some(w) => w,
+        None => {
+            return format!(
+                "Error: workflow '{workflow_name}' not found in {}. Available: {}",
+                server.workforces_dir.display(),
+                workforces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ")
+            )
+        }
+    };
+
+    let teams = orrch_workforce::load_teams(&server.teams_dir);
+    let agent_profiles = load_agent_profile_bodies(&server.agents_dir);
+    let compiled = orrch_workforce::compile_workflow(workforce, &teams, &agent_profiles);
+    let body = compiled.render();
+
+    format!(
+        "# Workflow Dispatch — {workflow_name}\n\n\
+         **Goal:** {goal}\n\
+         **Project:** {project_dir}\n\n\
+         The orrchestrator harness compiled this dispatch script DETERMINISTICALLY \
+         from `workforces/{stem}.md` via the in-process .md→script compiler — no \
+         LLM was involved in the translation.\n\n\
+         The workflow expands to multiple teams, each running in its own harness \
+         session. Sessions stay open in parallel; the cleanup team is the last \
+         entry and writes the final summary.\n\n\
+         ---\n\n{body}",
+        stem = normalize_stem(&workforce.name),
+    )
+}
+
+/// List every team .md file in the teams/ directory.
+fn team_list(server: &OrrchMcpServer) -> String {
+    let teams = orrch_workforce::load_teams(&server.teams_dir);
+    if teams.is_empty() {
+        return format!(
+            "No teams found in {}. Create teams/<name>.md files using the team md syntax.",
+            server.teams_dir.display()
+        );
+    }
+    let mut out = format!("Teams ({} total):\n", teams.len());
+    for team in &teams {
+        out.push_str(&format!(
+            "- {} ({} agents, {} steps): {}\n",
+            team.name,
+            team.agents.len(),
+            team.steps.len(),
+            team.description
+        ));
+    }
+    out
+}
+
+/// List every workforce .md file in the workforces/ directory.
+fn workflow_list(server: &OrrchMcpServer) -> String {
+    let workforces = orrch_workforce::load_workforces(&server.workforces_dir);
+    if workforces.is_empty() {
+        return format!("No workforces found in {}.", server.workforces_dir.display());
+    }
+    let mut out = format!("Workflows ({} total):\n", workforces.len());
+    for w in &workforces {
+        out.push_str(&format!(
+            "- {} ({} teams): {}\n",
+            w.name,
+            w.teams.len(),
+            w.description
+        ));
+    }
+    out
+}
+
+/// Load every `agents/<name>.md` profile and return (display_name, body) pairs
+/// for the compiler to embed. Reads YAML frontmatter `name:` field; falls back
+/// to filename stem if missing.
+fn load_agent_profile_bodies(agents_dir: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(agents_dir) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .collect();
+    paths.sort();
+    for path in paths {
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let name = extract_frontmatter_field(&content, "name").unwrap_or_else(|| {
+            path.file_stem().unwrap_or_default().to_string_lossy().into()
+        });
+        out.push((name, content));
+    }
+    out
+}
+
+/// Lowercase + non-alnum→underscore + collapse for stem matching.
+fn normalize_stem(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
 }
 
 fn assess_development(server: &OrrchMcpServer, args: &Value) -> String {
@@ -2453,8 +2640,10 @@ mod tests {
     #[test]
     fn test_tool_definitions_count() {
         // 15 base tools + skill_invoke + 5 remote_* tools + 4 create_* tools
-        // + continue_intake + incorporate_inbox + assess_development = 28.
-        assert_eq!(tool_definitions().len(), 28);
+        // + continue_intake + incorporate_inbox + assess_development = 28
+        // + workflow/team architectural split: develop_aio, team_call,
+        //   workflow_call, team_list, workflow_list = +5 → 33.
+        assert_eq!(tool_definitions().len(), 33);
     }
 
     #[test]
@@ -2472,6 +2661,12 @@ mod tests {
             "remote_kill_session",
             "continue_intake",
             "incorporate_inbox",
+            // Workflow/team architectural split (orrchestrator overhaul).
+            "develop_aio",
+            "team_call",
+            "workflow_call",
+            "team_list",
+            "workflow_list",
         ] {
             assert!(
                 names.iter().any(|n| n == expected),
@@ -2761,6 +2956,8 @@ pub mod inner;
         let server = OrrchMcpServer {
             agents_dir: root.join("agents"),
             skills_dir: library_dir.join("skills"),
+            workforces_dir: root.join("workforces"),
+            teams_dir: root.join("teams"),
             library_dir,
             projects_dir: root.join("projects"),
         };

@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Researcher agent — investigates technical options, evaluates libraries, produces structured reports
 argument-hint: "<research question or technology to evaluate>"
 allowed-tools: Bash, Read, Glob, Grep, Agent, WebSearch, WebFetch

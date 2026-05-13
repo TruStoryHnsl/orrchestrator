@@ -1,9 +1,21 @@
 ---
-description: Execute the develop-feature workflow — a dispatch loop that spawns agents, pipes compressed output between steps, and commits results
+description: LEGACY all-in-one develop-feature dispatch loop. Preserved for cases where a single-session pipeline is preferable to the multi-team workforce. Superseded by `develop_feature` MCP tool (which now invokes the team_call compiler-driven pipeline). Hidden from the user-facing skills menu (internal:true).
 argument-hint: "<development goal or instruction>" or no args to read from instructions_inbox.md
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit, Agent
 internal: true
 ---
+
+# /develop-aio — Legacy AIO Dispatch Loop
+
+This is the **legacy** all-in-one develop-feature pipeline preserved verbatim
+from the pre-overhaul `/develop-feature` skill. It encodes a lot of accumulated
+optimization (file-cluster-bundling to avoid duplicate reads, light-vs-full
+verification heuristics, tiered-merge tool invocation) and is the upgrade
+target for future heuristic improvements.
+
+The new `develop_feature` MCP tool now invokes the compiled multi-team
+pipeline. Use `develop_aio` (or invoke this skill directly) when you want the
+single-session legacy pipeline instead.
 
 # /develop-feature — Dispatch Loop
 

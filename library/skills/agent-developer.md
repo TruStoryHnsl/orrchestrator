@@ -1,4 +1,5 @@
 ---
+internal: true
 description: Invoke the Developer agent — implements code per instructions, follows existing patterns
 argument-hint: "<coding task, e.g. 'implement the responsive tab layout in orrch-tui'>"
 allowed-tools: Bash, Read, Glob, Grep, Write, Edit
