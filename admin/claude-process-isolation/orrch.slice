@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude AI assistant background tasks (cgroup isolation)
+Documentation=man:systemd.slice(5) man:systemd-run(1)
+Before=session.slice
+
+[Slice]
+CPUWeight=20
+IOWeight=20
+CPUAccounting=yes
+IOAccounting=yes
+MemoryAccounting=yes
+TasksAccounting=yes
+MemoryHigh=4G
+MemoryMax=8G
+TasksMax=2048
