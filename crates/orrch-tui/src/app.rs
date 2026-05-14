@@ -1081,6 +1081,25 @@ pub struct App {
     /// increments this; Down decrements. Persisted per-session so a
     /// collapsed-and-re-expanded view keeps its place.
     pub session_preview_scroll: std::collections::HashMap<String, usize>,
+
+    /// Per-session pulse tracker for the cockpit roster.
+    /// Records the previous tick's output-byte count and the timestamp
+    /// it last grew, so the roster can render a moving block glyph
+    /// (▁▂▃▄▅▆▇█) for sessions actively producing output. Settles back
+    /// to empty space after 2 seconds of silence.
+    pub session_pulse: std::collections::HashMap<String, SessionPulse>,
+}
+
+/// Per-session pulse state — drives the moving block glyph in the
+/// cockpit roster. See `App::session_pulse`.
+#[derive(Debug, Clone, Copy)]
+pub struct SessionPulse {
+    /// Last observed output-byte count.
+    pub last_len: usize,
+    /// Wall-clock time of the most recent growth.
+    pub last_growth: std::time::Instant,
+    /// Animation tick used to cycle through the 8 block glyphs.
+    pub tick: u8,
 }
 
 /// A versioned release entry for the Production panel.
@@ -1324,6 +1343,7 @@ impl App {
             session_prompt_caret: 0,
             inline_pane_cache: std::collections::HashMap::new(),
             session_preview_scroll: std::collections::HashMap::new(),
+            session_pulse: std::collections::HashMap::new(),
         };
         // Populate fields that need projects_dir AFTER struct construction
         // (struct moves projects_dir into self.projects_dir).
@@ -6253,22 +6273,26 @@ KeyCode::Char('i') => {
     /// renderer treats the cached pane content (200 scrollback lines)
     /// as the upper bound; with a fixed 16-line viewport the user can
     /// see ~184 lines of history before hitting the top.
-    pub fn preview_max_scroll(&self, name: &str) -> usize {
-        const VIEWPORT: usize = 16;
-        let line_count = self
-            .inline_pane_cache
-            .get(name)
-            .map(|(_, raw)| raw.lines().count())
-            .unwrap_or(0);
-        line_count.saturating_sub(VIEWPORT)
-    }
-
     fn key_sessions_tab(&mut self, key: KeyCode) -> Result<()> {
-        // While the inline prompt input is active, every keystroke goes to
-        // the buffer rather than the list.
+        // Cockpit layout (Hypervise > Sessions): the inspector is always
+        // on, selection drives it instantly, and the inline-expand /
+        // prompt-row navigation has been retired. Keys are flat:
+        //   ↑/↓     navigate roster
+        //   PgUp/PgDn  jump 5 rows
+        //   Home/End   first / last row
+        //   Enter   open the full-screen ExpandedSession view
+        //   i / p   activate the inspector prompt input
+        //   T       jump to the first session in the triage strip
+        //   o       focus the selected session's external tmux window
+        //   m       minimize that window
+        //   x / Del kill the selected session (asks for confirmation)
+        //   L       toggle the session log browser
+        //   R       force-refresh the session list
+        //   q       quit
         if self.session_prompt_active {
             return self.key_sessions_prompt_input(key);
         }
+        let len = self.managed_sessions.len();
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('R') => {
@@ -6276,127 +6300,35 @@ KeyCode::Char('i') => {
                 self.notify("Sessions refreshed".into());
             }
             KeyCode::Up => {
-                // Prompt row → back to the session header.
-                if self.session_focus_prompt {
-                    self.session_focus_prompt = false;
-                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    let is_expanded = self.session_inline_expanded.contains(&name);
-                    // On an expanded session header → scroll the preview
-                    // upward (showing older lines). When we hit the top,
-                    // fall through to "previous session" navigation.
-                    let max_scroll = self.preview_max_scroll(&name);
-                    let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
-                    if is_expanded && cur < max_scroll {
-                        self.session_preview_scroll.insert(name, (cur + 1).min(max_scroll));
-                    } else if self.session_tab_selected > 0 {
-                        self.session_tab_selected -= 1;
-                        if let Some(prev) = self.managed_sessions.get(self.session_tab_selected) {
-                            if self.session_inline_expanded.contains(&prev.name) {
-                                // Land on the prompt row of the previous
-                                // expanded session — Up reverses Down.
-                                self.session_focus_prompt = true;
-                            }
-                        }
-                    } else {
-                        self.focus_depth = 0;
-                    }
-                } else if self.session_tab_selected == 0 {
+                if self.session_tab_selected == 0 {
                     self.focus_depth = 0;
+                } else {
+                    self.session_tab_selected -= 1;
                 }
             }
             KeyCode::Down => {
-                if self.session_focus_prompt {
-                    self.session_focus_prompt = false;
-                    if !self.managed_sessions.is_empty()
-                        && self.session_tab_selected < self.managed_sessions.len() - 1
-                    {
-                        self.session_tab_selected += 1;
-                    }
-                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    let is_expanded = self.session_inline_expanded.contains(&name);
-                    let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
-                    if is_expanded && cur > 0 {
-                        // Scrolled up earlier — Down brings us back toward
-                        // the live tail.
-                        self.session_preview_scroll.insert(name, cur - 1);
-                    } else if is_expanded {
-                        // At the bottom of the preview → focus the prompt row.
-                        self.session_focus_prompt = true;
-                    } else if !self.managed_sessions.is_empty()
-                        && self.session_tab_selected < self.managed_sessions.len() - 1
-                    {
-                        self.session_tab_selected += 1;
-                    }
+                if len > 0 && self.session_tab_selected + 1 < len {
+                    self.session_tab_selected += 1;
                 }
             }
             KeyCode::PageUp => {
-                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    if self.session_inline_expanded.contains(&name) {
-                        let max = self.preview_max_scroll(&name);
-                        let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
-                        self.session_preview_scroll
-                            .insert(name, (cur + 10).min(max));
-                    }
-                }
+                self.session_tab_selected = self.session_tab_selected.saturating_sub(5);
             }
             KeyCode::PageDown => {
-                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    if self.session_inline_expanded.contains(&name) {
-                        let cur = *self.session_preview_scroll.get(&name).unwrap_or(&0);
-                        self.session_preview_scroll
-                            .insert(name, cur.saturating_sub(10));
-                    }
+                if len > 0 {
+                    self.session_tab_selected = (self.session_tab_selected + 5).min(len - 1);
                 }
             }
             KeyCode::Home => {
-                // Snap to the live tail (newest content) on the current preview.
-                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    if self.session_inline_expanded.contains(&name) {
-                        self.session_preview_scroll.insert(name, 0);
-                    }
-                }
+                self.session_tab_selected = 0;
             }
             KeyCode::End => {
-                // Snap to the oldest captured content.
-                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    if self.session_inline_expanded.contains(&name) {
-                        let max = self.preview_max_scroll(&name);
-                        self.session_preview_scroll.insert(name, max);
-                    }
-                }
-            }
-            KeyCode::Right => {
-                // Right toggles inline expand (or, when on the prompt row,
-                // opens the prompt input — same as Enter on the prompt row).
-                if self.session_focus_prompt {
-                    self.session_prompt_active = true;
-                    self.session_prompt_buffer.clear();
-                    self.session_prompt_caret = 0;
-                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    if self.session_inline_expanded.contains(&name) {
-                        self.session_inline_expanded.remove(&name);
-                        self.session_focus_prompt = false;
-                    } else {
-                        self.session_inline_expanded.insert(name);
-                    }
+                if len > 0 {
+                    self.session_tab_selected = len - 1;
                 }
             }
             KeyCode::Enter => {
-                // Enter on the prompt row → activate inline input.
-                // Enter on a session header → open the one-level-deeper
-                // full-screen view (the only path into ExpandedSession).
-                if self.session_focus_prompt {
-                    self.session_prompt_active = true;
-                    self.session_prompt_buffer.clear();
-                    self.session_prompt_caret = 0;
-                } else if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
+                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
                     let name = s.name.clone();
                     self.expanded_pane_content.clear();
                     self.expanded_pane_last_capture = None;
@@ -6407,27 +6339,34 @@ KeyCode::Char('i') => {
                     self.sub = SubView::ExpandedSession(name);
                 }
             }
-            KeyCode::Char('p') => {
-                // Shortcut: expand + jump to prompt input for selected session.
-                if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
-                    let name = s.name.clone();
-                    self.session_inline_expanded.insert(name);
-                    self.session_focus_prompt = true;
+            KeyCode::Char('i') | KeyCode::Char('p') => {
+                // Activate the inspector prompt input. Keystrokes thereafter
+                // accumulate into session_prompt_buffer until Enter (send)
+                // or Esc (cancel).
+                if self.managed_sessions.get(self.session_tab_selected).is_some() {
                     self.session_prompt_active = true;
                     self.session_prompt_buffer.clear();
                     self.session_prompt_caret = 0;
                 }
             }
+            KeyCode::Char('T') => {
+                // Jump to the first WaitingForInput / Dead session.
+                use orrch_core::windows::SessionStatus;
+                if let Some((idx, _)) = self
+                    .managed_sessions
+                    .iter()
+                    .enumerate()
+                    .find(|(_, s)| matches!(s.status, SessionStatus::WaitingForInput | SessionStatus::Dead))
+                {
+                    self.session_tab_selected = idx;
+                }
+            }
             KeyCode::Char('o') => {
-                // Open the selected session's external tmux/terminal window
-                // (the previous Enter behavior, kept on `o` for users who
-                // want a separate window instead of the inline expand).
                 if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
                     orrch_core::windows::select_and_focus(s.category, s.index);
                 }
             }
             KeyCode::Char('m') => {
-                // Minimize the category's terminal window
                 if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
                     let title = format!("[orrch] {}", s.category.label());
                     orrch_core::windows::minimize_window(&title);
@@ -6435,19 +6374,12 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Char('x') | KeyCode::Delete => {
-                // Show confirm modal before killing session (90d)
                 if let Some(s) = self.managed_sessions.get(self.session_tab_selected) {
                     let name = s.name.clone();
                     self.sub = SubView::ConfirmKillSession(name);
                 }
             }
-            KeyCode::Char('i') => {
-                // Open steer input for the selected session
-                self.steer_buf.clear();
-                self.sub = SubView::SteerSession(self.session_tab_selected);
-            }
             KeyCode::Char('L') => {
-                // Toggle session log browser
                 let log_dir = self.projects_dir.join("orrchestrator").join(".session-logs");
                 self.session_logs = orrch_core::windows::load_session_logs(&log_dir, 50);
                 self.session_logs_selected = 0;

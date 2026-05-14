@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# orrchestrator launcher — installed to ~/.local/bin/orrchestrator
+#
+# Responsibilities:
+#   1. Resolve the repo root (follow symlink → packaging/bin/orrchestrator → repo)
+#   2. Source ~/.config/orrchestrator/launch.env if present (exports every var)
+#   3. Auto-build target/release/orrchestrator if missing
+#   4. exec the binary so signals propagate cleanly
+
+set -euo pipefail
+
+APP_NAME="orrchestrator"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+PKG_BIN_DIR="$(dirname "$SCRIPT_PATH")"
+REPO_ROOT="$(cd "$PKG_BIN_DIR/../.." && pwd)"
+BINARY="$REPO_ROOT/target/release/$APP_NAME"
+CONFIG_FILE="$HOME/.config/$APP_NAME/launch.env"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    set +a
+fi
+
+if [[ ! -x "$BINARY" ]]; then
+    echo "[$APP_NAME] release binary missing — building..." >&2
+    (cd "$REPO_ROOT" && cargo build --release)
+fi
+
+exec "$BINARY" "$@"

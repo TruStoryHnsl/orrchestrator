@@ -44,11 +44,27 @@ fn feature_status_style(status: orrch_core::FeatureStatus) -> Style {
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Layout: panel tabs (1 line) + content + status bar (1 line)
+    // Staleness banner: when source files have been edited since the
+    // running binary was built, render a 1-line protest banner above the
+    // panel tabs. Geometry stays stable in non-stale state (zero rows).
+    let stale_state = orrch_core::staleness::snapshot();
+    let banner_height: u16 = if stale_state.is_stale() { 1 } else { 0 };
+
+    // Layout: [banner] + panel tabs (1) + content + status bar (1)
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(banner_height),
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
         .split(area);
+
+    if banner_height > 0 {
+        draw_staleness_banner(frame, layout[0], &stale_state);
+    }
+    let layout = [layout[1], layout[2], layout[3]];
 
     draw_panel_tabs(frame, app, layout[0]);
 
@@ -112,6 +128,26 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     draw_status_bar(frame, app, layout[2]);
+}
+
+/// Render the staleness protest banner. Red background, bold white text.
+/// Caller is responsible for only invoking when `state.is_stale()` is true
+/// and the layout has actually allocated a row.
+fn draw_staleness_banner(
+    frame: &mut Frame,
+    area: Rect,
+    state: &orrch_core::staleness::StalenessState,
+) {
+    let text = orrch_core::staleness::banner_text(state);
+    let banner = Paragraph::new(Line::from(Span::styled(
+        text,
+        Style::default()
+            .fg(Color::Rgb(255, 255, 255))
+            .bg(ACCENT)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .style(Style::default().bg(ACCENT));
+    frame.render_widget(banner, area);
 }
 
 fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
@@ -3052,283 +3088,452 @@ fn draw_external_session(frame: &mut Frame, app: &App, area: Rect, pid: u32) {
 
 // ─── Sessions Tab ────────────────────────────────────────────────────
 
+// ─── Cockpit (Hypervise > Sessions) ────────────────────────────────────
+//
+// Layout is the "three-pane cockpit" recommended by the frontend-design
+// advisory:
+//
+//   ┌─ workflow strip (3-4 rows, conditional) ──────────────────────────┐
+//   ├─ triage strip (1-5 rows, conditional, only when WAIT/DEAD present)┤
+//   ├─ ROSTER (fixed 42 cols) │ INSPECTOR (rest) ────────────────────────┤
+//   │ ▶ ◆ ▅ │ session-name…    │ ▣ session-name  [WORKING]               │
+//   │   ✕   │ another-name     │   /home/.../cwd/path                    │
+//   │   · ▆ │ ...              │ ┌─ live pane ──────────────────────────┐│
+//   │       │                  │ │ pane bytes from tmux capture-pane    ││
+//   │       │                  │ └──────────────────────────────────────┘│
+//   │       │                  │ ┌─ ✎ prompt (i to activate) ───────────┐│
+//   │       │                  │ │ ...                                  ││
+//   └───────┴──────────────────┴────────────────────────────────────────┘
+//
+// Geometry is sacred — rows never reflow. Selection drives the inspector
+// instantly because the inspector is always rendered. The roster row
+// encodes state in dedicated visual cells:
+//   • cursor (▶ / space)
+//   • demand glyph (◆ waiting, ✕ dead, · idle, space working)
+//   • pulse glyph (animated block, 8 levels, blank when no output growth
+//     for >2s) — see `pulse_char` and `update_session_pulses`.
+//   • category tick (red/cyan/yellow bar)
+//   • name (truncated)
+//   • status badge (WORK/IDLE/WAIT/DEAD)
+
+const PULSE_GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+const PULSE_FADE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Update the pulse tracker: drop entries for sessions that no longer
+/// exist, advance each surviving session's tick, and record growth of
+/// the `last_output` byte count.
+fn update_session_pulses(
+    map: &mut std::collections::HashMap<String, crate::app::SessionPulse>,
+    sessions: &[orrch_core::windows::ManagedSession],
+) {
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let alive: std::collections::HashSet<String> =
+        sessions.iter().map(|s| s.name.clone()).collect();
+    map.retain(|name, _| alive.contains(name));
+    for s in sessions {
+        let len = s.last_output.len();
+        let entry = map
+            .entry(s.name.clone())
+            .or_insert_with(|| crate::app::SessionPulse {
+                last_len: len,
+                last_growth: now - Duration::from_secs(10),
+                tick: 0,
+            });
+        if len > entry.last_len {
+            entry.last_growth = now;
+        }
+        entry.last_len = len;
+        entry.tick = entry.tick.wrapping_add(1);
+    }
+}
+
+fn pulse_char(p: Option<&crate::app::SessionPulse>) -> char {
+    use std::time::Instant;
+    match p {
+        Some(p) if Instant::now().duration_since(p.last_growth) <= PULSE_FADE => {
+            PULSE_GLYPHS[(p.tick as usize) % PULSE_GLYPHS.len()]
+        }
+        _ => ' ',
+    }
+}
+
+fn short_status(s: orrch_core::windows::SessionStatus) -> &'static str {
+    use orrch_core::windows::SessionStatus;
+    match s {
+        SessionStatus::Working => "WORK",
+        SessionStatus::Idle => "IDLE",
+        SessionStatus::WaitingForInput => "WAIT",
+        SessionStatus::Dead => "DEAD",
+    }
+}
+
+fn truncate_visible(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        s.to_string()
+    } else {
+        let mut t: String = chars.into_iter().take(max.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    }
+}
+
 fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.session_log_view {
         draw_session_log_browser(frame, app, area);
         return;
     }
-    use orrch_core::windows::{SessionCategory, SessionStatus};
+    use orrch_core::windows::SessionStatus;
 
-    // Refresh sessions on each render (fast — just reads tmux state)
+    // Refresh and clamp selection.
     app.managed_sessions = orrch_core::windows::list_all_sessions();
-    // Mark any windows that have been closed since the last refresh as Dead (90a).
     orrch_core::windows::cleanup_stale_sessions(&mut app.managed_sessions);
+    update_session_pulses(&mut app.session_pulse, &app.managed_sessions);
 
-    // Poll workflow status from active sessions' working directories
-    app.workflow_status = app.managed_sessions.iter()
+    app.workflow_status = app
+        .managed_sessions
+        .iter()
         .filter(|s| matches!(s.status, SessionStatus::Working | SessionStatus::WaitingForInput))
         .find_map(|s| orrch_core::load_workflow_status(std::path::Path::new(&s.cwd)));
 
-    // Pre-compute inline-expand previews up front so the render loop can
-    // hold an immutable iter over `managed_sessions` without conflicting
-    // with the mutable cache lookup. ~24 lines per expanded session,
-    // with ANSI parsed into colored Spans by `crate::ansi::parse`.
-    let mut inline_previews: std::collections::HashMap<String, Vec<Line<'static>>> =
-        std::collections::HashMap::new();
-    {
-        let cache = &mut app.inline_pane_cache;
-        for s in &app.managed_sessions {
-            if app.session_inline_expanded.contains(&s.name) {
-                let scroll = *app
-                    .session_preview_scroll
-                    .get(&s.name)
-                    .unwrap_or(&0);
-                let lines_for = inline_pane_lines(cache, s.category, s.index, &s.name, scroll);
-                inline_previews.insert(s.name.clone(), lines_for);
-            }
-        }
-    }
-
-    let mut lines: Vec<Line> = Vec::new();
-    let mut flat_idx: usize = 0;
-
-    for cat in SessionCategory::all() {
-        let cat_sessions: Vec<&orrch_core::windows::ManagedSession> = app.managed_sessions.iter()
-            .filter(|s| s.category == *cat)
-            .collect();
-
-        let cat_label = cat.label();
-        let count = cat_sessions.len();
-        lines.push(Line::styled(
-            format!("── {} ({}) ─────────────────────────", cat_label, count),
-            Style::default().fg(match cat {
-                SessionCategory::Dev => ACCENT,
-                SessionCategory::Edit => CYAN,
-                SessionCategory::Proc => WAITING_COLOR,
-            }).add_modifier(Modifier::BOLD),
-        ));
-
-        if cat_sessions.is_empty() {
-            lines.push(Line::styled("    (none)", Style::default().fg(TEXT_MUTED)));
-        }
-
-        for s in &cat_sessions {
-            let selected = flat_idx == app.session_tab_selected;
-            let marker = if selected { " ▶ " } else { "   " };
-
-            // 90b: Working=cyan, Waiting=yellow, Idle=dim, Dead=red
-            let status_color = match s.status {
-                SessionStatus::Working => CYAN,
-                SessionStatus::Idle => TEXT_MUTED,
-                SessionStatus::WaitingForInput => WAITING_COLOR,
-                SessionStatus::Dead => Color::Red,
-            };
-
-            let style = if selected {
-                Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(TEXT)
-            };
-
-            // Session row: marker icon name [status]
-            lines.push(Line::from(vec![
-                Span::styled(marker, Style::default().fg(ACCENT)),
-                Span::styled(format!("{} ", s.status.icon()), Style::default().fg(status_color)),
-                Span::styled(&s.name, style),
-                Span::styled(format!("  [{}]", s.status.label()), Style::default().fg(status_color)),
-                {
-                    use orrch_core::session::device_class;
-                    let dc = device_class(None);
-                    Span::styled(
-                        format!(" {}", dc.badge()),
-                        Style::default().fg(match dc {
-                            orrch_core::session::DeviceClass::Primary => CYAN,
-                            orrch_core::session::DeviceClass::Compatibility => TEXT_MUTED,
-                        }),
-                    )
-                },
-            ]));
-
-            // Show cwd (truncated)
-            if !s.cwd.is_empty() {
-                let cwd_display: String = s.cwd.chars().rev().take(60).collect::<String>()
-                    .chars().rev().collect();
-                let prefix = if s.cwd.len() > 60 { "…" } else { "" };
-                lines.push(Line::styled(
-                    format!("      {prefix}{cwd_display}"),
-                    Style::default().fg(Color::Rgb(80, 80, 120)),
-                ));
-            }
-
-            // Show recent output lines with line-wrapping so text is not cut off
-            let indent = "      ";
-            let wrap_width = (area.width as usize).saturating_sub(indent.len() + 2).max(20);
-            // Inline-expand: show ~20 lines of the live pane instead of the
-            // 2 cached preview lines. Uses the per-session pane snapshot
-            // refreshed at most ~10 Hz from `inline_pane_cache` (see below).
-            let is_expanded = app.session_inline_expanded.contains(&s.name);
-            if is_expanded {
-                let empty_vec: Vec<Line<'static>> = Vec::new();
-                let pane_lines = inline_previews.get(&s.name).unwrap_or(&empty_vec);
-                let scroll_offset = *app.session_preview_scroll.get(&s.name).unwrap_or(&0);
-                if scroll_offset > 0 {
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{indent}"), Style::default()),
-                        Span::styled(
-                            format!("▲ scrolled back {} line(s) — Down to return to live tail, Home jumps", scroll_offset),
-                            Style::default().fg(WAITING_COLOR),
-                        ),
-                    ]));
-                }
-                // Indent each parsed line by prepending an indent span,
-                // preserving ANSI colors from the parser.
-                for parsed in pane_lines {
-                    let mut spans: Vec<Span<'static>> = Vec::with_capacity(parsed.spans.len() + 1);
-                    spans.push(Span::raw(indent.to_string()));
-                    spans.extend(parsed.spans.iter().cloned());
-                    lines.push(Line::from(spans));
-                }
-                let _ = wrap_width; // wrapping handled by the Paragraph widget below
-                // Inline prompt row — clickable hint or the active textarea.
-                let on_prompt_row = selected && app.session_focus_prompt;
-                if on_prompt_row && app.session_prompt_active {
-                    // Active textarea: render buffer with caret marker.
-                    let mut shown = app.session_prompt_buffer.clone();
-                    // Insert the caret block after `caret` chars.
-                    let caret_byte = shown
-                        .char_indices()
-                        .nth(app.session_prompt_caret)
-                        .map(|(b, _)| b)
-                        .unwrap_or(shown.len());
-                    shown.insert(caret_byte, '█');
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{indent}▸ "), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                        Span::styled(shown, Style::default().fg(TEXT).bg(BG_HIGHLIGHT)),
-                        Span::styled("  [Enter sends, Esc cancels]", Style::default().fg(TEXT_DIM)),
-                    ]));
-                } else {
-                    let prompt_style = if on_prompt_row {
-                        Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(TEXT_DIM)
-                    };
-                    let marker = if on_prompt_row { "▸ " } else { "  " };
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("{indent}{marker}"), Style::default().fg(ACCENT)),
-                        Span::styled(
-                            format!("✎ Enter to send a prompt to {}", s.name),
-                            prompt_style,
-                        ),
-                    ]));
-                }
-            } else {
-                for output_line in s.last_output.lines().take(2) {
-                    let trimmed = output_line.trim();
-                    if trimmed.is_empty() { continue; }
-                    let mut remaining = trimmed;
-                    while !remaining.is_empty() {
-                        let chunk: String = remaining.chars().take(wrap_width).collect();
-                        let consumed = chunk.len().min(remaining.len());
-                        remaining = &remaining[consumed..];
-                        lines.push(Line::styled(
-                            format!("{indent}{chunk}"),
-                            Style::default().fg(TEXT_MUTED),
-                        ));
-                    }
-                }
-            }
-
-            flat_idx += 1;
-        }
-
-        lines.push(Line::raw(""));
-    }
-
-    // Clamp selection
     let total = app.managed_sessions.len();
     if total > 0 && app.session_tab_selected >= total {
         app.session_tab_selected = total - 1;
     }
 
-    // Decide whether to split for workflow tree
-    let show_workflow = app.workflow_status.as_ref().is_some_and(|ws| {
-        matches!(ws.status.as_str(), "running" | "paused" | "failed" | "complete")
-    });
-
-    let (session_area, workflow_area) = if show_workflow {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(area);
-        (chunks[0], Some(chunks[1]))
+    // Triage strip: WaitingForInput + Dead sessions, capped at 5 rows.
+    let triage_indices: Vec<usize> = app
+        .managed_sessions
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| matches!(s.status, SessionStatus::WaitingForInput | SessionStatus::Dead))
+        .map(|(i, _)| i)
+        .collect();
+    let triage_count = triage_indices.len();
+    let triage_h: u16 = if triage_count == 0 {
+        0
     } else {
-        (area, None)
+        // up to 5 rows + 2 (top + bottom border)
+        (triage_count.min(5) as u16) + 2
     };
 
-    // Paragraph (with wrap) so live pane content never gets truncated —
-    // long agent output lines flow onto the next visual row instead of
-    // being cut off mid-glyph.
-    let pane = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(Block::default().title(" Sessions ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
-    frame.render_widget(pane, session_area);
+    // Workflow strip: header + up to 2 agent lines + spillover hint = 4 rows.
+    let workflow_h: u16 = if app.workflow_status.is_some() { 4 } else { 0 };
 
-    // Render workflow agent tree when a workflow is running
-    if let (Some(wf_area), Some(ws)) = (workflow_area, &app.workflow_status) {
-        let mut tree_lines: Vec<Line> = Vec::new();
-        let agent_count = ws.agents.len();
-        for (i, agent) in ws.agents.iter().enumerate() {
-            let is_last = i == agent_count - 1;
-            let connector = if is_last { "  └─ " } else { "  ├─ " };
-            let status_color = match agent.status.as_str() {
-                "complete" => GREEN,
-                "running" => GREEN,
-                "waiting" => WAITING_COLOR,
-                "failed" => ACCENT,
-                _ => TEXT_MUTED,
-            };
-            tree_lines.push(Line::from(vec![
-                Span::styled(connector, Style::default().fg(TEXT_DIM)),
-                Span::styled(&agent.role, Style::default().fg(TEXT)),
-                Span::styled(format!("    [{}]", agent.status), Style::default().fg(status_color)),
-            ]));
-        }
+    let v = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(workflow_h),
+            Constraint::Length(triage_h),
+            Constraint::Min(5),
+        ])
+        .split(area);
 
-        let title = format!(
-            " Workflow: {} \u{2014} Step {}/{} ",
-            ws.workflow, ws.step, ws.total_steps
-        );
-        let tree_block = Paragraph::new(tree_lines)
-            .block(
-                Block::default()
-                    .title(Span::styled(&title, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)))
-                    .borders(Borders::ALL)
-                    .style(Style::default().fg(TEXT_DIM)),
-            );
-        frame.render_widget(tree_block, wf_area);
+    if workflow_h > 0 {
+        draw_cockpit_workflow_strip(frame, v[0], app);
     }
+    if triage_h > 0 {
+        draw_cockpit_triage_strip(frame, v[1], app, &triage_indices);
+    }
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(42), Constraint::Min(30)])
+        .split(v[2]);
+
+    draw_cockpit_roster(frame, body[0], app);
+    draw_cockpit_inspector(frame, body[1], app);
 }
 
-/// Capture (and cache, ~150ms TTL) up to ~200 scrollback lines of a
-/// session's tmux pane for the inline-expand preview, then return a
-/// 16-line viewport offset by `scroll` lines from the bottom. ANSI colors
-/// are preserved as ratatui Spans via `crate::ansi::parse`.
-///
-/// `scroll = 0` shows the live tail. Higher values show progressively
-/// older content. The viewport size is fixed (16 lines) so the surrounding
-/// list layout stays predictable; users can scroll within an expanded
-/// session via Up/Down arrows on its header.
-fn inline_pane_lines(
+fn draw_cockpit_workflow_strip(frame: &mut Frame, area: Rect, app: &App) {
+    let Some(ws) = &app.workflow_status else {
+        return;
+    };
+    let mut lines: Vec<Line> = Vec::new();
+    let status_color = match ws.status.as_str() {
+        "running" => CYAN,
+        "paused" => WAITING_COLOR,
+        "failed" => Color::Red,
+        "complete" => GREEN,
+        _ => TEXT_MUTED,
+    };
+    lines.push(Line::from(vec![
+        Span::styled("▣ ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(&ws.workflow, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!(" · step {}/{}", ws.step, ws.total_steps),
+            Style::default().fg(TEXT_DIM),
+        ),
+        Span::styled(format!(" · {}", ws.status), Style::default().fg(status_color)),
+    ]));
+    let shown = ws.agents.len().min(2);
+    for (i, agent) in ws.agents.iter().take(shown).enumerate() {
+        let is_last = i + 1 == shown && ws.agents.len() <= 2;
+        let connector = if is_last { "  └─ " } else { "  ├─ " };
+        let agent_color = match agent.status.as_str() {
+            "complete" | "running" => GREEN,
+            "waiting" => WAITING_COLOR,
+            "failed" => ACCENT,
+            _ => TEXT_MUTED,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(connector, Style::default().fg(TEXT_DIM)),
+            Span::styled(&agent.role, Style::default().fg(TEXT)),
+            Span::styled(format!("  [{}]", agent.status), Style::default().fg(agent_color)),
+        ]));
+    }
+    if ws.agents.len() > 2 {
+        lines.push(Line::styled(
+            format!("  + {} more agents", ws.agents.len() - 2),
+            Style::default().fg(TEXT_MUTED),
+        ));
+    }
+    let p = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .style(Style::default().fg(TEXT_MUTED)),
+    );
+    frame.render_widget(p, area);
+}
+
+fn draw_cockpit_triage_strip(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    indices: &[usize],
+) {
+    use orrch_core::windows::SessionStatus;
+    let mut lines: Vec<Line> = Vec::new();
+    for &idx in indices.iter().take(5) {
+        let Some(s) = app.managed_sessions.get(idx) else {
+            continue;
+        };
+        let (glyph, color) = match s.status {
+            SessionStatus::WaitingForInput => ('◆', WAITING_COLOR),
+            SessionStatus::Dead => ('✕', Color::Red),
+            _ => ('·', TEXT_DIM),
+        };
+        let last_line = s
+            .last_output
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .last()
+            .unwrap_or("");
+        let snippet: String = last_line.chars().take(80).collect();
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", glyph),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<28}", truncate_visible(&s.name, 28)),
+                Style::default().fg(TEXT),
+            ),
+            Span::styled(
+                format!("  {:<6}", short_status(s.status)),
+                Style::default().fg(color),
+            ),
+            Span::styled(format!("  {}", snippet), Style::default().fg(TEXT_DIM)),
+        ]));
+    }
+    let title = format!(" ⚠ Needs attention ({}) ", indices.len());
+    let block = Block::default()
+        .title(Span::styled(
+            title,
+            Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .style(Style::default().fg(WAITING_COLOR));
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn draw_cockpit_roster(frame: &mut Frame, area: Rect, app: &App) {
+    use orrch_core::windows::{SessionCategory, SessionStatus};
+    let mut lines: Vec<Line> = Vec::new();
+    for (idx, s) in app.managed_sessions.iter().enumerate() {
+        let selected = idx == app.session_tab_selected;
+        let cursor = if selected { "▶" } else { " " };
+        let (demand, demand_color) = match s.status {
+            SessionStatus::WaitingForInput => ('◆', WAITING_COLOR),
+            SessionStatus::Dead => ('✕', Color::Red),
+            _ => (' ', TEXT_MUTED),
+        };
+        let pulse = pulse_char(app.session_pulse.get(&s.name));
+        let cat_color = match s.category {
+            SessionCategory::Dev => ACCENT,
+            SessionCategory::Edit => CYAN,
+            SessionCategory::Proc => WAITING_COLOR,
+        };
+        let status_color = match s.status {
+            SessionStatus::Working => CYAN,
+            SessionStatus::Idle => TEXT_MUTED,
+            SessionStatus::WaitingForInput => WAITING_COLOR,
+            SessionStatus::Dead => Color::Red,
+        };
+        let name_style = if selected {
+            Style::default()
+                .fg(TEXT)
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
+        let name_str = truncate_visible(&s.name, 22);
+        lines.push(Line::from(vec![
+            Span::styled(format!("{cursor} "), Style::default().fg(ACCENT)),
+            Span::styled(
+                format!("{demand} "),
+                Style::default()
+                    .fg(demand_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("{pulse} "), Style::default().fg(GREEN)),
+            Span::styled("│ ", Style::default().fg(cat_color)),
+            Span::styled(format!("{:<22}", name_str), name_style),
+            Span::styled(
+                format!(" {:>4}", short_status(s.status)),
+                Style::default().fg(status_color),
+            ),
+        ]));
+    }
+    if app.managed_sessions.is_empty() {
+        lines.push(Line::styled(
+            "  no sessions",
+            Style::default().fg(TEXT_MUTED),
+        ));
+    }
+    let title = format!(" Roster ({}) ", app.managed_sessions.len());
+    let block = Block::default()
+        .title(Span::styled(title, Style::default().fg(ACCENT)))
+        .borders(Borders::ALL)
+        .style(Style::default().fg(TEXT_MUTED));
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn draw_cockpit_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
+    let Some(s) = app
+        .managed_sessions
+        .get(app.session_tab_selected)
+        .cloned()
+    else {
+        let p = Paragraph::new("  no session selected")
+            .style(Style::default().fg(TEXT_MUTED))
+            .block(
+                Block::default()
+                    .title(" Inspector ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            );
+        frame.render_widget(p, area);
+        return;
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(5),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    // Header: name + status (line 1), cwd (line 2)
+    let status_color = match s.status {
+        orrch_core::windows::SessionStatus::Working => CYAN,
+        orrch_core::windows::SessionStatus::Idle => TEXT_MUTED,
+        orrch_core::windows::SessionStatus::WaitingForInput => WAITING_COLOR,
+        orrch_core::windows::SessionStatus::Dead => Color::Red,
+    };
+    let cwd_display: String = if s.cwd.is_empty() {
+        String::from("—")
+    } else {
+        let chars: Vec<char> = s.cwd.chars().collect();
+        if chars.len() > 80 {
+            let tail: String = chars.into_iter().rev().take(80).collect::<Vec<_>>().into_iter().rev().collect();
+            format!("…{tail}")
+        } else {
+            s.cwd.clone()
+        }
+    };
+    let header_lines = vec![
+        Line::from(vec![
+            Span::styled("▣ ", Style::default().fg(ACCENT)),
+            Span::styled(&s.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  [{}]", s.status.label()), Style::default().fg(status_color)),
+            Span::styled("    i prompt · Enter expand · o open · x kill", Style::default().fg(TEXT_MUTED)),
+        ]),
+        Line::styled(format!("  {cwd_display}"), Style::default().fg(TEXT_DIM)),
+    ];
+    frame.render_widget(Paragraph::new(header_lines), chunks[0]);
+
+    // Live pane
+    let pane_inner_height = chunks[1].height.saturating_sub(2) as usize;
+    let pane_lines = inspector_pane_lines(
+        &mut app.inline_pane_cache,
+        s.category,
+        s.index,
+        &s.name,
+        pane_inner_height.max(1),
+    );
+    let pane_block = Block::default()
+        .borders(Borders::ALL)
+        .style(Style::default().fg(TEXT_MUTED));
+    let pane = Paragraph::new(pane_lines)
+        .block(pane_block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(pane, chunks[1]);
+
+    // Prompt input — always present so user knows it's there.
+    let prompt_active = app.session_prompt_active;
+    let prompt_text = if prompt_active {
+        let mut shown = app.session_prompt_buffer.clone();
+        let caret_byte = shown
+            .char_indices()
+            .nth(app.session_prompt_caret)
+            .map(|(b, _)| b)
+            .unwrap_or(shown.len());
+        shown.insert(caret_byte, '█');
+        shown
+    } else {
+        format!("press i to send a prompt to {}", s.name)
+    };
+    let prompt_text_style = if prompt_active {
+        Style::default().fg(TEXT).bg(BG_HIGHLIGHT)
+    } else {
+        Style::default().fg(TEXT_DIM)
+    };
+    let prompt_title = if prompt_active {
+        format!(" ✎ → {}  ·  Enter sends · Esc cancels ", s.name)
+    } else {
+        " ✎ Prompt ".to_string()
+    };
+    let prompt = Paragraph::new(prompt_text)
+        .style(prompt_text_style)
+        .wrap(Wrap { trim: false })
+        .block(
+            Block::default()
+                .title(Span::styled(prompt_title, Style::default().fg(ACCENT)))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(if prompt_active { ACCENT } else { TEXT_MUTED })),
+        );
+    frame.render_widget(prompt, chunks[2]);
+}
+
+/// Capture the bottom `height` lines of a session's tmux pane, with a
+/// ~150ms TTL cache to avoid hammering tmux. Unlike `inline_pane_lines`,
+/// the viewport size is supplied by the caller so the inspector can fill
+/// whatever vertical space it has.
+fn inspector_pane_lines(
     cache: &mut std::collections::HashMap<String, (std::time::Instant, String)>,
     cat: orrch_core::windows::SessionCategory,
     index: u32,
     name: &str,
-    scroll: usize,
+    height: usize,
 ) -> Vec<Line<'static>> {
     use std::time::{Duration, Instant};
     const TTL: Duration = Duration::from_millis(150);
-    const SCROLLBACK: u32 = 200;
-    const VIEWPORT: usize = 16;
+    const SCROLLBACK: u32 = 400;
     let now = Instant::now();
     let needs_refresh = cache
         .get(name)
@@ -3341,10 +3546,8 @@ fn inline_pane_lines(
     let raw = cache.get(name).map(|(_, c)| c.clone()).unwrap_or_default();
     let parsed = crate::ansi::parse(&raw);
     let total = parsed.len();
-    // Window: [end - VIEWPORT - scroll .. end - scroll]
-    let end = total.saturating_sub(scroll);
-    let start = end.saturating_sub(VIEWPORT);
-    parsed[start..end].to_vec()
+    let start = total.saturating_sub(height);
+    parsed[start..total].to_vec()
 }
 
 /// Strip CSI / OSC ANSI escape sequences while preserving multi-byte

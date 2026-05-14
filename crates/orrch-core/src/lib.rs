@@ -19,6 +19,7 @@ pub mod remote;
 pub mod session;
 pub mod session_brief;
 pub mod session_log;
+pub mod staleness;
 pub mod usage;
 pub mod windows;
 pub mod vault;
