@@ -3,6 +3,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::process_spawn::{self, SliceMode};
+
 /// Summary of a project's git state.
 #[derive(Debug, Clone)]
 pub struct GitStatus {
@@ -177,7 +179,7 @@ pub fn spawn_commit_all(projects_dir: &Path) -> Vec<(String, String)> {
 }
 
 fn git_output(dir: &Path, args: &[&str]) -> String {
-    Command::new("git")
+    process_spawn::command("git", SliceMode::OrrchSlice)
         .args(args)
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
@@ -203,7 +205,7 @@ pub fn commits_for_feature(project_dir: &Path, feature_id: &str) -> Vec<FeatureC
     if feature_id.is_empty() {
         return Vec::new();
     }
-    let output = Command::new("git")
+    let output = process_spawn::command("git", SliceMode::OrrchSlice)
         .arg("-C")
         .arg(project_dir)
         .args(["log", "--oneline", "-n", "50", "--fixed-strings", "--grep"])

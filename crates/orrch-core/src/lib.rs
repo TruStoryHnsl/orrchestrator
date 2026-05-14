@@ -13,6 +13,7 @@ pub mod pi_rpc;
 pub mod loops;
 pub mod plan_parser;
 pub mod process_manager;
+pub mod process_spawn;
 pub mod project;
 pub mod provider;
 pub mod release;

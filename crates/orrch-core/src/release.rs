@@ -2,6 +2,8 @@
 
 use std::path::Path;
 use std::process::Command;
+
+use crate::process_spawn::{self, SliceMode};
 use std::collections::BTreeMap;
 
 // ─── Version Tagging + Changelog ──────────────────────────────
@@ -75,7 +77,7 @@ pub fn bump_version(project_dir: &Path, bump: BumpKind) -> anyhow::Result<String
     let changelog = generate_changelog_entry(project_dir, &version);
     let message = format!("Release {version}\n\n{changelog}");
 
-    let out = Command::new("git")
+    let out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["tag", "-a", &version, "-m", &message])
         .current_dir(project_dir)
         .output()?;
@@ -258,7 +260,7 @@ pub fn generate_release_notes(project_dir: &Path) -> String {
         args.push(&range);
     }
 
-    let output = Command::new("git")
+    let output = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(&args)
         .current_dir(project_dir)
         .output();
@@ -329,7 +331,7 @@ pub fn generate_release_notes(project_dir: &Path) -> String {
 }
 
 fn get_last_tag(project_dir: &Path) -> Option<String> {
-    let out = Command::new("git")
+    let out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["describe", "--tags", "--abbrev=0"])
         .current_dir(project_dir)
         .output()
@@ -400,7 +402,7 @@ fn check_cargo_version(project_dir: &Path) -> bool {
 }
 
 fn check_git_clean(project_dir: &Path) -> bool {
-    let out = Command::new("git")
+    let out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["status", "--porcelain"])
         .current_dir(project_dir)
         .output();
@@ -539,7 +541,7 @@ pub struct ReleaseHistoryEntry {
 
 /// Read git tags and build a release history list (most recent first).
 pub fn load_release_history(project_dir: &Path) -> Vec<ReleaseHistoryEntry> {
-    let tag_out = Command::new("git")
+    let tag_out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["tag", "--sort=-version:refname", "--format=%(refname:short)"])
         .current_dir(project_dir)
         .output();
@@ -557,7 +559,7 @@ pub fn load_release_history(project_dir: &Path) -> Vec<ReleaseHistoryEntry> {
     tags.iter()
         .map(|tag| {
             // Try annotated tag date + subject first
-            let info_out = Command::new("git")
+            let info_out = process_spawn::command("git", SliceMode::OrrchSlice)
                 .args([
                     "for-each-ref",
                     "--format=%(taggerdate:short)|%(subject)",
@@ -602,7 +604,7 @@ pub fn load_release_history(project_dir: &Path) -> Vec<ReleaseHistoryEntry> {
 }
 
 fn commit_date_for_tag(project_dir: &Path, tag: &str) -> String {
-    let out = Command::new("git")
+    let out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["log", "-1", "--format=%as", tag])
         .current_dir(project_dir)
         .output();
@@ -684,7 +686,7 @@ pub fn load_marketing_metadata(project_dir: &Path) -> MarketingMetadata {
     }
 
     // Feature highlights from feat: commits
-    let feat_out = Command::new("git")
+    let feat_out = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["log", "--oneline", "--no-merges", "--grep=^feat"])
         .current_dir(project_dir)
         .output();
@@ -767,7 +769,7 @@ fn extract_toml_str(line: &str, key: &str) -> Option<String> {
 /// done and what the caller should do next.
 pub fn rollback_release(project_dir: &Path, tag: &str) -> anyhow::Result<String> {
     // Validate that the tag exists locally.
-    let check = Command::new("git")
+    let check = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["tag", "-l", tag])
         .current_dir(project_dir)
         .output()
@@ -779,7 +781,7 @@ pub fn rollback_release(project_dir: &Path, tag: &str) -> anyhow::Result<String>
     }
 
     // Delete the local tag.
-    let del = Command::new("git")
+    let del = process_spawn::command("git", SliceMode::OrrchSlice)
         .args(["tag", "-d", tag])
         .current_dir(project_dir)
         .output()
