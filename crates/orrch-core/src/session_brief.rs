@@ -4,8 +4,9 @@
 //! since the session started. Plus helpers to enumerate existing briefs.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::process_spawn::{self, SliceMode};
 
 /// Directory name (relative to project root) where session briefs are persisted.
 pub const SESSION_BRIEFS_SUBDIR: &str = ".orrch/session_briefs";
@@ -133,7 +134,7 @@ fn rfc3339_from_epoch(_epoch: u64) -> String {
 }
 
 fn git_diff_stat(project_dir: &Path) -> String {
-    let output = Command::new("git")
+    let output = process_spawn::command("git", SliceMode::OrrchSlice)
         .arg("-C").arg(project_dir)
         .arg("diff").arg("--stat").arg("HEAD")
         .output();
@@ -148,7 +149,7 @@ fn git_diff_stat(project_dir: &Path) -> String {
 
 fn git_log_since(project_dir: &Path, start: &str) -> String {
     let range = format!("{start}..HEAD");
-    let output = Command::new("git")
+    let output = process_spawn::command("git", SliceMode::OrrchSlice)
         .arg("-C").arg(project_dir)
         .arg("log").arg("--oneline").arg(&range)
         .output();
