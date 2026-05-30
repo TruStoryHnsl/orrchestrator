@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use orrch_core::file_registry::{
     AgentId, ChangeSpec, Clock, EditStatus, FileRegistry, ManualClock, RegistryError,
-    DEFAULT_AUDIT_LOG, DEFAULT_REGISTRY_PATH, SOFT_DOUBLE_READ_ENV,
+    DEFAULT_AUDIT_LOG, DEFAULT_REGISTRY_PATH,
 };
 
 use tempfile::TempDir;
@@ -87,8 +87,9 @@ fn double_acquire_hard_error() {
     let b = agent("Researcher:1:c1:0002");
 
     reg.acquire(&dir.path().join("foo.rs"), &a).unwrap();
-    // SAFETY: serial test — env var is single-threaded read by the registry.
-    unsafe { std::env::remove_var(SOFT_DOUBLE_READ_ENV) };
+    // Hard mode is a per-instance property — set it explicitly so the test is
+    // deterministic and never touches the shared process environment.
+    reg.set_soft_double_read(false);
     let err = reg
         .acquire(&dir.path().join("foo.rs"), &b)
         .expect_err("second acquire must fail");
@@ -113,9 +114,10 @@ fn double_acquire_soft_still_returns_error() {
     let b = agent("Researcher:1:c1:0002");
 
     reg.acquire(&dir.path().join("foo.rs"), &a).unwrap();
-    unsafe { std::env::set_var(SOFT_DOUBLE_READ_ENV, "1") };
+    // Soft mode is a per-instance property — set it explicitly so the test is
+    // deterministic and never touches the shared process environment.
+    reg.set_soft_double_read(true);
     let err = reg.acquire(&dir.path().join("foo.rs"), &b);
-    unsafe { std::env::remove_var(SOFT_DOUBLE_READ_ENV) };
 
     // Spec: "soft warning, not soft permission" — still returns AlreadyOwned.
     assert!(matches!(err, Err(RegistryError::AlreadyOwned { .. })));

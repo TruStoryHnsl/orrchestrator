@@ -217,6 +217,13 @@ pub struct FileRegistry {
     pending_edits: Vec<EditHandle>,
     crashed_owners: HashMap<AgentId, SystemTime>,
     clock: Arc<dyn Clock>,
+    /// When true, a double-read conflict logs a SOFT warning instead of a hard
+    /// block (the conflict is still returned as an error either way). Captured
+    /// once at construction from `SOFT_DOUBLE_READ_ENV` so behavior is a stable
+    /// per-instance property rather than a process-global env read on every
+    /// `acquire` — the latter races across concurrently-running registries
+    /// (e.g. parallel tests) that mutate the shared env.
+    soft_double_read: bool,
     /// Monotonic counter for UUID-like edit-handle IDs without an external dep.
     seq: u64,
 }
@@ -285,9 +292,19 @@ impl FileRegistry {
             pending_edits: snapshot.pending_edits,
             crashed_owners,
             clock,
+            soft_double_read: std::env::var(SOFT_DOUBLE_READ_ENV).ok().as_deref() == Some("1"),
             seq: 0,
         };
         Ok(me)
+    }
+
+    /// Override the soft-double-read policy for this registry instance.
+    ///
+    /// The default is read once from `SOFT_DOUBLE_READ_ENV` at construction;
+    /// callers (and tests) use this to set the policy explicitly without
+    /// mutating the process-global environment.
+    pub fn set_soft_double_read(&mut self, enabled: bool) {
+        self.soft_double_read = enabled;
     }
 
     fn save(&self) -> Result<(), RegistryError> {
@@ -425,7 +442,7 @@ impl FileRegistry {
             }
             // Conflict.
             let current = existing.owner.clone();
-            let soft = std::env::var(SOFT_DOUBLE_READ_ENV).ok().as_deref() == Some("1");
+            let soft = self.soft_double_read;
             if soft {
                 tracing::warn!(
                     "file_registry: SOFT double-read attempt path={} attempting={} owner={}",
