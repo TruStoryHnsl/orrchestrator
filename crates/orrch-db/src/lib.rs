@@ -17,4 +17,4 @@ pub mod migrate;
 pub use model::{
     ArchFact, BugRow, EntityType, EventKind, EventRecord, FeatureRow, LibraryRow, LicenseRow,
 };
-// pub use rebuild::{...}; // Task 7
+pub use rebuild::{rebuild_all, RebuildSources};
