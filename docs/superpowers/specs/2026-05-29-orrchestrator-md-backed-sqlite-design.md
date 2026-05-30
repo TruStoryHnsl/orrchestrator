@@ -1,4 +1,4 @@
-# Design: `.orrchestrator/` md-backed, rebuildable SQLite memory backend
+# Design: `.orrch/` md-backed, rebuildable SQLite memory backend
 
 **Date:** 2026-05-29
 **Status:** Approved design — pending spec review → implementation plan
@@ -30,20 +30,20 @@ A **deterministic, token-efficient, fast** query layer for everything orrchestra
 
 2. **The DB holds zero unique durable state.** It is a **purely ephemeral local query accelerator**, rebuilt from markdown on every launch. `rm orrch.db` costs nothing. There are therefore **no schema migrations, ever** — the running binary's DDL *is* the schema, recreated each rebuild.
 
-3. **Source of truth = structured, human-readable markdown in a hidden `.orrchestrator/` folder inside each project.** Everything orrchestrator canonically tracks lives there. The user can navigate the folder and read the plan exactly as before.
+3. **Source of truth = structured, human-readable markdown in a hidden `.orrch/` folder inside each project.** Everything orrchestrator canonically tracks lives there. The user can navigate the folder and read the plan exactly as before.
 
 4. **Sharing = sharing the project folder.** Project folders already sync across the Tailscale network via Syncthing/git. Any machine with the folder rebuilds an identical DB. No DB replication, no binary-file conflicts, no daemon. This honors the **Local-First** rule (no operational dependency on a remote machine).
 
-5. **Human-readable stays human-readable.** Files that are human-readable today (`PLAN.md`, `DEVLOG.md`) remain so after moving into `.orrchestrator/`. orrchestrator MAY create additional **compressed / non-human-readable derived artifacts** (the SQLite DB itself is exactly that) — but it MUST NOT degrade the readability of the canonical markdown to suit the machine. Canonical md is for humans; the derived DB is for the machine.
+5. **Human-readable stays human-readable.** Files that are human-readable today (`PLAN.md`, `DEVLOG.md`) remain so after moving into `.orrch/`. orrchestrator MAY create additional **compressed / non-human-readable derived artifacts** (the SQLite DB itself is exactly that) — but it MUST NOT degrade the readability of the canonical markdown to suit the machine. Canonical md is for humans; the derived DB is for the machine.
 
-6. **Everything migrates into `.orrchestrator/`.** `PLAN.md` and `DEVLOG.md` move there intact (single readable files, not exploded). Code that currently reads root `PLAN.md` repoints to `.orrchestrator/PLAN.md` (with a fallback to root for un-migrated projects during transition).
+6. **Everything migrates into `.orrch/`.** `PLAN.md` and `DEVLOG.md` move there intact (single readable files, not exploded). Code that currently reads root `PLAN.md` repoints to `.orrch/PLAN.md` (with a fallback to root for un-migrated projects during transition).
 
 ## Architecture
 
-### `.orrchestrator/` folder layout (per project)
+### `.orrch/` folder layout (per project)
 
 ```
-.orrchestrator/
+.orrch/
   PLAN.md            # human-readable roadmap (moved from project root, intact) — parsed -> features
   DEVLOG.md          # human-readable dev log (moved from project root, intact)
   architecture.md    # SNAPSHOT doc: current architecture facts (frontmatter + sections)
@@ -53,7 +53,7 @@ A **deterministic, token-efficient, fast** query layer for everything orrchestra
                      #   bug reports, status changes, audit entries, known-issue records
 ```
 
-Genuinely-transient runtime state (active-loop status, in-flight workflow status — today's `.orrch/loops.json`, `.orrch/workflow.json`) is **out of scope**: it is process-runtime state, not durable project knowledge, and need not be markdown-backed or rebuildable. It may stay as-is.
+The canonical markdown coexists with the **existing** runtime JSON in `.orrch/` (`loops.json`, `workflow.json`). That transient runtime state is **out of scope**: it is process-runtime state, not durable project knowledge, and need not be markdown-backed or rebuildable. It stays as-is, side by side with the new markdown. The rebuild ingest ignores it.
 
 ### Two format classes, by access pattern
 
@@ -76,7 +76,7 @@ Snapshot-derived tables:
 - `projects(slug, path, name, scope)` — from the `~/projects` scan
 - `architecture_facts(project, section, key, value)` — from `architecture.md`
 - `licensing(project, dependency, license, audit_status, notes)` — from `licensing.md`
-- `features(project, slug, title, status, description, source)` — from `.orrchestrator/PLAN.md`
+- `features(project, slug, title, status, description, source)` — from `.orrch/PLAN.md`
 
 Event-log tables:
 - `events(id, project, ts, kind, entity_type, entity_id, payload_json, session_id)` — raw immutable log, one row per `events/*.md`
@@ -91,7 +91,7 @@ Search:
 
 ### Rebuild pipeline (`orrch-db` crate)
 
-1. **Launch — full rebuild.** Open `orrch.db` (WAL mode). Scan: global library dir + every project's `.orrchestrator/` + (transitional) any un-migrated root `PLAN.md`/`DEVLOG.md`. Parse → insert. Snapshots → state tables; `events/*.md` → `events`; then **fold events** into `bugs` / feature-status overrides. Build FTS indexes. Expected sub-second at current project/library counts.
+1. **Launch — full rebuild.** Open `orrch.db` (WAL mode). Scan: global library dir + every project's `.orrch/` + (transitional) any un-migrated root `PLAN.md`/`DEVLOG.md`. Parse → insert. Snapshots → state tables; `events/*.md` → `events`; then **fold events** into `bugs` / feature-status overrides. Build FTS indexes. Expected sub-second at current project/library counts.
 2. **Runtime — incremental.** A `notify` file-watcher on those directories. On change, re-ingest only files whose `mtime`/`hash` differ from `source_files`, and re-fold affected entities.
 3. **Write path — file-first, always.** orrchestrator never writes the DB as the primary action:
    - new bug / status change → write a **new** `events/<ts>-<id>.md` (never edit) → incremental ingest updates the DB.
@@ -107,9 +107,9 @@ Search:
 
 ## Migration
 
-1. Introduce `.orrchestrator/` and move `PLAN.md` + `DEVLOG.md` into it per project (keep a root-fallback read path during transition).
-2. Convert `.retrospect/errors.jsonl` → `.orrchestrator/events/*.md` (one file per record).
-3. Repoint `plan_parser`/`project.rs` reads to `.orrchestrator/PLAN.md`.
+1. Introduce `.orrch/` and move `PLAN.md` + `DEVLOG.md` into it per project (keep a root-fallback read path during transition).
+2. Convert `.retrospect/errors.jsonl` → `.orrch/events/*.md` (one file per record).
+3. Repoint `plan_parser`/`project.rs` reads to `.orrch/PLAN.md`.
 4. Seed `architecture.md` / `licensing.md` (licensing can bootstrap from `compliance.rs`'s current hardcoded list).
 
 ## Non-Goals (YAGNI)
@@ -124,4 +124,4 @@ Search:
 
 - Exact frontmatter schema per event `kind` (bug, status_change, audit, known_issue) — define the minimal required fields.
 - Whether `features` status can also be event-sourced (status-change events) or stays snapshot-only in `PLAN.md`. Default: snapshot-only initially; events can override later if needed.
-- Naming: `.orrchestrator/` vs reusing/renaming the existing `.orrch/` directory.
+- ~~Naming of the folder~~ — **resolved:** reuse the existing `.orrch/` directory; canonical markdown and transient runtime JSON coexist there.
