@@ -7,8 +7,9 @@ use crate::server::OrrchMcpServer;
 
 // ─── orrch-db helper ────────────────────────────────────────────────────────
 
-/// Build an ephemeral orrch-db connection by rebuilding from the standard
-/// sources. Cheap (sub-second); the DB is purely a query accelerator.
+/// Build an ephemeral in-memory orrch-db connection by rebuilding from the
+/// standard sources. In-memory avoids file-system races between concurrent
+/// MCP calls. Each call gets its own fresh DB.
 fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
     use orrch_db::{rebuild_all, RebuildSources};
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
@@ -23,9 +24,28 @@ fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let db_path = std::path::PathBuf::from(&home)
-        .join(".cache").join("orrchestrator").join("orrch.db");
+    // ":memory:" → in-memory DB; remove_file(":memory:") in rebuild_all fails
+    // silently, which is correct. Connection::open(":memory:") gives a fresh
+    // in-memory SQLite database.
+    let db_path = std::path::PathBuf::from(":memory:");
     rebuild_all(&db_path, &RebuildSources { project_dirs, library_root })
+}
+
+/// Map the `library_search` tool schema `kind` enum value (plural, matches
+/// library subdirectory names) to the DB `kind` column value (singular, set
+/// by LIBRARY_KINDS in orrch-db/src/rebuild.rs).
+///
+/// Returns `None` for values that have no corresponding DB kind (e.g. "models",
+/// "harnesses" — these subdirs exist on disk but are not ingested as library
+/// items).
+fn schema_kind_to_db_kind(schema_kind: &str) -> Option<&'static str> {
+    match schema_kind {
+        "skills"      => Some("skill"),
+        "tools"       => Some("tool"),
+        "mcp_servers" => Some("mcp_server"),
+        // "models" and "harnesses" are library subdirs but not DB-ingested kinds.
+        _ => None,
+    }
 }
 
 // ─── Tool definitions (JSON Schema for tools/list) ─────────────────────────
@@ -545,13 +565,32 @@ pub fn tool_definitions() -> Vec<Value> {
 pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> String {
     match name {
         "library_search" => {
+            // Fix 2: validate empty query — match wording of the old file-scanner fn.
             let q = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            if q.is_empty() {
+                return "Error: 'query' parameter is required".into();
+            }
+            // Fix 1: optional kind filter — map schema enum value → DB kind string.
+            let kind_filter: Option<&str> = args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .and_then(|s| schema_kind_to_db_kind(s));
             match orrch_db_conn() {
                 Ok(conn) => match orrch_db::query::library_search(&conn, q) {
-                    Ok(hits) if hits.is_empty() => format!("No library items match '{q}'."),
-                    Ok(hits) => hits.iter()
-                        .map(|h| format!("- [{}] {} — {}", h.kind, h.name, h.description))
-                        .collect::<Vec<_>>().join("\n"),
+                    Ok(mut hits) => {
+                        // Apply kind post-filter if caller specified one.
+                        if let Some(k) = kind_filter {
+                            hits.retain(|h| h.kind == k);
+                        }
+                        if hits.is_empty() {
+                            format!("No library items match '{q}'.")
+                        } else {
+                            hits.iter()
+                                .map(|h| format!("- [{}] {} — {}", h.kind, h.name, h.description))
+                                .collect::<Vec<_>>().join("\n")
+                        }
+                    }
                     Err(e) => format!("library_search error: {e}"),
                 },
                 Err(e) => format!("library_search error: {e}"),
@@ -573,10 +612,22 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "list_skills" => {
             match orrch_db_conn() {
                 Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "skill") {
-                    Ok(items) if items.is_empty() => "No skill files found.".into(),
-                    Ok(items) => items.iter()
-                        .map(|i| format!("- {} — {}", i.name, i.description))
-                        .collect::<Vec<_>>().join("\n"),
+                    Ok(items) => {
+                        // Fix 3: replicate the internal-skill filter from the old
+                        // list_skills file-scanner. Exclude items whose name matches
+                        // is_internal_skill_stem (agent-*, develop-feature, develop-aio)
+                        // — these are harness-internal skills, not user-facing menu items.
+                        let visible: Vec<_> = items.iter()
+                            .filter(|i| !is_internal_skill_stem(&i.name))
+                            .collect();
+                        if visible.is_empty() {
+                            "No skill files found.".into()
+                        } else {
+                            visible.iter()
+                                .map(|i| format!("- {} — {}", i.name, i.description))
+                                .collect::<Vec<_>>().join("\n")
+                        }
+                    }
                     Err(e) => format!("list_skills error: {e}"),
                 },
                 Err(e) => format!("list_skills error: {e}"),
@@ -617,59 +668,6 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
 
 // ─── Tool implementations ───────────────────────────────────────────────────
 
-fn library_search(server: &OrrchMcpServer, args: &Value) -> String {
-    let query = match args.get("query").and_then(|v| v.as_str()) {
-        Some(q) => q.to_lowercase(),
-        None => return "Error: 'query' parameter is required".into(),
-    };
-
-    let subdirs: Vec<&str> = match args.get("kind").and_then(|v| v.as_str()) {
-        Some(kind) => vec![kind],
-        None => vec!["models", "harnesses", "skills", "tools", "mcp_servers"],
-    };
-
-    let mut matches: Vec<String> = Vec::new();
-
-    for subdir in subdirs {
-        let dir = server.library_dir.join(subdir);
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                let filename = path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-
-                let mut matched = filename.contains(&query);
-
-                if !matched {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        matched = content.to_lowercase().contains(&query);
-                    }
-                }
-
-                if matched {
-                    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-                    matches.push(format!("{subdir}/{stem}"));
-                }
-            }
-        }
-    }
-
-    if matches.is_empty() {
-        format!("No matches for '{}'", args.get("query").and_then(|v| v.as_str()).unwrap_or(&query))
-    } else {
-        matches.sort();
-        matches.join("\n")
-    }
-}
-
 fn library_get(server: &OrrchMcpServer, args: &Value) -> String {
     let kind = match args.get("kind").and_then(|v| v.as_str()) {
         Some(k) => k,
@@ -687,81 +685,10 @@ fn library_get(server: &OrrchMcpServer, args: &Value) -> String {
     }
 }
 
-fn list_agents(server: &OrrchMcpServer) -> String {
-    let entries = match std::fs::read_dir(&server.agents_dir) {
-        Ok(e) => e,
-        Err(e) => return format!("Error: cannot read agents directory: {e}"),
-    };
-
-    let mut agents: Vec<String> = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let name = extract_frontmatter_field(&content, "name")
-                    .unwrap_or_else(|| {
-                        path.file_stem().unwrap_or_default().to_string_lossy().into()
-                    });
-                let role = extract_frontmatter_field(&content, "role").unwrap_or_default();
-                let dept = extract_frontmatter_field(&content, "department").unwrap_or_default();
-                agents.push(format!("- {name} | {role} | {dept}"));
-            }
-        }
-    }
-
-    agents.sort();
-
-    if agents.is_empty() {
-        "No agent profiles found.".into()
-    } else {
-        format!("Agents ({} total):\n{}", agents.len(), agents.join("\n"))
-    }
-}
-
-fn list_skills(server: &OrrchMcpServer) -> String {
-    let entries = match std::fs::read_dir(&server.skills_dir) {
-        Ok(e) => e,
-        Err(e) => return format!("Error: cannot read skills directory: {e}"),
-    };
-
-    let mut skills: Vec<String> = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "md") {
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let (desc, internal) = if let Ok(content) = std::fs::read_to_string(&path) {
-                let desc = extract_frontmatter_field(&content, "description").unwrap_or_default();
-                let internal = extract_frontmatter_field(&content, "internal")
-                    .map(|v| v.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false);
-                (desc, internal)
-            } else {
-                (String::new(), false)
-            };
-            // Skills auto-served as MCP harness instructions (agent-*, develop-*)
-            // are tagged `internal: true` and excluded from the user-facing menu.
-            // They remain reachable via skill_invoke / develop_feature / team_call
-            // / workflow_call etc.
-            if internal || is_internal_skill_stem(&stem) {
-                continue;
-            }
-            skills.push(format!("- {stem}: {desc}"));
-        }
-    }
-
-    skills.sort();
-
-    if skills.is_empty() {
-        "No skill files found.".into()
-    } else {
-        format!("Skills ({} total):\n{}", skills.len(), skills.join("\n"))
-    }
-}
-
-/// Pattern-based fallback for the user-facing skills menu filter. Used when
-/// a skill file lacks the explicit `internal: true` frontmatter tag.
+/// Pattern-based filter for the user-facing skills menu. Excludes skills that
+/// are auto-served as MCP harness instructions (agent-*, develop-*). These
+/// remain reachable via skill_invoke / develop_feature / team_call /
+/// workflow_call etc.
 pub fn is_internal_skill_stem(stem: &str) -> bool {
     stem.starts_with("agent-")
         || stem == "develop-feature"
@@ -2805,10 +2732,19 @@ mod tests {
 
     #[test]
     fn test_library_search_no_query() {
+        // Routes through the LIVE dispatch path (not dead-code file-scanner).
+        // An empty/missing query must return the informative required-parameter
+        // message — not a silent empty result or an FTS5 error.
         let server = OrrchMcpServer::from_defaults();
-        let args = serde_json::json!({});
-        let result = library_search(&server, &args);
-        assert!(result.starts_with("Error:"));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // Case 1: query field absent.
+        let result = rt.block_on(dispatch(&server, "library_search", &serde_json::json!({})));
+        assert!(result.starts_with("Error:"), "missing query: {result}");
+        assert!(result.contains("'query'"), "should mention param name: {result}");
+        // Case 2: query field present but empty string.
+        let result2 = rt.block_on(dispatch(&server, "library_search", &serde_json::json!({"query": ""})));
+        assert!(result2.starts_with("Error:"), "empty query: {result2}");
+        assert!(result2.contains("'query'"), "should mention param name: {result2}");
     }
 
     #[test]
