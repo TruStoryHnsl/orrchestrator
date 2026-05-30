@@ -2,6 +2,16 @@ use std::path::{Path, PathBuf};
 
 use crate::plan_parser::{self, FeatureStatus, PlanPhase, parse_status_marker};
 
+/// Resolve the canonical roadmap file for a project: prefer `.orrch/PLAN.md`,
+/// fall back to a root `PLAN.md` for not-yet-migrated projects.
+pub fn resolve_plan_path(project_dir: &std::path::Path) -> std::path::PathBuf {
+    let dot = project_dir.join(".orrch").join("PLAN.md");
+    if dot.exists() {
+        return dot;
+    }
+    project_dir.join("PLAN.md")
+}
+
 /// A roadmap item parsed from PLAN.md.
 #[derive(Debug, Clone)]
 pub struct RoadmapItem {
@@ -306,7 +316,12 @@ impl Project {
         let color_tag = load_color_tag(path);
         let meta = scan_project_meta(path);
         let (roadmap, description, has_plan, plan_phases) = if let Some(ref plan_file) = meta.plan_file {
-            let plan_path = path.join(plan_file);
+            // Prefer .orrch/PLAN.md; fall back to root for un-migrated projects.
+            let plan_path = if plan_file == "PLAN.md" {
+                resolve_plan_path(path)
+            } else {
+                path.join(plan_file)
+            };
             let (rm, desc, hp) = parse_plan_file(&plan_path);
             let phases = if hp {
                 if let Ok(content) = std::fs::read_to_string(&plan_path) {
@@ -1479,5 +1494,18 @@ mod tests {
         meta.has_cargo_toml = true;
         meta.current_version = Some("v2".into());
         assert_eq!(meta.summary_line(), "CLAUDE.md | Cargo.toml | v2");
+    }
+
+    #[test]
+    fn prefers_dot_orrch_plan_over_root() {
+        let tmp = std::env::temp_dir().join(format!("orrch_plan_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".orrch")).unwrap();
+        std::fs::write(tmp.join("PLAN.md"), "- [ ] root feature\n").unwrap();
+        std::fs::write(tmp.join(".orrch/PLAN.md"), "- [ ] orrch feature\n").unwrap();
+
+        let resolved = resolve_plan_path(&tmp);
+        assert!(resolved.ends_with(".orrch/PLAN.md"), "got {resolved:?}");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
