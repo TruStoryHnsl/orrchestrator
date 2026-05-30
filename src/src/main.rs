@@ -39,6 +39,13 @@ async fn main() -> Result<()> {
         })
         .init();
 
+    // Start the staleness monitor early. Reads compile-time env vars
+    // (ORRCH_BUILD_TIMESTAMP_NS / ORRCH_BUILD_REPO_ROOT) injected by
+    // src/build.rs. The monitor spawns a background thread that polls
+    // the source tree; the TUI + WebUI render a protest banner when any
+    // rebuild-required file is newer than this binary.
+    let _ = orrch_core::staleness::start_monitor_from_env();
+
     // --- CLI arg handling ---
     //
     // Minimal hand-rolled arg parser (no clap).

@@ -3,6 +3,7 @@ name = "orrchestrator"
 description = "AI development pipeline hypervisor"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [[bin]]
 name = "orrchestrator"

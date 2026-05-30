@@ -114,16 +114,16 @@ fn find_terminal() -> Option<String> {
 
 /// Build nvim `-c` args that brand the window as orrchestrator-owned.
 ///
-/// Sets three things:
-/// 1. Terminal title (visible in taskbar / alt-tab)
-/// 2. Persistent statusline at the bottom: "[orrchestrator] Feedback  file.md    :wq save | :q! discard"
-/// 3. StatusLine highlight in orrchestrator's accent color (#E94560) so it's unmistakable
+/// Sets the terminal title only. Earlier versions also forced a custom
+/// statusline + StatusLine highlight via post-init `-c` commands, which
+/// silently clobbered the user's own statusline plugin (lualine, etc.)
+/// because `-c` runs AFTER init.lua. Title alone is enough to identify
+/// the window in alt-tab / taskbar; the rest belongs to the user's nvim.
 fn vim_title_args(title: &str) -> Vec<String> {
     let esc = title.replace(' ', "\\ ");
     vec![
-        "-c".into(), format!("set title titlestring={esc}"),
-        "-c".into(), format!("set laststatus=2 scrolloff=2 statusline={esc}\\ \\ %f%m"),
-        "-c".into(), "hi StatusLine cterm=NONE gui=NONE".into(),
+        "-c".into(),
+        format!("set title titlestring={esc}"),
     ]
 }
 

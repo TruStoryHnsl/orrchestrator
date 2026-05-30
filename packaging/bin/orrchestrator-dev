@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# orrchestrator-dev — live-reload dev launcher.
+#
+# Wraps `cargo watch -x run` so the app rebuilds + restarts on any .rs or
+# Cargo.toml change. The staleness banner inside the app will additionally
+# warn about any rebuild-required files that have changed since the running
+# binary was built (covers the gap between save and rebuild completion).
+#
+# Defaults to debug build for fast iteration. Set ORRCH_DEV_RELEASE=1 to
+# use --release (slower compiles, better runtime perf).
+
+set -euo pipefail
+
+APP_NAME="orrchestrator"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+PKG_BIN_DIR="$(dirname "$SCRIPT_PATH")"
+REPO_ROOT="$(cd "$PKG_BIN_DIR/../.." && pwd)"
+CONFIG_FILE="$HOME/.config/$APP_NAME/launch.env"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+    set +a
+fi
+
+export ORRCH_DEV_MODE=1
+
+if ! command -v cargo-watch >/dev/null 2>&1; then
+    echo "[$APP_NAME-dev] cargo-watch not installed — installing..." >&2
+    cargo install cargo-watch
+fi
+
+CARGO_RUN_FLAGS=()
+if [[ "${ORRCH_DEV_RELEASE:-0}" == "1" ]]; then
+    CARGO_RUN_FLAGS+=(--release)
+fi
+
+cd "$REPO_ROOT"
+exec cargo watch \
+    --why \
+    --watch src \
+    --watch crates \
+    --watch Cargo.toml \
+    -x "run ${CARGO_RUN_FLAGS[*]} -- $*"
