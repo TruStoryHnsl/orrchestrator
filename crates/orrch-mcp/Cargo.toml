@@ -12,7 +12,10 @@ path = "src/main.rs"
 orrch-agents = { path = "../orrch-agents" }
 orrch-workforce = { path = "../orrch-workforce" }
 orrch-core = { path = "../orrch-core" }
+orrch-db = { path = "../orrch-db" }
+anyhow.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+rusqlite = { workspace = true }

@@ -5,6 +5,29 @@ use std::sync::OnceLock;
 
 use crate::server::OrrchMcpServer;
 
+// ─── orrch-db helper ────────────────────────────────────────────────────────
+
+/// Build an ephemeral orrch-db connection by rebuilding from the standard
+/// sources. Cheap (sub-second); the DB is purely a query accelerator.
+fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
+    use orrch_db::{rebuild_all, RebuildSources};
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let library_root = std::path::PathBuf::from(&home)
+        .join(".config").join("orrchestrator").join("library");
+    let projects_root = std::path::PathBuf::from(&home).join("projects");
+    let project_dirs = std::fs::read_dir(&projects_root)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let db_path = std::path::PathBuf::from(&home)
+        .join(".cache").join("orrchestrator").join("orrch.db");
+    rebuild_all(&db_path, &RebuildSources { project_dirs, library_root })
+}
+
 // ─── Tool definitions (JSON Schema for tools/list) ─────────────────────────
 
 pub fn tool_definitions() -> Vec<Value> {
@@ -521,10 +544,44 @@ pub fn tool_definitions() -> Vec<Value> {
 
 pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> String {
     match name {
-        "library_search" => library_search(server, args),
+        "library_search" => {
+            let q = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            match orrch_db_conn() {
+                Ok(conn) => match orrch_db::query::library_search(&conn, q) {
+                    Ok(hits) if hits.is_empty() => format!("No library items match '{q}'."),
+                    Ok(hits) => hits.iter()
+                        .map(|h| format!("- [{}] {} — {}", h.kind, h.name, h.description))
+                        .collect::<Vec<_>>().join("\n"),
+                    Err(e) => format!("library_search error: {e}"),
+                },
+                Err(e) => format!("library_search error: {e}"),
+            }
+        }
         "library_get" => library_get(server, args),
-        "list_agents" => list_agents(server),
-        "list_skills" => list_skills(server),
+        "list_agents" => {
+            match orrch_db_conn() {
+                Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "agent") {
+                    Ok(items) if items.is_empty() => "No agent profiles found.".into(),
+                    Ok(items) => items.iter()
+                        .map(|i| format!("- {} — {}", i.name, i.description))
+                        .collect::<Vec<_>>().join("\n"),
+                    Err(e) => format!("list_agents error: {e}"),
+                },
+                Err(e) => format!("list_agents error: {e}"),
+            }
+        }
+        "list_skills" => {
+            match orrch_db_conn() {
+                Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "skill") {
+                    Ok(items) if items.is_empty() => "No skill files found.".into(),
+                    Ok(items) => items.iter()
+                        .map(|i| format!("- {} — {}", i.name, i.description))
+                        .collect::<Vec<_>>().join("\n"),
+                    Err(e) => format!("list_skills error: {e}"),
+                },
+                Err(e) => format!("list_skills error: {e}"),
+            }
+        }
         "develop_feature" => develop_feature(server, args),
         "assess_development" => assess_development(server, args),
         "instruction_intake" => instruction_intake(server, args),
