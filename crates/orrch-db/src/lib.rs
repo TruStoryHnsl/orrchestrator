@@ -14,5 +14,7 @@ pub mod query;
 pub mod watch;
 pub mod migrate;
 
-// pub use model::{...};   // Task 2
+pub use model::{
+    ArchFact, BugRow, EntityType, EventKind, EventRecord, FeatureRow, LibraryRow, LicenseRow,
+};
 // pub use rebuild::{...}; // Task 7
