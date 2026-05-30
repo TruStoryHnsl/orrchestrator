@@ -78,7 +78,7 @@ CREATE TABLE source_files (
 );
 
 CREATE VIRTUAL TABLE library_fts USING fts5(
-    name, description, tags, content=''
+    name, description, tags, content='library_items', content_rowid='rowid'
 );
 "#;
 

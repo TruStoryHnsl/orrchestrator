@@ -31,9 +31,12 @@ pub fn insert_library_item(conn: &Connection, row: &LibraryRow) -> rusqlite::Res
          (kind, name, description, tags, path, body_hash) VALUES (?1,?2,?3,?4,?5,?6)",
         params![row.kind, row.name, row.description, row.tags.join(","), row.path, row.body_hash],
     )?;
+    // Keep the content-table FTS index in sync. We insert using the rowid of
+    // the library_items row so FTS5 can resolve content back from the table.
     conn.execute(
-        "INSERT INTO library_fts (name, description, tags) VALUES (?1,?2,?3)",
-        params![row.name, row.description, row.tags.join(" ")],
+        "INSERT INTO library_fts (rowid, name, description, tags) \
+         SELECT rowid, name, description, tags FROM library_items WHERE name=?1",
+        params![row.name],
     )?;
     Ok(())
 }
