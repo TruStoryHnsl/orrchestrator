@@ -12,9 +12,9 @@
 jobs = 6
 
 [target.x86_64-unknown-linux-gnu]
-# clang + lld is dramatically faster at linking than the default GNU bfd ld.
-# Both are already installed on this box (/usr/bin/clang, /usr/bin/lld).
-# If you install `mold` (pacman -S mold), swap `-fuse-ld=lld` for
-# `-fuse-ld=mold` for an even faster link.
+# clang + mold: mold is the fastest linker available and dramatically beats
+# the default GNU bfd ld on this multi-crate workspace's link step.
+# Both installed on this box (/usr/bin/clang, /usr/bin/mold 2.41).
+# Fallback: if mold is ever missing, swap `-fuse-ld=mold` for `-fuse-ld=lld`.
 linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
