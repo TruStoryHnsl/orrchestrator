@@ -1,0 +1,20 @@
+# Dev-loop build performance. See chore/dev-build-perf.
+#
+# Two goals:
+#   1. Keep the machine responsive during builds (don't pin all 8 cores).
+#   2. Make incremental link steps fast (rust-lld linker is the slow part of
+#      a debug rebuild on a multi-crate workspace).
+
+[build]
+# Ryzen 7 3700X = 8 logical cores. Cap codegen jobs at 6 so two cores stay
+# free for the editor / running TUI while cargo-watch rebuilds. Remove this
+# line (or raise it) for fastest possible CI/release builds.
+jobs = 6
+
+[target.x86_64-unknown-linux-gnu]
+# clang + lld is dramatically faster at linking than the default GNU bfd ld.
+# Both are already installed on this box (/usr/bin/clang, /usr/bin/lld).
+# If you install `mold` (pacman -S mold), swap `-fuse-ld=lld` for
+# `-fuse-ld=mold` for an even faster link.
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]

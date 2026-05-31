@@ -37,9 +37,18 @@ if [[ "${ORRCH_DEV_RELEASE:-0}" == "1" ]]; then
 fi
 
 cd "$REPO_ROOT"
+# --delay 2: debounce — coalesce a burst of saves (or a Syncthing batch
+#   write) into ONE rebuild instead of stacking N full recompiles.
+# --ignore: only .rs / Cargo.toml changes should trigger a rebuild. Markdown,
+#   JSON config, and other non-source writes inside the watched trees would
+#   otherwise cause phantom rebuilds that pin every core for no reason.
 exec cargo watch \
     --why \
+    --delay 2 \
     --watch src \
     --watch crates \
     --watch Cargo.toml \
+    --ignore '*.md' \
+    --ignore '*.json' \
+    --ignore '*.txt' \
     -x "run ${CARGO_RUN_FLAGS[*]} -- $*"
