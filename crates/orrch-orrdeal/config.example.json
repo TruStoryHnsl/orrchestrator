@@ -1,0 +1,18 @@
+{
+  "proxmox": {
+    "endpoint": "https://orrbit:8006/",
+    "node": "orrbit",
+    "api_token_env": "ORRDEAL_PVE_TOKEN",
+    "template": "debian-12-cloudinit",
+    "ssh_user": "orrdeal",
+    "ssh_public_key_path": "~/.ssh/orrdeal.pub",
+    "ssh_private_key_path": "~/.ssh/orrdeal",
+    "cores": 2,
+    "memory_mb": 2048
+  },
+  "mesh": {
+    "device": "cb17",
+    "ssh_user": "corr",
+    "ssh_private_key_path": "~/.ssh/orrdeal"
+  }
+}

@@ -1,0 +1,6 @@
+# Terraform working state — never commit
+terraform/proxmox-k3s/.terraform/
+terraform/proxmox-k3s/.terraform.lock.hcl
+terraform/proxmox-k3s/terraform.tfstate
+terraform/proxmox-k3s/terraform.tfstate.backup
+terraform/proxmox-k3s/kubeconfig.yaml

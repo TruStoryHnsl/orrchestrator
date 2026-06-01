@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
         println!("  orrchestrator --web      Open the WebUI in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
+        println!("  orrchestrator orrdeal …  Heterogeneous test fabric (try: orrdeal skeleton run)");
         println!("  orrchestrator --help     Show this help");
         return Ok(());
     }
@@ -79,6 +80,12 @@ async fn main() -> Result<()> {
     // --web: open the WebUI in the browser.
     if args.iter().any(|a| a == "--web") {
         return open_webui_in_browser();
+    }
+
+    // `orrdeal …` — heterogeneous test fabric subcommand. Dispatched before the
+    // terminal-capability check because it's a non-TUI command-line tool.
+    if args.first().map(String::as_str) == Some("orrdeal") {
+        return orrch_orrdeal::run_cli(&args[1..]).await;
     }
 
     if !io::stdout().is_terminal() {
