@@ -48,7 +48,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------- args
 title="" class="" pid="" active=0 do_list=0
 burst=1 interval=500 watch=0 duration=6 threshold=0.01
-max_width=1280 project="$PWD" outdir="" settle=250
+max_width=1280 project="$PWD" outdir="" settle=250 display="" winid=""
 
 die() { echo "spectacle-peek: $*" >&2; exit 2; }
 
@@ -68,6 +68,8 @@ while [ $# -gt 0 ]; do
     --project)   project="${2:-}"; shift 2;;
     --outdir)    outdir="${2:-}"; shift 2;;
     --settle)    settle="${2:-}"; shift 2;;
+    --display)   display="${2:-}"; shift 2;;
+    --window)    winid="${2:-}"; shift 2;;
     -h|--help)   sed -n '3,55p' "$0"; exit 0;;
     *)           die "unknown argument: $1";;
   esac
@@ -103,17 +105,28 @@ fi
 have() { command -v "$1" >/dev/null 2>&1; }
 IM=""; have magick && IM="magick"; { [ -z "$IM" ] && have convert; } && IM="convert"
 
-backend=""
-if have spectacle; then backend="spectacle"
-elif have grim && { have swaymsg || have hyprctl; }; then backend="grim"
-elif have import && { have kdotool || have xdotool; }; then backend="x11"
+# --display :N forces the isolated-X11 path (e.g. a gui-sandbox Xvfb display):
+# capture via `import` and target windows via `xdotool`, all pinned to that
+# DISPLAY so nothing touches the user's real session.
+if [ -n "$display" ]; then
+  case "$display" in :[0-9]*) :;; [0-9]*) display=":$display";; *) die "bad --display '$display'";; esac
+  have import  || die "--display needs ImageMagick 'import'"
+  have xdotool || die "--display needs xdotool"
+  export DISPLAY="$display"
+  xdotool getdisplaygeometry >/dev/null 2>&1 || die "display $display not reachable (is the sandbox running?)"
+  backend="x11"; WQ="xdotool"
 else
-  echo "spectacle-peek: no usable capture backend (need spectacle, or grim+swaymsg, or import+xdotool)" >&2
-  exit 4
+  backend=""
+  if have spectacle; then backend="spectacle"
+  elif have grim && { have swaymsg || have hyprctl; }; then backend="grim"
+  elif have import && { have kdotool || have xdotool; }; then backend="x11"
+  else
+    echo "spectacle-peek: no usable capture backend (need spectacle, or grim+swaymsg, or import+xdotool)" >&2
+    exit 4
+  fi
+  # window query helper (KWin via kdotool; X11 via xdotool)
+  WQ=""; have kdotool && WQ="kdotool"; { [ -z "$WQ" ] && have xdotool; } && WQ="xdotool"
 fi
-
-# window query helper (KWin via kdotool; X11 via xdotool)
-WQ=""; have kdotool && WQ="kdotool"; { [ -z "$WQ" ] && have xdotool; } && WQ="xdotool"
 
 # --------------------------------------------------------------------- --list
 if [ "$do_list" -eq 1 ]; then
@@ -129,12 +142,13 @@ if [ "$do_list" -eq 1 ]; then
 fi
 
 # ------------------------------------------------------------- resolve a target
-[ "$active" -eq 1 ] || [ -n "$title" ] || [ -n "$class" ] || [ -n "$pid" ] || \
-  die "no target. Pass one of --title / --class / --pid / --active (whole-screen capture is not supported)."
+[ "$active" -eq 1 ] || [ -n "$winid" ] || [ -n "$title" ] || [ -n "$class" ] || [ -n "$pid" ] || \
+  die "no target. Pass one of --window / --title / --class / --pid / --active (whole-screen capture is not supported)."
 
 win_id=""
 resolve_window() {
   # Sets win_id when targeting a non-active window. Empty win_id == use active.
+  [ -n "$winid" ] && { win_id="$winid"; return; }
   [ "$active" -eq 1 ] && { win_id=""; return; }
   [ -n "$WQ" ] || die "targeting by --title/--class/--pid needs kdotool or xdotool"
   local out=""
