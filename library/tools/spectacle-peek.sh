@@ -73,6 +73,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ---------------------------------------------------------------- validate input
+# Every numeric option flows into awk and $(( )) arithmetic; validate strictly so
+# nothing reaches an eval/arithmetic context as code. (Strings like --title are
+# passed as argv to kdotool, never evaluated, so they need no shell escaping.)
+is_uint()   { case "$1" in ''|*[!0-9]*)       return 1;; *) return 0;; esac; }
+is_ufloat() { case "$1" in ''|*[!0-9.]*|*.*.*) return 1;; *) return 0;; esac; }
+
+is_uint "$burst"     && [ "$burst" -ge 1 ] || die "--burst must be a positive integer"
+is_uint "$interval"  || die "--interval must be a non-negative integer (ms)"
+is_uint "$duration"  && [ "$duration" -ge 1 ] || die "--duration must be a positive integer (seconds)"
+is_uint "$max_width" || die "--max-width must be a non-negative integer (px; 0=off)"
+is_uint "$settle"    || die "--settle must be a non-negative integer (ms)"
+is_ufloat "$threshold" || die "--threshold must be a number in 0..1"
+[ -z "$pid" ] || is_uint "$pid" || die "--pid must be a positive integer"
+
 # --------------------------------------------------------------------- scope gate
 scope_file="$project/.scope"
 if [ -f "$scope_file" ]; then
@@ -212,11 +227,11 @@ if [ "$watch" -eq 1 ]; then
     cp "$prev" "$f"; emit "$f"; count=$((count+1))
   fi
   while [ "$(date +%s)" -lt "$end" ]; do
-    sleep "$(awk "BEGIN{print $interval/1000}")"
+    sleep "$(awk -v ms="$interval" 'BEGIN{print ms/1000}')"
     cur="$outdir/.cur.png"
     capture_one "$cur" || continue
     frac="$(change_frac "$prev" "$cur")"
-    if awk "BEGIN{exit !($frac >= $threshold)}"; then
+    if awk -v f="$frac" -v t="$threshold" 'BEGIN{exit !(f>=t)}'; then
       idx=$((idx+1)); f="$(printf '%s/%02d.png' "$outdir" "$idx")"
       mv "$cur" "$f"; emit "$f"; count=$((count+1))
       cp "$f" "$prev"
@@ -230,7 +245,7 @@ else
     i=$((i+1))
     f="$(printf '%s/%02d.png' "$outdir" "$i")"
     if capture_one "$f"; then emit "$f"; count=$((count+1)); fi
-    if [ "$i" -lt "$burst" ]; then sleep "$(awk "BEGIN{print $interval/1000}")"; fi
+    if [ "$i" -lt "$burst" ]; then sleep "$(awk -v ms="$interval" 'BEGIN{print ms/1000}')"; fi
   done
 fi
 
