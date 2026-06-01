@@ -3,11 +3,14 @@
 #
 # What it does:
 #   1. Builds target/release/orrchestrator if missing or older than source
-#   2. Creates ~/.config/orrchestrator/ and seeds launch.env from the example
+#   2. Installs orrch-mcp-server to ~/.local/bin (a COPY, refreshed every run, so
+#      the MCP server binary survives `cargo clean` wiping target/ and is always
+#      as fresh as the last build)
+#   3. Creates ~/.config/orrchestrator/ and seeds launch.env from the example
 #      (never clobbers an existing launch.env)
-#   3. Symlinks packaging/bin/orrchestrator → ~/.local/bin/orrchestrator
+#   4. Symlinks packaging/bin/orrchestrator → ~/.local/bin/orrchestrator
 #      Same for orrchestrator-dev
-#   4. Verifies ~/.local/bin is in $PATH and warns if not
+#   5. Verifies ~/.local/bin is in $PATH and warns if not
 #
 # Re-running is safe — every step is idempotent.
 
@@ -47,7 +50,24 @@ else
     green "      binary is current"
 fi
 
-cyan "[2/4] Config"
+cyan "[2/5] MCP server"
+# The MCP server is a separate workspace binary the Claude Code MCP config launches
+# by absolute path. Pointing that config at target/release/ is fragile — `cargo
+# clean` (or a linker-config change) wipes target/ and the server vanishes (ENOENT).
+# So install a COPY at a stable path and refresh it on every install run.
+MCP_BIN="$REPO_ROOT/target/release/orrch-mcp-server"
+MCP_DST="$LOCAL_BIN/orrch-mcp-server"
+mkdir -p "$LOCAL_BIN"
+if [[ ! -x "$MCP_BIN" ]]; then
+    yellow "      orrch-mcp-server missing from target/release — building"
+    (cd "$REPO_ROOT" && cargo build --release -p orrch-mcp --bin orrch-mcp-server)
+fi
+# COPY, not symlink: a symlink into target/release would break on cargo clean.
+install -m 0755 "$MCP_BIN" "$MCP_DST"
+green "      installed $MCP_DST (copy — survives cargo clean, refreshed each run)"
+yellow "      MCP config command should be: $MCP_DST"
+
+cyan "[3/5] Config"
 mkdir -p "$CFG_DIR"
 if [[ -f "$CFG_FILE" ]]; then
     green "      $CFG_FILE already exists (left untouched)"
@@ -56,7 +76,7 @@ else
     green "      seeded $CFG_FILE from template"
 fi
 
-cyan "[3/4] Symlink"
+cyan "[4/5] Symlink"
 mkdir -p "$LOCAL_BIN"
 for name in "$APP_NAME" "$APP_NAME-dev"; do
     src="$PKG_BIN_DIR/$name"
@@ -76,7 +96,7 @@ for name in "$APP_NAME" "$APP_NAME-dev"; do
     fi
 done
 
-cyan "[4/4] PATH check"
+cyan "[5/5] PATH check"
 case ":$PATH:" in
     *":$LOCAL_BIN:"*)
         green "      $LOCAL_BIN is in PATH"
@@ -92,3 +112,4 @@ green "✔ orrchestrator installed"
 echo "  Run:                $APP_NAME"
 echo "  Live-reload dev:    $APP_NAME-dev"
 echo "  Config:             $CFG_FILE"
+echo "  MCP server:         $LOCAL_BIN/orrch-mcp-server"
