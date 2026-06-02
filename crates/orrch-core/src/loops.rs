@@ -19,6 +19,53 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// LOOP-011 — the destructiveness class of a loop. Two top-level kinds; Support
+/// carries a sub-kind purely for UI/diagnostics (it does NOT change the policy —
+/// every Support sub-kind is equally non-destructive).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LoopClass {
+    /// Destructive / may-modify-code: commercial & general software development.
+    /// Full tool surface; may write/edit code, run mutating bash, git commit.
+    Dev,
+    /// Non-destructive support loop. Reads/analyzes only; writes `.md` artifacts
+    /// to support the dev agents. NEVER mutates code, NEVER commits. The sub-kind
+    /// is informational (Planning/Analysis/Testing/Research/Critique).
+    Support(SupportKind),
+}
+
+/// Informational sub-kind of a Support loop. All sub-kinds share the SAME
+/// (non-destructive) ToolPolicy — this only labels the loop for the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SupportKind {
+    #[default]
+    Planning,
+    Analysis,
+    Testing,
+    Research,
+    Critique,
+}
+
+impl Default for LoopClass {
+    /// Legacy loops (no `class` key) materialize as Dev — preserves prior
+    /// behavior (every existing loop could modify code).
+    fn default() -> Self {
+        LoopClass::Dev
+    }
+}
+
+impl LoopClass {
+    /// True when this class may mutate code / commit (Dev only).
+    pub fn is_destructive(self) -> bool {
+        matches!(self, LoopClass::Dev)
+    }
+    /// True for any Support sub-kind (non-destructive).
+    pub fn is_support(self) -> bool {
+        matches!(self, LoopClass::Support(_))
+    }
+}
+
 /// One scheduled loop — a sequence of workflows that runs sequentially and
 /// repeats when the final workflow finishes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +89,10 @@ pub struct LoopSchedule {
     /// runner-side dispatch logic.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
+    /// LOOP-011 destructiveness class. serde-defaulted to Dev so every legacy
+    /// loops.json (and the loops.rs round-trip tests) parse unchanged.
+    #[serde(default)]
+    pub class: LoopClass,
 }
 
 impl LoopSchedule {
@@ -57,6 +108,7 @@ impl LoopSchedule {
             enabled: false,
             created_at: iso_now(),
             kind: String::new(),
+            class: LoopClass::default(),
         }
     }
 }
@@ -221,5 +273,70 @@ mod tests {
         let dir = fresh_dir();
         // Don't save anything; load should yield empty vec.
         assert!(load_loops(&dir).is_empty());
+    }
+
+    // ── LOOP-011: LoopClass ──────────────────────────────────────────────
+
+    #[test]
+    fn loop_class_default_is_dev() {
+        assert_eq!(LoopClass::default(), LoopClass::Dev);
+        assert!(LoopSchedule::new("x", PathBuf::from("/p"), vec![]).class == LoopClass::Dev);
+    }
+
+    #[test]
+    fn loop_class_is_support_and_is_destructive() {
+        assert!(LoopClass::Dev.is_destructive());
+        assert!(!LoopClass::Dev.is_support());
+        for k in [
+            SupportKind::Planning,
+            SupportKind::Analysis,
+            SupportKind::Testing,
+            SupportKind::Research,
+            SupportKind::Critique,
+        ] {
+            let c = LoopClass::Support(k);
+            assert!(c.is_support());
+            assert!(!c.is_destructive());
+        }
+    }
+
+    #[test]
+    fn legacy_loop_json_without_class_deserializes_to_dev() {
+        // JSON with NO `class` key (a pre-existing loops.json) → class=Dev.
+        let json = r#"[{
+            "id": "legacy",
+            "name": "Legacy",
+            "project_dir": "/p",
+            "workflows": ["a"],
+            "enabled": false,
+            "created_at": "2026-01-01T00:00:00Z"
+        }]"#;
+        let loaded: Vec<LoopSchedule> = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].class, LoopClass::Dev);
+    }
+
+    #[test]
+    fn loop_class_serde_tokens_are_kebab_case() {
+        // Dev → "dev"
+        let dev = serde_json::to_string(&LoopClass::Dev).unwrap();
+        assert_eq!(dev, "\"dev\"");
+        // Support(Planning) → externally-tagged map with kebab token
+        let sup = serde_json::to_string(&LoopClass::Support(SupportKind::Planning)).unwrap();
+        assert_eq!(sup, "{\"support\":\"planning\"}");
+        // round-trip
+        let back: LoopClass = serde_json::from_str(&sup).unwrap();
+        assert_eq!(back, LoopClass::Support(SupportKind::Planning));
+    }
+
+    #[test]
+    fn schedule_with_support_class_round_trips() {
+        let dir = fresh_dir();
+        let mut s = LoopSchedule::new("Planner", dir.join("p"), vec!["plan".into()]);
+        s.class = LoopClass::Support(SupportKind::Planning);
+        save_loops(&dir, &[s.clone()]).unwrap();
+        let loaded = load_loops(&dir);
+        assert_eq!(loaded[0], s);
+        assert!(loaded[0].class.is_support());
     }
 }

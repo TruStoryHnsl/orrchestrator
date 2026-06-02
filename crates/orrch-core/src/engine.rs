@@ -78,6 +78,55 @@ pub fn resolve_engine<'a>(
     (resolved, entry)
 }
 
+// ─── LOOP-012: class → default engine mapping (PURE) ────────────────────────
+
+/// ENG-008 reasoning provider — Support loops default here.
+pub const SUPPORT_DEFAULT_ENGINE: &str = "GPT-4o";
+/// ENG-008 execution provider — Dev loops default here.
+pub const DEV_DEFAULT_ENGINE: &str = "Claude Sonnet 4.6";
+
+/// LOOP-012 (PURE). The class-appropriate default engine id for a loop class.
+/// Support (planning/analysis/testing/research/critique) → GPT; Dev → Claude.
+/// This is the loop-level analogue of `agent_layer_engine`: it feeds the
+/// `EngineLayers` so the existing 4-level precedence still runs on top
+/// (session pick > class default > project default > global > builtin).
+pub fn class_default_engine(class: crate::loops::LoopClass) -> &'static str {
+    if class.is_support() {
+        SUPPORT_DEFAULT_ENGINE
+    } else {
+        DEV_DEFAULT_ENGINE
+    }
+}
+
+/// LOOP-012 overridable resolution. The class default occupies a layer slot
+/// ABOVE project/global (a class default beats a project default) but BELOW
+/// session_pick + agent_role (an explicit per-spawn or per-agent engine still
+/// wins → "overriding the class default works"). PURE; reuses
+/// `resolve_engine_id`. `class_override` = an explicit engine the loop schedule
+/// pins (None → use `class_default_engine`).
+pub fn resolve_loop_engine_id(
+    class: crate::loops::LoopClass,
+    session_pick: Option<&str>,
+    agent_role: Option<&str>,
+    class_override: Option<&str>,
+    project_default: Option<&str>,
+    global_default: Option<&str>,
+    fallback: &str,
+) -> ResolvedEngineId {
+    let class_engine = class_override
+        .map(str::to_string)
+        .or_else(|| Some(class_default_engine(class).to_string()));
+    let layers = EngineLayers {
+        session_pick: session_pick.map(str::to_string),
+        agent_role: agent_role.map(str::to_string),
+        // Fold the class default in ABOVE project by occupying the project slot
+        // ONLY when the project expressed no preference of its own.
+        project_default: project_default.map(str::to_string).or(class_engine),
+        global_default: global_default.map(str::to_string),
+    };
+    resolve_engine_id(&layers, fallback)
+}
+
 // ─── ENG-009: deploy handoff — resolved engine + human rationale ────────────
 
 /// ENG-009 outcome: the resolved engine id, which layer won, the importance that
@@ -675,6 +724,111 @@ mod tests {
         assert_eq!(d.source, EngineSource::Session);
         assert_eq!(d.engine_id, "user-pick");
         assert!(d.rationale.contains("overrides"), "rationale: {}", d.rationale);
+    }
+
+    // ── LOOP-012: class → default engine ─────────────────────────────────
+
+    #[test]
+    fn test_class_default_engine_support_is_gpt() {
+        use crate::loops::{LoopClass, SupportKind};
+        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Planning)), "GPT-4o");
+        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Analysis)), "GPT-4o");
+        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Testing)), "GPT-4o");
+        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Research)), "GPT-4o");
+        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Critique)), "GPT-4o");
+        // GPT engine id
+        assert!(class_default_engine(LoopClass::Support(SupportKind::Planning)).contains("GPT"));
+    }
+
+    #[test]
+    fn test_class_default_engine_dev_is_claude() {
+        use crate::loops::LoopClass;
+        assert_eq!(class_default_engine(LoopClass::Dev), "Claude Sonnet 4.6");
+        assert!(class_default_engine(LoopClass::Dev).contains("Claude"));
+    }
+
+    #[test]
+    fn test_resolve_loop_engine_class_default_when_nothing_else() {
+        use crate::loops::{LoopClass, SupportKind};
+        // No overrides → Support loop resolves to the GPT class default, riding
+        // the project slot (source ProjectDefault).
+        let r = resolve_loop_engine_id(
+            LoopClass::Support(SupportKind::Planning),
+            None, None, None, None, None, "fb",
+        );
+        assert_eq!(r.engine_id, "GPT-4o");
+        assert_eq!(r.source, EngineSource::ProjectDefault);
+
+        let r2 = resolve_loop_engine_id(LoopClass::Dev, None, None, None, None, None, "fb");
+        assert_eq!(r2.engine_id, "Claude Sonnet 4.6");
+    }
+
+    #[test]
+    fn test_resolve_loop_engine_session_pick_overrides_class_default() {
+        use crate::loops::{LoopClass, SupportKind};
+        let r = resolve_loop_engine_id(
+            LoopClass::Support(SupportKind::Analysis),
+            Some("user-pick"),
+            None,
+            None,
+            None,
+            None,
+            "fb",
+        );
+        assert_eq!(r.engine_id, "user-pick");
+        assert_eq!(r.source, EngineSource::Session);
+    }
+
+    #[test]
+    fn test_resolve_loop_engine_agent_role_overrides_class_default() {
+        use crate::loops::LoopClass;
+        let r = resolve_loop_engine_id(
+            LoopClass::Dev,
+            None,
+            Some("agent-engine"),
+            None,
+            None,
+            None,
+            "fb",
+        );
+        assert_eq!(r.engine_id, "agent-engine");
+        assert_eq!(r.source, EngineSource::AgentRole);
+    }
+
+    #[test]
+    fn test_resolve_loop_engine_explicit_class_override_beats_class_default() {
+        use crate::loops::{LoopClass, SupportKind};
+        // A pinned class_override replaces the GPT default but still rides the
+        // project slot (below session/agent).
+        let r = resolve_loop_engine_id(
+            LoopClass::Support(SupportKind::Research),
+            None,
+            None,
+            Some("pinned-engine"),
+            None,
+            None,
+            "fb",
+        );
+        assert_eq!(r.engine_id, "pinned-engine");
+        assert_eq!(r.source, EngineSource::ProjectDefault);
+    }
+
+    #[test]
+    fn test_resolve_loop_engine_project_default_beats_class_default() {
+        use crate::loops::{LoopClass, SupportKind};
+        // When the project DOES express a preference, it occupies the slot and
+        // the class default is dropped (class default only fills an empty slot).
+        let r = resolve_loop_engine_id(
+            LoopClass::Support(SupportKind::Planning),
+            None,
+            None,
+            None,
+            Some("proj-engine"),
+            None,
+            "fb",
+        );
+        assert_eq!(r.engine_id, "proj-engine");
+        assert_eq!(r.source, EngineSource::ProjectDefault);
     }
 
     #[test]
