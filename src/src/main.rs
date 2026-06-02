@@ -86,9 +86,16 @@ async fn main() -> Result<()> {
         println!("  orrchestrator --web      Open the WebUI in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
+        println!("  orrchestrator --voice-toggle  Toggle orrch-voice listening via the local socket");
         println!("  orrchestrator orrdeal …  Heterogeneous test fabric (try: orrdeal skeleton run)");
         println!("  orrchestrator --help     Show this help");
         return Ok(());
+    }
+
+    // Wayland-safe voice hotkey poke: bind a compositor shortcut to
+    // `orrchestrator --voice-toggle` instead of relying on global key hooks.
+    if args.iter().any(|a| a == "--voice-toggle") {
+        return voice_toggle_poke();
     }
 
     // --web: open the WebUI in the browser.
@@ -171,6 +178,23 @@ async fn main() -> Result<()> {
         );
     }
 
+    if std::env::var("ORRCH_VOICE_ENABLE").as_deref() == Ok("1") {
+        std::thread::Builder::new()
+            .name("orrch-voice".into())
+            .spawn(|| {
+                let cfg = orrch_voice::service::VoiceConfig::from_env();
+                orrch_voice::service::VoiceService::run(cfg);
+            })
+            .ok();
+        tracing::info!(
+            "orrch-voice enabled at {}",
+            std::env::var("ORRCH_VOICE_SOCKET")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| orrch_voice::protocol::default_socket_path())
+                .display()
+        );
+    }
+
     // Build a writer that tees stdout → local terminal AND → WebUI broadcast.
     // If the WebUI didn't start, the broadcast is a dangling channel with no
     // receivers — sends are silently dropped, no-op.
@@ -220,6 +244,56 @@ fn open_webui_in_browser() -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+    Ok(())
+}
+
+fn voice_toggle_poke() -> Result<()> {
+    use std::io::{BufRead, Write};
+    use std::os::unix::net::UnixStream;
+
+    let socket_path = std::env::var("ORRCH_VOICE_SOCKET")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| orrch_voice::protocol::default_socket_path());
+    let mut stream = match UnixStream::connect(&socket_path) {
+        Ok(stream) => stream,
+        Err(err) => {
+            println!(
+                "voice service offline — launch orrchestrator with ORRCH_VOICE_ENABLE=1 ({err})"
+            );
+            return Ok(());
+        }
+    };
+
+    // Prevent an infinite hang if the service accepts but never replies.
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+
+    serde_json::to_writer(&mut stream, &orrch_voice::protocol::VoiceRequest::Toggle)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    let mut line = String::new();
+    match std::io::BufReader::new(stream).read_line(&mut line) {
+        // Err path: explicit timeout error kind (WouldBlock / TimedOut).
+        Err(err)
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            println!("voice service timed out");
+            return Ok(());
+        }
+        Err(err) => return Err(err.into()),
+        // Ok(0) on Linux with SO_RCVTIMEO means the deadline fired (manifests as EOF).
+        Ok(0) => {
+            println!("voice service timed out");
+            return Ok(());
+        }
+        Ok(_) => {}
+    }
+    match serde_json::from_str::<orrch_voice::protocol::VoiceResponse>(&line)? {
+        orrch_voice::protocol::VoiceResponse::Ok => println!("voice toggle: ok"),
+        orrch_voice::protocol::VoiceResponse::Error(err) => println!("voice toggle: error: {err}"),
+        other => println!("voice toggle: {other:?}"),
+    }
     Ok(())
 }
 
