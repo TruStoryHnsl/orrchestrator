@@ -138,6 +138,25 @@ async fn main() -> Result<()> {
         }
     };
 
+    // orrch-relay (Task 9): OpenAI-compatible MoE-aware inference scheduler.
+    // Opt-in subsystem — only spawned when ORRCH_RELAY_ENABLE=1, so a normal
+    // launch is completely unaffected. `run_from_env()` builds state, spawns
+    // its worker, and serves an axum listener forever, so it must run on its
+    // own detached task and never block the TUI event loop. Bind/engine/embed
+    // config all come from ORRCH_RELAY_* env vars (see launch.env.example).
+    if std::env::var("ORRCH_RELAY_ENABLE").as_deref() == Ok("1") {
+        tokio::spawn(async {
+            if let Err(e) = orrch_relay::run_from_env().await {
+                tracing::error!("orrch-relay exited: {e}");
+            }
+        });
+        tracing::info!(
+            "orrch-relay enabled at http://{}/v1",
+            std::env::var("ORRCH_RELAY_BIND")
+                .unwrap_or_else(|_| "127.0.0.1:8585".to_string())
+        );
+    }
+
     // Build a writer that tees stdout → local terminal AND → WebUI broadcast.
     // If the WebUI didn't start, the broadcast is a dangling channel with no
     // receivers — sends are silently dropped, no-op.
