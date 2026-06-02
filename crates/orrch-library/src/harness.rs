@@ -94,6 +94,92 @@ impl FlexibilityMatrix {
     }
 }
 
+// ─── LOOP-013: per-loop-class tool policy (PURE) ────────────────────────────
+//
+// Lives next to FlexibilityMatrix because enforcement happens at the CTX-004
+// `tool_gating` control point. orrch-library is a LEAF crate (orrch-core
+// depends on it, not vice versa) so the policy fns take a plain
+// `class_is_support: bool` rather than the orrch-core `LoopClass` enum — the
+// caller (orrch-core spawn flow) passes `schedule.class.is_support()`.
+
+/// Coarse classification of a tool the harness might invoke, derived at the
+/// gate from the tool name/kind. Mutating vs non-mutating is the only axis
+/// LOOP-013 cares about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Read,         // Read/cat/grep/find/ls — always safe
+    Grep,
+    Find,
+    Research,     // WebSearch/WebFetch/MCP research tools — safe
+    MdWrite,      // write/edit of a *.md artifact — the ONLY write Support allows
+    CodeWrite,    // write/edit of a non-.md source file — DENIED for Support
+    CodeEdit,     // in-place edit of a non-.md source file — DENIED for Support
+    BashMutating, // bash that writes/moves/deletes/builds — DENIED for Support
+    BashReadOnly, // bash that only reads (ls/cat/git status) — allowed
+    GitCommit,    // git commit/push/tag — DENIED for Support
+}
+
+/// LOOP-013 per-class tool policy. `Full` = Dev (no restriction).
+/// `SupportReadOnly` = non-destructive: read/grep/find/research/md-write only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPolicy {
+    Full,
+    SupportReadOnly,
+}
+
+impl ToolPolicy {
+    /// The policy a loop class enforces. Dev → Full; any Support sub-kind →
+    /// SupportReadOnly. Caller passes `class_is_support` (decoupled from the
+    /// orrch-core enum to keep this crate a leaf).
+    pub fn for_class(class_is_support: bool) -> ToolPolicy {
+        if class_is_support {
+            ToolPolicy::SupportReadOnly
+        } else {
+            ToolPolicy::Full
+        }
+    }
+}
+
+/// THE GATE (LOOP-013). PURE. Returns true iff `kind` may run under `policy`.
+/// Enforced at the spawn/tool-gate layer (where orrch-library/harness control
+/// points are applied), NOT by convention. Dev allows everything; Support
+/// denies every mutating/commit kind and permits only
+/// read/grep/find/research/md-write/bash-read-only.
+pub fn is_tool_allowed(policy: ToolPolicy, kind: ToolKind) -> bool {
+    match policy {
+        ToolPolicy::Full => true,
+        ToolPolicy::SupportReadOnly => matches!(
+            kind,
+            ToolKind::Read
+                | ToolKind::Grep
+                | ToolKind::Find
+                | ToolKind::Research
+                | ToolKind::MdWrite
+                | ToolKind::BashReadOnly
+        ),
+    }
+}
+
+/// LOOP-013 spawn precondition. A Support loop can only be PROVABLY
+/// non-destructive on a harness that actually supports tool gating (CTX-004).
+/// Returns Err with a reason the spawn layer surfaces (refuse, don't run
+/// unguarded). Dev imposes no precondition.
+pub fn policy_enforceable_on(
+    policy: ToolPolicy,
+    matrix: &FlexibilityMatrix,
+) -> Result<(), &'static str> {
+    match policy {
+        ToolPolicy::Full => Ok(()),
+        ToolPolicy::SupportReadOnly => {
+            if matrix.tool_gating {
+                Ok(())
+            } else {
+                Err("support loop requires a tool-gating-capable harness (CTX-004 tool_gating) to be provably non-destructive")
+            }
+        }
+    }
+}
+
 /// A registered AI coding harness in the library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessEntry {
@@ -335,5 +421,80 @@ mod tests {
         }"#;
         let h: HarnessEntry = serde_json::from_str(json).unwrap();
         assert_eq!(h.flexibility, FlexibilityMatrix::default());
+    }
+
+    // ---- LOOP-013 ToolPolicy --------------------------------------------
+
+    #[test]
+    fn test_tool_policy_for_class() {
+        assert_eq!(ToolPolicy::for_class(true), ToolPolicy::SupportReadOnly);
+        assert_eq!(ToolPolicy::for_class(false), ToolPolicy::Full);
+    }
+
+    #[test]
+    fn test_dev_policy_allows_everything() {
+        for kind in [
+            ToolKind::Read,
+            ToolKind::Grep,
+            ToolKind::Find,
+            ToolKind::Research,
+            ToolKind::MdWrite,
+            ToolKind::CodeWrite,
+            ToolKind::CodeEdit,
+            ToolKind::BashMutating,
+            ToolKind::BashReadOnly,
+            ToolKind::GitCommit,
+        ] {
+            assert!(is_tool_allowed(ToolPolicy::Full, kind), "Full must allow {kind:?}");
+        }
+    }
+
+    #[test]
+    fn test_support_policy_denies_mutating_and_commit() {
+        for kind in [
+            ToolKind::CodeWrite,
+            ToolKind::CodeEdit,
+            ToolKind::BashMutating,
+            ToolKind::GitCommit,
+        ] {
+            assert!(
+                !is_tool_allowed(ToolPolicy::SupportReadOnly, kind),
+                "SupportReadOnly must DENY {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_support_policy_allows_read_research_mdwrite() {
+        for kind in [
+            ToolKind::Read,
+            ToolKind::Grep,
+            ToolKind::Find,
+            ToolKind::Research,
+            ToolKind::MdWrite,
+            ToolKind::BashReadOnly,
+        ] {
+            assert!(
+                is_tool_allowed(ToolPolicy::SupportReadOnly, kind),
+                "SupportReadOnly must ALLOW {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_policy_enforceable_on() {
+        let gating = FlexibilityMatrix { tool_gating: true, ..Default::default() };
+        let no_gating = FlexibilityMatrix { tool_gating: false, ..Default::default() };
+
+        // Full never needs a precondition.
+        assert!(policy_enforceable_on(ToolPolicy::Full, &gating).is_ok());
+        assert!(policy_enforceable_on(ToolPolicy::Full, &no_gating).is_ok());
+
+        // Support requires a tool-gating-capable harness.
+        assert!(policy_enforceable_on(ToolPolicy::SupportReadOnly, &gating).is_ok());
+        assert!(
+            policy_enforceable_on(ToolPolicy::SupportReadOnly, &no_gating).is_err(),
+            "support on non-gating harness must refuse"
+        );
     }
 }

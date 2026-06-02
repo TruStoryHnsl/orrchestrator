@@ -38,7 +38,7 @@ pub use agent::{AgentProfile, load_agents, agents_dir};
 pub use audit::{AuditEntry, ChunkCoordinate, compute_source_hash, write_audit_entry, load_audit_entries};
 pub use backend::{BackendKind, BackendsConfig, is_provider_available};
 pub use provider::{ProviderConfig, ProviderKind};
-pub use engine::{EngineLayers, EngineSource, ResolvedEngineId, resolve_engine, resolve_engine_id, engine_env, engine_selectable, agent_role_engine, project_default_engine, anthropic_url, openai_url, Importance, agent_layer_engine, agent_role_engine_for, agent_engine_pair, EngineDecision, decide_engine};
+pub use engine::{EngineLayers, EngineSource, ResolvedEngineId, resolve_engine, resolve_engine_id, engine_env, engine_selectable, agent_role_engine, project_default_engine, anthropic_url, openai_url, Importance, agent_layer_engine, agent_role_engine_for, agent_engine_pair, EngineDecision, decide_engine, class_default_engine, resolve_loop_engine_id, SUPPORT_DEFAULT_ENGINE, DEV_DEFAULT_ENGINE};
 pub use config::Config;
 pub use shadow::{ShadowRepo, data_dir, shadow_git_dir, DEFAULT_TRACKED_PATHS};
 pub use backup::{BackupConfig, BackupTier, PushOutcome, ProvisionPlan, configure_remote, push_backup, provision_plan};
@@ -54,7 +54,7 @@ pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_cl
 pub use session_brief::{SESSION_BRIEFS_SUBDIR, SessionBrief, SessionBriefInput, list_session_briefs, write_session_brief};
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
-pub use loops::{LoopSchedule, load_loops, save_loops, upsert_loop, toggle_loop, delete_loop, loops_path};
+pub use loops::{LoopSchedule, LoopClass, SupportKind, load_loops, save_loops, upsert_loop, toggle_loop, delete_loop, loops_path};
 // NOTE: `Clock`/`SystemClock`/`ManualClock`/`Tstamp` collide with file_registry's
 // own identically-named types, so they are NOT re-exported flat here — reach them
 // via `loop_controller::` (e.g. `orrch_core::loop_controller::ManualClock`).
