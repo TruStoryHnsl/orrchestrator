@@ -179,11 +179,19 @@ async fn main() -> Result<()> {
     }
 
     if std::env::var("ORRCH_VOICE_ENABLE").as_deref() == Ok("1") {
+        let runtime_handle = tokio::runtime::Handle::current();
         std::thread::Builder::new()
             .name("orrch-voice".into())
-            .spawn(|| {
+            .spawn(move || {
                 let cfg = orrch_voice::service::VoiceConfig::from_env();
-                orrch_voice::service::VoiceService::run(cfg);
+                let service = orrch_voice::service::VoiceService::new(cfg);
+                if std::env::var("ORRCH_VOICE_LOOP_ENABLE").as_deref() == Ok("1") {
+                    let rx = service.subscribe_utterances();
+                    orrch_voice::control_loop::start_loop_from_env(rx, runtime_handle);
+                }
+                if let Err(err) = service.start() {
+                    tracing::warn!("orrch-voice socket server exited: {err}");
+                }
             })
             .ok();
         tracing::info!(

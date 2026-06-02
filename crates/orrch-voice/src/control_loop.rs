@@ -1,11 +1,13 @@
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tracing::{info, warn};
 
 use crate::intent::{OllamaInterpreter, VoiceAction, VoiceInterpreter};
 use crate::protocol::Utterance;
@@ -305,6 +307,103 @@ impl VoiceControlLoop {
     }
 }
 
+#[derive(Clone)]
+pub struct CoreActionDispatcher {
+    projects_dir: PathBuf,
+    process_manager: Arc<Mutex<orrch_core::ProcessManager>>,
+    dispatch_backend: Option<orrch_core::BackendKind>,
+    runtime_handle: tokio::runtime::Handle,
+}
+
+impl CoreActionDispatcher {
+    pub fn from_env(runtime_handle: tokio::runtime::Handle) -> Self {
+        let config = orrch_core::Config::load();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let process_manager = Arc::new(Mutex::new(orrch_core::ProcessManager::new(event_tx)));
+        let dispatch_backend = select_dispatch_backend(&process_manager.lock().unwrap().backends);
+        Self {
+            projects_dir: config.projects_dir,
+            process_manager,
+            dispatch_backend,
+            runtime_handle,
+        }
+    }
+
+    #[cfg(test)]
+    fn new_for_test(
+        projects_dir: PathBuf,
+        dispatch_backend: Option<orrch_core::BackendKind>,
+    ) -> Self {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        Self {
+            projects_dir,
+            process_manager: Arc::new(Mutex::new(orrch_core::ProcessManager::new(event_tx))),
+            dispatch_backend,
+            runtime_handle: tokio::runtime::Handle::current(),
+        }
+    }
+
+    fn project_dir(&self, project: &str) -> Result<PathBuf> {
+        let path = Path::new(project);
+        let project_dir = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.projects_dir.join(project)
+        };
+        if !project_dir.is_dir() {
+            anyhow::bail!("project directory '{}' not found", project_dir.display());
+        }
+        Ok(project_dir)
+    }
+}
+
+impl ActionDispatcher for CoreActionDispatcher {
+    fn execute(&self, action: &VoiceAction) -> Result<ActionDispatchResult> {
+        match action {
+            VoiceAction::Dispatch {
+                project,
+                instruction,
+            } => {
+                let project_dir = self.project_dir(project)?;
+                let timestamp = orrch_core::feedback::chrono_lite_timestamp();
+                orrch_core::intake_review::distribute_to_inbox_from_intake(
+                    instruction,
+                    &project_dir,
+                    &timestamp,
+                    65_536,
+                )?;
+                Ok(ActionDispatchResult {
+                    session_id: None,
+                    message: format!("appended instruction to {}", project_dir.display()),
+                })
+            }
+            VoiceAction::SpawnSession { project, goal } => {
+                let project_dir = self.project_dir(project)?;
+                let backend = self.dispatch_backend.ok_or_else(|| {
+                    anyhow::anyhow!("no non-Claude backend configured for dispatch")
+                })?;
+                let _runtime = self.runtime_handle.enter();
+                let sid = self
+                    .process_manager
+                    .lock()
+                    .unwrap()
+                    .spawn(&project_dir, backend, Some(goal), 40, 120)
+                    .with_context(|| {
+                        format!(
+                            "failed to spawn voice dispatch session in {}",
+                            project_dir.display()
+                        )
+                    })?;
+                Ok(ActionDispatchResult {
+                    session_id: Some(sid),
+                    message: format!("spawned {} dispatch session", backend.label()),
+                })
+            }
+            _ => anyhow::bail!("voice action is not dispatchable"),
+        }
+    }
+}
+
 fn push_activity(
     activity_log: &VoiceActivityLog,
     utterance: String,
@@ -321,6 +420,40 @@ fn push_activity(
     });
 }
 
+fn select_dispatch_backend(
+    backends: &orrch_core::BackendsConfig,
+) -> Option<orrch_core::BackendKind> {
+    if let Ok(value) = std::env::var("ORRCH_VOICE_DISPATCH_BACKEND") {
+        let requested = normalize_backend_label(&value);
+        let selected = backend_by_label(&requested).filter(|kind| allowed_dispatch_backend(*kind));
+        if selected.is_none() {
+            warn!("ORRCH_VOICE_DISPATCH_BACKEND={value} is not an allowed non-Claude CLI backend");
+        }
+        return selected;
+    }
+
+    let available = backends.available();
+    ["codex", "gemini", "crush", "opencode"]
+        .iter()
+        .filter_map(|label| backend_by_label(label))
+        .find(|kind| available.contains(kind) && allowed_dispatch_backend(*kind))
+}
+
+fn backend_by_label(label: &str) -> Option<orrch_core::BackendKind> {
+    orrch_core::BackendKind::all()
+        .iter()
+        .copied()
+        .find(|kind| kind.label() == label)
+}
+
+fn allowed_dispatch_backend(kind: orrch_core::BackendKind) -> bool {
+    matches!(kind.label(), "codex" | "gemini" | "crush" | "opencode") && kind.is_cli()
+}
+
+fn normalize_backend_label(value: &str) -> String {
+    value.trim().to_lowercase().replace('_', "-")
+}
+
 fn env_flag(name: &str) -> bool {
     matches!(
         std::env::var(name).ok().as_deref(),
@@ -333,6 +466,17 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+pub fn start_loop_from_env(
+    receiver: mpsc::Receiver<Utterance>,
+    runtime_handle: tokio::runtime::Handle,
+) {
+    let dispatcher = Arc::new(CoreActionDispatcher::from_env(runtime_handle));
+    let control_loop = VoiceControlLoop::from_env(dispatcher);
+    control_loop.publish_activity_handle();
+    let _ = control_loop.start(receiver);
+    info!("orrch-voice control loop enabled with local Ollama interpreter");
 }
 
 #[cfg(test)]
@@ -493,5 +637,23 @@ mod tests {
         });
 
         release_tx.send(()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn core_dispatch_appends_to_project_inbox() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("orrchestrator");
+        std::fs::create_dir_all(&project).unwrap();
+        let dispatcher = CoreActionDispatcher::new_for_test(tmp.path().to_path_buf(), None);
+        let result = dispatcher
+            .execute(&VoiceAction::Dispatch {
+                project: "orrchestrator".to_string(),
+                instruction: "Ship the voice loop.".to_string(),
+            })
+            .unwrap();
+
+        assert!(result.message.contains("appended instruction"));
+        let inbox = std::fs::read_to_string(project.join("instructions_inbox.md")).unwrap();
+        assert!(inbox.contains("Ship the voice loop."));
     }
 }
