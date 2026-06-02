@@ -58,6 +58,7 @@ Workforce tabs:  Workflows | Teams | Agents | Skills | Tools | MCP | Profiles | 
 | File | Purpose |
 |------|---------|
 | `PLAN.md` | Master dev plan — 64+ roadmap items, all design decisions |
+| `docs/PLAN_SCHEMA.md` | Canonical machine-readable PLAN.md roadmap schema |
 | `instructions_inbox.md` | Queued instructions for implementation (INS-001 through INS-009) |
 | `agents/*.md` | 21 agent profiles with YAML frontmatter |
 | `workforces/*.md` | Workforce templates (team compositions) |
