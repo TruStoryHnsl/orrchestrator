@@ -27,10 +27,23 @@ shipped their work to branches and opened PRs.
 
 ### Branch and PR Inventory
 
+**Scope is the WHOLE repository, not just this run.** Enumerating only the
+branches this workforce created is the exact bug that let stale debris
+accumulate across sessions. You reconcile everything inactive, regardless of who
+created it.
+
 1. Enumerate every non-`main` / non-`master` / non-`develop` branch in the
-   project's git repository created during this workforce run.
-2. For each branch, capture: branch name, head sha, associated PR number (if
-   any), parent task description (if traceable from `.orrch/workflow.json`).
+   project's git repository — local AND remote (`git fetch --all --prune` first,
+   then `git branch -a`). Include branches from prior sessions, dependabot/bot
+   branches, and anything left dangling.
+2. For each branch, capture: branch name, head sha, last-commit age, merged-into-
+   main status (`git branch --merged main`), associated PR number (if any), live
+   worktree/process holder (if any), and parent task description (if traceable
+   from `.orrch/workflow.json`).
+3. Apply the PM's **Repository Reconciliation ACTIVE test** (see
+   `agents/project_manager.md`) to each item. Branches already merged into `main`
+   but never deleted are the most common and safest case — delete them (local +
+   remote). Genuinely-active session branches are the ONLY items you leave alone.
 
 ### Verification Sweep
 
@@ -50,6 +63,9 @@ For each branch:
 
 For each branch, choose ONE verdict:
 
+- **PRUNE** — already merged into `main` (content is in main's history) but the
+  branch ref still exists. Delete it (local + remote) and remove any merged
+  worktree. No re-merge needed; this is pure debris removal and the safest case.
 - **MERGE** — build clean, tests pass, no behavior regression, acceptance
   criteria met. Safe to squash-merge to `main`.
 - **REWORK** — build/test failures exist OR a regression is observed OR an
@@ -129,6 +145,13 @@ iterations and orrchestrator's project history reads pull from here.
 - Never push to `main` directly. Always go through `merge_to_main.sh` or PR.
 - Never auto-resolve an ESCALATE classification. Surface it; let the user
   decide.
-- Never delete a branch the tool didn't successfully merge.
+- Never delete a branch that has unmerged commits the tool didn't successfully
+  merge. (Already-merged branches — PRUNE verdict — ARE safe to delete; that is
+  the point of the sweep.)
+- Never `rm -rf` a worktree with uncommitted changes. Salvage the scraps to a
+  `salvage/<orig>-<ts>` branch and report it first, then remove the worktree.
 - Never amend or force-push a branch from another team — your job is to
   reconcile, not to rewrite history.
+- The session is NOT complete while inactive branches, dangling PRs, or orphaned
+  worktrees remain. "Reconciled everything except a few I left for later" is a
+  failed cleanup, not a partial success.
