@@ -91,6 +91,13 @@ pub fn config_dir() -> PathBuf {
     PathBuf::from(home).join(".config").join("orrchestrator")
 }
 
+/// App-data root: ~/.local/share/orrchestrator/ — mutable derived state/backups
+/// (shadow repos), NOT under `.config`.
+pub fn data_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    PathBuf::from(home).join(".local").join("share").join("orrchestrator")
+}
+
 fn default_agents_dir() -> PathBuf {
     // Check for project-local agents/ first
     let local = PathBuf::from("agents");

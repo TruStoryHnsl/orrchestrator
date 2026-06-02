@@ -23,6 +23,13 @@ flags:
   - --thinking
 limitations:
   - no built-in MCP server (use extensions)
+env_injection: true
+rpc_steering: true
+prompt_injection: true
+mcp_tools: true
+tool_gating: true
+system_prompt_override: true
+mid_run_steering: true
 ---
 
 Multi-provider harness with first-class RPC mode for programmatic control.
