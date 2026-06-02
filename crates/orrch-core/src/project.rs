@@ -945,6 +945,10 @@ fn scan_project_meta(path: &Path) -> ProjectMeta {
         }
     }
 
+    if meta.plan_file.is_none() && path.join(".orrch").join("PLAN.md").exists() {
+        meta.plan_file = Some(".orrch/PLAN.md".into());
+    }
+
     // Current version = highest vN
     if !meta.version_dirs.is_empty() {
         meta.version_dirs.sort();
@@ -1506,6 +1510,54 @@ mod tests {
 
         let resolved = resolve_plan_path(&tmp);
         assert!(resolved.ends_with(".orrch/PLAN.md"), "got {resolved:?}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_project_discovers_dot_orrch_plan_without_root_plan() {
+        let tmp = std::env::temp_dir().join(format!(
+            "orrch_dot_plan_only_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join(".orrch")).unwrap();
+        std::fs::write(
+            tmp.join(".orrch/PLAN.md"),
+            "# Test Plan\n\n## Phase 1: Discovery\n\n- [ ] open item\n- [x] done item\n",
+        )
+        .unwrap();
+
+        let project = Project::load(&tmp);
+
+        assert!(project.has_plan);
+        assert_eq!(project.meta.plan_file.as_deref(), Some(".orrch/PLAN.md"));
+        assert!(resolve_plan_path(&tmp).ends_with(".orrch/PLAN.md"));
+        assert!(!project.plan_phases.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn load_project_without_any_plan_has_no_plan() {
+        let tmp = std::env::temp_dir().join(format!(
+            "orrch_no_plan_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let project = Project::load(&tmp);
+
+        assert!(!project.has_plan);
+        assert!(project.meta.plan_file.is_none());
+        assert!(project.plan_phases.is_empty());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
