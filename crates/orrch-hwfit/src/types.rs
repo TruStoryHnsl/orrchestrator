@@ -82,6 +82,8 @@ pub struct SystemInfo {
     pub error: Option<String>,           // "Cannot connect to <host>"
     #[serde(default)]
     pub gpu_only: bool,                   // user picked explicit GPU config → no RAM offload
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_rand_read_gbps: Option<f64>, // conservative random-read GB/s for disk-backed MoE
 }
 
 /// Per-component scores 0..=100. Mirrors the nested "scores" object.
@@ -103,7 +105,7 @@ pub struct FitResult {
     pub is_moe: bool,
     pub use_case: String,
     pub fit_level: String,             // "perfect"|"good"|"marginal"|"too_tight"
-    pub run_mode: String,              // "gpu"|"moe_offload"|"cpu_offload"|"cpu_only"|"no_fit"
+    pub run_mode: String,              // "gpu"|"moe_offload"|"cpu_offload"|"cpu_only"|"disk_stream"|"no_fit"
     pub quant: String,
     pub context: u64,
     pub required_gb: f64,              // round(...,1)

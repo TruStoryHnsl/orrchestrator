@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 /// 30 min — hardware rarely changes; pass fresh=true to force a re-probe.
 const CACHE_TTL: Duration = Duration::from_secs(1800);
+const STORAGE_GBPS_ENV: &str = "ORRCH_HWFIT_STORAGE_GBPS";
 
 /// Per-probe context: where to run commands (local vs SSH) and which platform.
 /// Mirrors the Python module-level `_remote_host` / `_remote_port` globals, but
@@ -101,6 +102,24 @@ impl Ctx {
             std::fs::read_to_string(path).ok()
         }
     }
+
+    fn list_dir_names(&self, path: &str) -> Vec<String> {
+        if self.is_remote() {
+            return self
+                .run(&["ls", "-1", path])
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
+        }
+
+        std::fs::read_dir(path)
+            .ok()
+            .into_iter()
+            .flat_map(|rd| rd.filter_map(|e| e.ok()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect()
+    }
 }
 
 /// Round to one decimal place (Python `round(x, 1)`, banker's-rounding caveat
@@ -108,6 +127,135 @@ impl Ctx {
 /// round-half-even rarely diverges; matches odysseus output in practice).
 fn round1(x: f64) -> f64 {
     (x * 10.0).round() / 10.0
+}
+
+fn storage_override_gbps() -> Option<f64> {
+    let raw = std::env::var(STORAGE_GBPS_ENV).ok()?;
+    let parsed = raw.trim().parse::<f64>().ok()?;
+    if parsed > 0.0 { Some(parsed) } else { None }
+}
+
+fn mount_source_for(ctx: &Ctx, target: &str) -> Option<String> {
+    if let Some(out) = ctx.run(&["findmnt", "-no", "SOURCE", "-T", target]) {
+        let first = out.lines().next().unwrap_or("").trim();
+        if !first.is_empty() {
+            return Some(first.to_string());
+        }
+    }
+
+    let out = ctx.run(&["df", "-P", target])?;
+    out.lines()
+        .skip(1)
+        .last()
+        .and_then(|line| line.split_whitespace().next())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn block_name_from_source(source: &str) -> Option<String> {
+    let source = source.split('[').next().unwrap_or(source);
+    let name = source.strip_prefix("/dev/")?.rsplit('/').next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn partition_parent(name: &str) -> Option<String> {
+    let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
+    let base = trimmed.strip_suffix('p').unwrap_or(trimmed);
+    if !base.is_empty() && base != name {
+        return Some(base.to_string());
+    }
+    None
+}
+
+fn resolve_base_blocks(ctx: &Ctx, name: &str, depth: u8) -> Vec<String> {
+    if depth > 4 || name.is_empty() {
+        return Vec::new();
+    }
+
+    let slaves = ctx.list_dir_names(&format!("/sys/class/block/{name}/slaves"));
+    if !slaves.is_empty() {
+        let mut out = Vec::new();
+        for slave in slaves {
+            out.extend(resolve_base_blocks(ctx, &slave, depth + 1));
+        }
+        return out;
+    }
+
+    if ctx
+        .read_file(&format!("/sys/class/block/{name}/partition"))
+        .is_some()
+    {
+        if let Some(parent) = partition_parent(name) {
+            return resolve_base_blocks(ctx, &parent, depth + 1);
+        }
+    }
+
+    vec![name.to_string()]
+}
+
+fn parse_pcie_link_speed_gbps(raw: &str) -> Option<f64> {
+    let speed = raw
+        .split_whitespace()
+        .next()
+        .and_then(|n| n.parse::<f64>().ok())?;
+    if speed >= 16.0 {
+        Some(2.0)
+    } else if speed >= 8.0 {
+        Some(1.0)
+    } else {
+        Some(1.0)
+    }
+}
+
+fn storage_class_gbps(ctx: &Ctx, block: &str) -> Option<f64> {
+    let rotational = ctx
+        .read_file(&format!("/sys/block/{block}/queue/rotational"))
+        .or_else(|| ctx.read_file(&format!("/sys/class/block/{block}/queue/rotational")))
+        .map(|s| s.trim().to_string());
+
+    if block.starts_with("nvme") {
+        for path in [
+            format!("/sys/block/{block}/device/device/current_link_speed"),
+            format!("/sys/block/{block}/device/current_link_speed"),
+            format!("/sys/class/block/{block}/device/device/current_link_speed"),
+            format!("/sys/class/block/{block}/device/current_link_speed"),
+        ] {
+            if let Some(speed) = ctx
+                .read_file(&path)
+                .and_then(|raw| parse_pcie_link_speed_gbps(&raw))
+            {
+                return Some(speed);
+            }
+        }
+        return Some(1.0);
+    }
+
+    match rotational.as_deref() {
+        Some("1") => Some(0.02),
+        Some("0") => Some(0.4),
+        _ => None,
+    }
+}
+
+fn detect_storage_rand_read_gbps(ctx: &Ctx) -> Option<f64> {
+    if let Some(override_gbps) = storage_override_gbps() {
+        return Some(override_gbps);
+    }
+
+    let source = mount_source_for(ctx, ".").or_else(|| mount_source_for(ctx, "/"))?;
+    let block = block_name_from_source(&source)?;
+    let base_blocks = resolve_base_blocks(ctx, &block, 0);
+    let mut speeds: Vec<f64> = base_blocks
+        .iter()
+        .filter_map(|b| storage_class_gbps(ctx, b))
+        .collect();
+
+    speeds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    speeds.first().copied()
 }
 
 /// Group identical GPUs by (name, rounded VRAM). vLLM tensor-parallel only works
@@ -534,6 +682,7 @@ pub fn detect_system(host: &str, ssh_port: &str, plat: &str, fresh: bool) -> Sys
     let available_ram = round1(get_available_ram_gb(&ctx));
     let cpu_cores = get_cpu_count(&ctx);
     let cpu_name = get_cpu_name(&ctx);
+    let storage_rand_read_gbps = detect_storage_rand_read_gbps(&ctx);
 
     let gpu_info = match detect_nvidia(&mut ctx) {
         Some(g) => Some(g),
@@ -558,6 +707,7 @@ pub fn detect_system(host: &str, ssh_port: &str, plat: &str, fresh: bool) -> Sys
             gpu_error: None,
             error: None,
             gpu_only: false,
+            storage_rand_read_gbps,
         }
     } else {
         let arch_out = if ctx.is_remote() {
@@ -583,6 +733,7 @@ pub fn detect_system(host: &str, ssh_port: &str, plat: &str, fresh: bool) -> Sys
             gpu_error: ctx.last_gpu_error.clone(),
             error: None,
             gpu_only: false,
+            storage_rand_read_gbps,
         }
     };
 
