@@ -8,6 +8,7 @@ pub mod scheduler;
 pub mod server;
 pub mod types;
 pub mod worker;
+pub mod runner;
 pub use types::*;
 
 /// Start the relay: build state, spawn worker, serve the gateway. Returns when
