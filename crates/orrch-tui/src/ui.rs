@@ -5027,6 +5027,12 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     let local_url = app.webui_port.map(|p| format!("http://localhost:{p}"));
     let public_url = app.webui_public_url.clone();
     let public_http_url = app.webui_public_http_url.clone();
+    // orrch-relay URL — only when the relay subsystem is enabled.
+    let relay_url = (std::env::var("ORRCH_RELAY_ENABLE").as_deref() == Ok("1")).then(|| {
+        let bind = std::env::var("ORRCH_RELAY_BIND")
+            .unwrap_or_else(|_| "127.0.0.1:8585".to_string());
+        format!("http://{bind}/v1")
+    });
     let mut url_lines = 0u16;
     if local_url.is_some() {
         url_lines += 2; // "WebUI:" header + local line
@@ -5037,6 +5043,9 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
             url_lines += 1;
         }
         url_lines += 1; // spacer
+    }
+    if relay_url.is_some() {
+        url_lines += 3; // "Relay" header + url line + spacer
     }
 
     let popup = centered_popup(frame.area(), 56, (items.len() as u16) + 5 + url_lines);
@@ -5074,6 +5083,19 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
                 Span::styled(truncate_url(http_public, URL_MAX), Style::default().fg(ACCENT)),
             ]));
         }
+        lines.push(Line::raw(""));
+    }
+
+    if let Some(relay) = &relay_url {
+        const URL_MAX: usize = 45;
+        lines.push(Line::styled(
+            "Relay (OpenAI API)",
+            Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled("  local  ", Style::default().fg(TEXT_DIM)),
+            Span::styled(truncate_url(relay, URL_MAX), Style::default().fg(ACCENT)),
+        ]));
         lines.push(Line::raw(""));
     }
 
