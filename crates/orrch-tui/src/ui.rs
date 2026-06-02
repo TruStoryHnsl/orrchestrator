@@ -5033,6 +5033,10 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
             .unwrap_or_else(|_| "127.0.0.1:8585".to_string());
         format!("http://{bind}/v1")
     });
+    let voice_socket = (std::env::var("ORRCH_VOICE_ENABLE").as_deref() == Ok("1")).then(|| {
+        std::env::var("ORRCH_VOICE_SOCKET")
+            .unwrap_or_else(|_| orrch_core::data_dir().join("voice.sock").display().to_string())
+    });
     let mut url_lines = 0u16;
     if local_url.is_some() {
         url_lines += 2; // "WebUI:" header + local line
@@ -5046,6 +5050,9 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     }
     if relay_url.is_some() {
         url_lines += 3; // "Relay" header + url line + spacer
+    }
+    if voice_socket.is_some() {
+        url_lines += 4; // "Voice" header + socket + hotkey + spacer
     }
 
     let popup = centered_popup(frame.area(), 56, (items.len() as u16) + 5 + url_lines);
@@ -5095,6 +5102,23 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         lines.push(Line::from(vec![
             Span::styled("  local  ", Style::default().fg(TEXT_DIM)),
             Span::styled(truncate_url(relay, URL_MAX), Style::default().fg(ACCENT)),
+        ]));
+        lines.push(Line::raw(""));
+    }
+
+    if let Some(socket) = &voice_socket {
+        const URL_MAX: usize = 45;
+        lines.push(Line::styled(
+            "Voice",
+            Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled("  socket ", Style::default().fg(TEXT_DIM)),
+            Span::styled(truncate_url(socket, URL_MAX), Style::default().fg(ACCENT)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  bind   ", Style::default().fg(TEXT_DIM)),
+            Span::styled("orrchestrator --voice-toggle", Style::default().fg(ACCENT)),
         ]));
         lines.push(Line::raw(""));
     }
