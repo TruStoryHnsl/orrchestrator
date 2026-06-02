@@ -103,7 +103,7 @@ pub struct FitResult {
     pub is_moe: bool,
     pub use_case: String,
     pub fit_level: String,             // "perfect"|"good"|"marginal"|"too_tight"
-    pub run_mode: String,              // "gpu"|"cpu_offload"|"cpu_only"|"no_fit"
+    pub run_mode: String,              // "gpu"|"moe_offload"|"cpu_offload"|"cpu_only"|"no_fit"
     pub quant: String,
     pub context: u64,
     pub required_gb: f64,              // round(...,1)
