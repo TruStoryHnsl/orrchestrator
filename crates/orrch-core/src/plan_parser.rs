@@ -510,10 +510,11 @@ fn parse_phase_heading(heading: &str) -> PlanPhase {
             .collect();
         let number = num_str.parse::<u8>().ok();
 
+        let paren_pos = clean.find('(').unwrap_or(clean.len());
         let name_start = clean
-            .find(':')
-            .or_else(|| clean.find('—'))
-            .or_else(|| clean.find('–'));
+            .find('—')
+            .or_else(|| clean.find('–'))
+            .or_else(|| clean.find(':').filter(|&p| p < paren_pos));
         let name = if let Some(pos) = name_start {
             clean[pos + clean[pos..].chars().next().unwrap().len_utf8()..]
                 .trim()
@@ -1529,5 +1530,18 @@ orrgent/
 "#;
         let phases = parse_plan(content);
         assert!(phases.is_empty());
+    }
+
+    #[test]
+    fn test_phase_name_ignores_colon_inside_parenthetical() {
+        // Em-dash is the title separator; a colon inside "(target: ...)" must not
+        // be mistaken for it. Regression for orrgent phases like
+        // "Phase 6 — Orrchestrator absorption (target: ongoing)".
+        let p = try_parse_phase_header("### Phase 6 — Orrchestrator absorption (target: ongoing)").unwrap();
+        assert_eq!(p.name, "Orrchestrator absorption (target: ongoing)");
+        assert_eq!(p.number, Some(6));
+        // And a colon-style heading still works:
+        let q = try_parse_phase_header("## Phase 4: Multi-Provider (1.5.0)").unwrap();
+        assert!(q.name.starts_with("Multi-Provider"));
     }
 }
