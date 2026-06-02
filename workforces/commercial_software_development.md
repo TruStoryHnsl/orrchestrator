@@ -63,7 +63,8 @@ operations:
 
 | Order | Team | Description |
 |-------|------|-------------|
-| 1 | develop_feature | primary feature implementation cycle |
-| 2 | develop_feature | secondary feature cycle (parallel-track features) |
-| 3 | develop_feature | tertiary feature cycle (refinements, follow-ups) |
-| 4 | cleanup | MANDATORY workforce-scale reconciliation: review all branches/PRs from teams 1-3, run build+test, classify merge/rework/escalate, run merge_to_main, write cleanup_summary.md + DEVLOG entry |
+| 1 | dependabot_pr_processing | MANDATORY preflight: resolve all Dependabot/GitHub security autofix PRs before new commercial work unless the user explicitly demands a bypass |
+| 2 | develop_feature | primary feature implementation cycle |
+| 3 | develop_feature | secondary feature cycle (parallel-track features) |
+| 4 | develop_feature | tertiary feature cycle (refinements, follow-ups) |
+| 5 | cleanup | MANDATORY workforce-scale reconciliation: review all branches/PRs from teams 1-4, run build+test, classify merge/rework/escalate, run merge_to_main, write cleanup_summary.md + DEVLOG entry |

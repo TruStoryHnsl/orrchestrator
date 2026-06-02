@@ -37,6 +37,36 @@ Write `$INSTRUCTIONS` to `.orrch/instructions.md`.
 
 ---
 
+## STEP 0.5 — Dependabot/security PR preflight
+
+Before codebase briefing or PM planning, spawn ONE Project Manager agent:
+
+```
+prompt: |
+  You are the Project Manager. Run the Dependabot PR Processing protocol before
+  new feature work.
+
+  Requirements:
+  - Inventory all open Dependabot/GitHub security autofix PRs.
+  - Resolve routine PRs without user involvement: merge verified PRs, repair
+    bounded stale/conflicted PRs through available agents, and close
+    superseded/obsolete/stale PRs with reason comments.
+  - Prioritize security autofixes.
+  - Escalate only PRs the available agents cannot safely resolve.
+  - If the user explicitly demanded this run bypass Dependabot handling, write
+    that bypass reason to `.orrch/dependabot_summary.md` and continue.
+  - Otherwise, do not continue to feature planning while unresolved
+    Dependabot/security PRs remain.
+
+  Output: write `.orrch/dependabot_summary.md` with merged, fixed, closed,
+  deferred-major, and escalated PRs.
+```
+
+If the PM reports an unresolved escalation, STOP and report the blocker to the
+user. Otherwise continue.
+
+---
+
 ## STEP 1 — Codebase brief
 
 ```bash

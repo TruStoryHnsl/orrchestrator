@@ -47,6 +47,29 @@ You run this sweep **twice**:
    merged" — done is "the repository is clean and `main` is the single source
    of truth."
 
+#### Dependabot/security PR preflight — mandatory before new work
+
+Before starting feature planning, commercial development, or any other new
+process, resolve every open Dependabot or GitHub security autofix PR unless the
+user explicitly demands that this run bypass dependency PR handling.
+
+Run the dedicated `dependabot_pr_processing` team/workforce when available. If
+you are operating inside a single PM session, execute the same protocol yourself:
+
+- Inventory all open PRs and identify bot/security-autofix PRs.
+- Prioritize security autofixes over routine version bumps.
+- Merge only PRs whose install/build/test checks pass.
+- For stale, conflicted, or failing PRs with bounded dependency work, dispatch
+  Repository Manager/Developer/Tester agents to repair and verify them.
+- Close superseded, obsolete, stale, or deferred-major PRs with concise reason
+  comments and delete stale bot branches.
+- Escalate only when available agents cannot safely resolve the PR.
+- Leave no Dependabot PR unclassified before moving on to new work.
+
+The user's default notification contract is: routine Dependabot activity is an
+agent responsibility. Do not wake the user unless a dependency/security PR is a
+real unresolved problem after agent processing.
+
 #### Step R1 — Inventory the whole repository
 
 ```bash

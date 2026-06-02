@@ -42,6 +42,7 @@ teams: []
 
 | Index | Agent | Tool/Skill | Operation |
 |-------|-------|------------|-----------|
+| 0 | Project Manager | skill:dependabot-pr-processing | before workflow_init or feature planning, resolve every open Dependabot/GitHub security autofix PR unless the user explicitly demanded a bypass; escalate only PRs the available agents cannot safely resolve |
 | 1 | Project Manager | mcp:workflow_init | initialize codebase brief, read PLAN.md unchecked items, surface inbox stragglers |
 | 2 | Project Manager | skill:plan_tasks | decompose goal into TASK blocks (id, agent, files, work, acceptance, depends) |
 | 3 | Project Manager | mcp:workflow_cluster | cluster tasks by file overlap into parallel waves |
@@ -63,6 +64,11 @@ teams: []
 This is the canonical single-team development unit. A workforce may run multiple
 develop_feature teams sequentially (each ships one feature; each keeps its own
 session open until the workforce-level Cleanup team merges everything).
+
+Step 0 is a mandatory repository health gate for direct `develop_feature` calls:
+the PM handles Dependabot and GitHub security autofix PRs before planning new
+feature work. The PM may bypass that gate only when the user explicitly demands
+urgent work that should ignore Dependabot PRs for that run.
 
 Within this team, the PM performs the team-scale reconciliation duty in step 10:
 it reviews only this team's branches and PRs, leaving cross-team reconciliation
