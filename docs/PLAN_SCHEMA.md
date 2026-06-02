@@ -106,3 +106,6 @@ need to be rewritten before they can be tracked.
 Existing roadmap tables are also tolerated when a row has a status-marker cell,
 such as `| P1-01 | Initialize workspace | [ ] | INS-001 |`. Table rows outside
 roadmap phases remain prose and are ignored.
+
+For older plans, version-prefixed roadmap headings such as
+`## 1.0.0 Feature Roadmap` are treated as roadmap regions.

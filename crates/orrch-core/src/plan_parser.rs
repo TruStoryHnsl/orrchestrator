@@ -297,6 +297,115 @@ pub fn parse_plan(content: &str) -> Vec<PlanPhase> {
     phases
 }
 
+/// Return read-only warnings for PLAN.md content that will not parse cleanly.
+pub fn lint_plan(content: &str) -> Vec<String> {
+    use std::collections::BTreeSet;
+
+    let mut warnings = Vec::new();
+    let mut region = RoadmapRegion::Outside;
+    let mut found_region = false;
+    let mut current_phase: Option<(String, usize)> = None;
+    let mut non_roadmap_heading: Option<String> = None;
+    let mut ignored_numbered_headings = BTreeSet::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            if level == 2 && is_roadmap_region_heading(heading) {
+                flush_lint_phase(&mut warnings, &mut current_phase);
+                found_region = true;
+                region = RoadmapRegion::Explicit;
+                non_roadmap_heading = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Outside && is_implicit_roadmap_phase(level, heading) {
+                flush_lint_phase(&mut warnings, &mut current_phase);
+                found_region = true;
+                region = RoadmapRegion::Implicit;
+                current_phase = Some((parse_phase_heading(heading).name, 0));
+                non_roadmap_heading = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Explicit {
+                if level == 3 || (level == 2 && is_phase_like_heading(heading)) {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    current_phase = Some((parse_phase_heading(heading).name, 0));
+                    continue;
+                }
+
+                if level == 2 {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    non_roadmap_heading = Some(heading.to_string());
+                    continue;
+                }
+            }
+
+            if region == RoadmapRegion::Implicit {
+                if is_implicit_roadmap_phase(level, heading) {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    current_phase = Some((parse_phase_heading(heading).name, 0));
+                    continue;
+                }
+
+                if level <= 2 {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    non_roadmap_heading = Some(heading.to_string());
+                    continue;
+                }
+            }
+
+            if region == RoadmapRegion::Outside {
+                non_roadmap_heading = Some(heading.to_string());
+            }
+            continue;
+        }
+
+        if region != RoadmapRegion::Outside {
+            if current_phase.is_some() && try_parse_feature_line(trimmed).is_some() {
+                if let Some((_, count)) = current_phase.as_mut() {
+                    *count += 1;
+                }
+            }
+        } else if is_numbered_list_line(trimmed) {
+            let heading = non_roadmap_heading.as_deref().unwrap_or("document");
+            if ignored_numbered_headings.insert(heading.to_string()) {
+                warnings.push(format!(
+                    "numbered list under non-roadmap heading '{heading}' ignored — move under a roadmap phase to track it"
+                ));
+            }
+        }
+    }
+
+    flush_lint_phase(&mut warnings, &mut current_phase);
+
+    if !found_region {
+        warnings.insert(0, "no roadmap region found".to_string());
+    }
+
+    warnings
+}
+
+fn flush_lint_phase(warnings: &mut Vec<String>, current_phase: &mut Option<(String, usize)>) {
+    if let Some((phase_name, feature_count)) = current_phase.take() {
+        if feature_count == 0 {
+            warnings.push(format!("phase '{phase_name}' has 0 features"));
+        }
+    }
+}
+
+fn is_numbered_list_line(line: &str) -> bool {
+    let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0
+        && line
+            .get(digits..)
+            .is_some_and(|rest| rest.starts_with(". "))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RoadmapRegion {
     Outside,
@@ -347,6 +456,13 @@ fn is_roadmap_region_heading(heading: &str) -> bool {
     ];
 
     let normalized = normalized_heading(heading);
+    if let Some(pos) = normalized.find("feature roadmap") {
+        let prefix = normalized[..pos].trim();
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
+            return true;
+        }
+    }
+
     ROADMAP_HEADINGS.iter().any(|candidate| {
         normalized == *candidate
             || normalized.strip_prefix(candidate).is_some_and(|rest| {
@@ -1181,6 +1297,45 @@ mod tests {
 
     fn feature_count(phases: &[PlanPhase]) -> usize {
         phases.iter().map(|phase| phase.features.len()).sum()
+    }
+
+    #[test]
+    fn test_lint_plan_warns_for_missing_roadmap_and_ignored_numbered_list() {
+        let warnings = lint_plan(
+            r#"## Open Conflicts
+
+### Native UI Rebuild Decisions
+1. **Toolkit selection is reopened.**
+2. **Native voice path is unresolved.**
+"#,
+        );
+
+        assert!(warnings
+            .iter()
+            .any(|warning| warning == "no roadmap region found"));
+        assert!(warnings.iter().any(|warning| warning.contains(
+            "numbered list under non-roadmap heading 'Native UI Rebuild Decisions' ignored"
+        )));
+    }
+
+    #[test]
+    fn test_lint_plan_warns_for_empty_phase() {
+        let warnings = lint_plan(
+            r#"## Feature Roadmap
+
+### Phase 1: Empty
+
+### Phase 2: Work
+- [ ] Ship it
+"#,
+        );
+
+        assert!(warnings
+            .iter()
+            .any(|warning| warning == "phase 'Empty' has 0 features"));
+        assert!(!warnings
+            .iter()
+            .any(|warning| warning == "phase 'Work' has 0 features"));
     }
 
     #[test]
