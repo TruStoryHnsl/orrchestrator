@@ -12,6 +12,7 @@ members = [
     "crates/orrch-relay",
     "crates/orrch-retrospect",
     "crates/orrch-tui",
+    "crates/orrch-voice",
     "crates/orrch-webedit",
     "crates/orrch-webui",
     "crates/orrch-workforce",
