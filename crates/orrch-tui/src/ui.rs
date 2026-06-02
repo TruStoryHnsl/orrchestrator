@@ -257,6 +257,7 @@ fn draw_hypervise(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.hypervise_sub {
         HyperviseSub::Sessions => draw_sessions_tab(frame, app, chunks[1]),
         HyperviseSub::Loops => draw_hypervise_loops_tab(frame, app, chunks[1]),
+        HyperviseSub::Voice => draw_hypervise_voice_tab(frame, app, chunks[1]),
         HyperviseSub::TokenUsage => draw_hypervise_token_usage_tab(frame, app, chunks[1]),
     }
 }
@@ -327,6 +328,150 @@ fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
             .style(Style::default().fg(TEXT_MUTED)))
         .column_spacing(2);
     frame.render_widget(table, area);
+}
+
+fn draw_hypervise_voice_tab(frame: &mut Frame, _app: &App, area: Rect) {
+    let status = orrch_voice::global_voice_status()
+        .and_then(|handle| handle.lock().ok().map(|status| status.clone()));
+    let activities = orrch_voice::control_loop::VoiceControlLoop::global_activity_log()
+        .and_then(|handle| handle.lock().ok().map(|activities| activities.clone()))
+        .unwrap_or_default();
+    let max_rows = area.height.saturating_sub(2) as usize;
+    let items: Vec<ListItem> = voice_panel_lines(status.as_ref(), &activities, max_rows)
+        .into_iter()
+        .map(|line| {
+            let style = voice_line_style(&line);
+            ListItem::new(line).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default()
+            .title(" Voice Control ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)));
+    frame.render_widget(list, area);
+}
+
+pub fn voice_panel_lines(
+    status: Option<&orrch_voice::VoiceStatusSnapshot>,
+    activities: &[orrch_voice::control_loop::VoiceActivity],
+    max_rows: usize,
+) -> Vec<String> {
+    if max_rows == 0 {
+        return Vec::new();
+    }
+
+    let Some(status) = status else {
+        return vec![
+            "Voice control offline — launch with ORRCH_VOICE_ENABLE=1 ORRCH_VOICE_LOOP_ENABLE=1"
+                .to_string(),
+        ];
+    };
+
+    let mode = if status.listening { "🎙 LISTENING" } else { "○ idle" };
+    let readiness = if status.model_ready {
+        String::new()
+    } else {
+        "  model loading…".to_string()
+    };
+    let pending = status
+        .pending
+        .as_ref()
+        .map(|pending| format!("  ⏳ pending: {pending}"))
+        .unwrap_or_default();
+    let mut lines = vec![format!(
+        "{mode}  model: {} ({}){}{}  queued: {}",
+        status.model, status.device, readiness, pending, status.queued
+    )];
+
+    if max_rows == 1 {
+        return lines;
+    }
+
+    if activities.is_empty() {
+        lines.push("(no voice activity yet)".to_string());
+        return lines;
+    }
+
+    lines.extend(activities.iter().rev().take(max_rows - 1).map(|activity| {
+        format!(
+            "{}  \"{}\"  → {}  [{}]",
+            hh_mm_ss(activity.ts_ms),
+            compact_inline(&activity.utterance, 72),
+            voice_action_summary(&activity.action),
+            voice_status_label(&activity.status),
+        )
+    }));
+    lines
+}
+
+fn voice_line_style(line: &str) -> Style {
+    if line.contains("[proposed]") {
+        Style::default().fg(WAITING_COLOR)
+    } else if line.contains("[confirmed]") {
+        Style::default().fg(CYAN)
+    } else if line.contains("[dispatched]") {
+        Style::default().fg(GREEN)
+    } else if line.contains("[rejected]") {
+        Style::default().fg(TEXT_DIM)
+    } else if line.contains("[error]") {
+        Style::default().fg(Color::Red)
+    } else if line.starts_with("🎙 LISTENING") {
+        Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(TEXT_DIM)
+    }
+}
+
+fn voice_action_summary(action: &orrch_voice::intent::VoiceAction) -> String {
+    use orrch_voice::intent::VoiceAction;
+
+    match action {
+        VoiceAction::Dispatch { project, instruction } => {
+            format!("Dispatch → {project}: {}", compact_inline(instruction, 80))
+        }
+        VoiceAction::SpawnSession { project, goal } => {
+            format!("Spawn session → {project}: {}", compact_inline(goal, 80))
+        }
+        VoiceAction::Note { text } => format!("Note: {}", compact_inline(text, 80)),
+        VoiceAction::Confirm => "Confirm".to_string(),
+        VoiceAction::Cancel => "Cancel".to_string(),
+        VoiceAction::None => "None".to_string(),
+    }
+}
+
+fn voice_status_label(status: &orrch_voice::control_loop::VoiceActivityStatus) -> &'static str {
+    use orrch_voice::control_loop::VoiceActivityStatus;
+
+    match status {
+        VoiceActivityStatus::Proposed => "proposed",
+        VoiceActivityStatus::Confirmed => "confirmed",
+        VoiceActivityStatus::Dispatched => "dispatched",
+        VoiceActivityStatus::Rejected => "rejected",
+        VoiceActivityStatus::Error => "error",
+    }
+}
+
+fn hh_mm_ss(ts_ms: u64) -> String {
+    let total = (ts_ms / 1000) % 86_400;
+    let hours = total / 3_600;
+    let minutes = (total % 3_600) / 60;
+    let seconds = total % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn compact_inline(text: &str, max_chars: usize) -> String {
+    let mut inline = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if inline.chars().count() <= max_chars {
+        return inline;
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    inline = inline.chars().take(max_chars - 1).collect();
+    inline.push('…');
+    inline
 }
 
 /// Hypervise > Token Usage tab body (overhaul point 10).
@@ -5444,7 +5589,10 @@ use orrch_core::BackendKind;
 
 #[cfg(test)]
 mod ui_tests {
-    use super::truncate_url;
+    use super::{truncate_url, voice_panel_lines};
+    use orrch_voice::VoiceStatusSnapshot;
+    use orrch_voice::control_loop::{VoiceActivity, VoiceActivityStatus};
+    use orrch_voice::intent::VoiceAction;
 
     #[test]
     fn truncate_url_passthrough_when_fits() {
@@ -5473,5 +5621,83 @@ mod ui_tests {
         let s = "http://é.example.com/foo";
         let out = truncate_url(s, 10);
         assert!(out.chars().count() <= 10);
+    }
+
+    #[test]
+    fn voice_panel_lines_renders_status_and_seeded_activity() {
+        let status = VoiceStatusSnapshot {
+            listening: true,
+            model_ready: true,
+            model: "whisper-tiny".to_string(),
+            device: "cpu".to_string(),
+            pending: Some("Dispatch → orrchestrator".to_string()),
+            queued: 2,
+        };
+        let activities = vec![
+            VoiceActivity {
+                ts_ms: 3_723_000,
+                utterance: "route the responsive tabs fix".to_string(),
+                action: VoiceAction::Dispatch {
+                    project: "orrchestrator".to_string(),
+                    instruction: "Fix responsive tabs.".to_string(),
+                },
+                status: VoiceActivityStatus::Proposed,
+                detail: None,
+            },
+            VoiceActivity {
+                ts_ms: 3_724_000,
+                utterance: "yes confirm".to_string(),
+                action: VoiceAction::Confirm,
+                status: VoiceActivityStatus::Confirmed,
+                detail: None,
+            },
+            VoiceActivity {
+                ts_ms: 3_725_000,
+                utterance: "dispatch complete".to_string(),
+                action: VoiceAction::Dispatch {
+                    project: "orrchestrator".to_string(),
+                    instruction: "Fix responsive tabs.".to_string(),
+                },
+                status: VoiceActivityStatus::Dispatched,
+                detail: Some("mock dispatched".to_string()),
+            },
+            VoiceActivity {
+                ts_ms: 3_726_000,
+                utterance: "cancel that".to_string(),
+                action: VoiceAction::Cancel,
+                status: VoiceActivityStatus::Rejected,
+                detail: None,
+            },
+            VoiceActivity {
+                ts_ms: 3_727_000,
+                utterance: "unclear request".to_string(),
+                action: VoiceAction::None,
+                status: VoiceActivityStatus::Error,
+                detail: Some("interpreter failed".to_string()),
+            },
+        ];
+
+        let lines = voice_panel_lines(Some(&status), &activities, 8);
+        println!("SEEDED voice_panel_lines OUTPUT:\n{}", lines.join("\n"));
+        let output = lines.join("\n");
+        assert!(output.contains("🎙 LISTENING"));
+        assert!(output.contains("model: whisper-tiny (cpu)"));
+        assert!(output.contains("⏳ pending: Dispatch → orrchestrator"));
+        assert!(output.contains("\"route the responsive tabs fix\""));
+        assert!(output.contains("Dispatch → orrchestrator: Fix responsive tabs."));
+        assert!(output.contains("[proposed]"));
+        assert!(output.contains("[confirmed]"));
+        assert!(output.contains("[dispatched]"));
+        assert!(output.contains("[rejected]"));
+        assert!(output.contains("[error]"));
+    }
+
+    #[test]
+    fn voice_panel_lines_renders_offline_hint() {
+        let lines = voice_panel_lines(None, &[], 4);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains(
+            "Voice control offline — launch with ORRCH_VOICE_ENABLE=1 ORRCH_VOICE_LOOP_ENABLE=1"
+        ));
     }
 }
