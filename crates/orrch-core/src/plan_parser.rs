@@ -1178,4 +1178,201 @@ mod tests {
         );
         assert_eq!(parse_status_marker("é foo"), None);
     }
+
+    fn feature_count(phases: &[PlanPhase]) -> usize {
+        phases.iter().map(|phase| phase.features.len()).sum()
+    }
+
+    #[test]
+    fn fixture_concord_open_conflicts_not_scooped() {
+        let open_conflicts = r#"# Concord — Master Development Plan
+
+## Open Conflicts
+
+### Native UI Rebuild Decisions — Open (2026-06-01)
+1. **Toolkit selection is reopened for the native-shell track.** The older "default to Tauri v2" decision still covers the transitional webview builds and packaging pipeline, but it does not settle the new native app shell plus managed-webview surface strategy. PM must drive evidence-based spikes for the top candidates from `docs/architecture/native-ui-rebuild-scope.md` (Slint / gpui / iced / Flutter + flutter_rust_bridge) before implementation.
+2. **Native voice path is unresolved.** Decide between LiveKit Rust SDK (libwebrtc-backed, heavier but highest parity) and finishing the existing `webrtc-rs` path (pure Rust, parity risk) through a live audio spike against a docker deployment.
+3. **Platform scope of native-UI v1 is unresolved.** Decide whether v1 is desktop-only first or desktop + mobile from the start; this choice affects toolkit selection, release schedule, and tvOS/mobile reuse.
+4. **Parity bar for retiring the webview-only shell is unresolved.** Do not remove the existing webview build for any platform until the required native surfaces are defined, implemented, and observed working surface-by-surface.
+5. **Managed webview boundary is unresolved.** Native clients must support interactive webview surfaces for channel apps/extensions. PM must decide which surfaces are native-rendered, which are managed-webview-rendered, and whether the chat display remains a web-rendered extensibility surface.
+"#;
+        assert_eq!(feature_count(&parse_plan(open_conflicts)), 0);
+
+        let roadmap = r#"## Feature Roadmap
+
+### TOP PRIORITY: P2P-first native architecture (routed 2026-05-27)
+
+**Source of truth: [`docs/architecture/p2p-design.md`](docs/architecture/p2p-design.md).** This is the largest single architectural shift on the roadmap; orrchestrator sequences these phases one at a time, each ending in a shippable state. Earlier roadmap items below remain relevant — voice subsystem health, mobile UI polish, settings, extensions, etc. — but the P2P phases below are the dominant track until they land. Phase 0 already shipped in this branch (2026-05-27); Phases 2–9 are the orrchestrator's queue.
+
+- [x] **Phase 0 — Web-compat hardening (shipped 2026-05-27, branch `chore/architecture-cleanup-7f3a`):** `INSTANCE_DOMAIN` auto-derived from `PUBLIC_BASE_URL`; `TURN_HOST` derives to `turn.<INSTANCE_DOMAIN>` and refuses RFC1918 values with logged warning; `services/voice_health.py` runs a non-blocking background STUN probe every 10 min and caches the snapshot.
+- [ ] **Phase 1 — P2P architecture design doc** (shipped 2026-05-27 as `docs/architecture/p2p-design.md`; captured here as a phase rather than separately marked completed for orrchestrator's accounting purposes).
+- [x] **Phase 2 — Peer identity scaffolding.** Ed25519 keypair on first launch, persisted in `tauri-plugin-stronghold`. Public-key fingerprint exposed via Tauri command + Settings UI.
+"#;
+        let phases = parse_plan(&format!("{open_conflicts}\n{roadmap}"));
+        assert_eq!(phases.len(), 1);
+        assert_eq!(feature_count(&phases), 3);
+        assert!(!phases[0]
+            .features
+            .iter()
+            .any(|feature| feature.title.contains("Toolkit selection")));
+    }
+
+    #[test]
+    fn fixture_orrapus_done_and_planned_are_phases() {
+        let content = r#"## Feature Roadmap
+
+### Done
+- **Headless Image Generation API** — `POST /orragen/api/generate`, auth-locked with dual-key (`X-Dashboard-Key` + `X-Orragen-Key`). Profiles in `orragen/data/image_profiles.yaml`. (2026-03-27)
+- **Model filename display layer** — cleaned descriptive titles, compatibility/expertise info at a glance (2026-03-28)
+- **Parameter sweep from main menu** — exploration tab removed, sweeps integrated into image gen with per-LoRA weight control (2026-03-28)
+
+### Planned
+
+#### INS-001: Create omnipus repo for parallel development
+- [x] Create a separate private GitHub repo for omnipus (`TruStoryHnsl/omnipus`)
+- [x] No changes land on orrapus main until GLSR is proven stable and cbsr is fully replaceable
+- [x] omnipus is its own independent application (Rust successor), not a fork — integration points wired in omnipus repo directly
+- [x] GLSR code and cbsr replacement live in omnipus repo
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert_eq!(phases[0].name, "Done");
+        assert_eq!(phases[0].features.len(), 3);
+        assert_eq!(phases[1].name, "Planned");
+        assert_eq!(phases[1].features.len(), 4);
+    }
+
+    #[test]
+    fn fixture_porrtfolio_fr_headings_are_phases() {
+        let content = r#"## Feature Roadmap
+
+Build order is: bug fix first → schema refactor (foundation for everything
+else) → individual entry types in dependency order → project workflow
+(consumes the typed entries) → promotion + resume-ingest rules.
+
+### FR-001 — Fix de-dup merge 500
+- Status: `[x] done` (commit `9768ba1`, 2026-05-05)
+- Diagnose root cause via server logs, fix the merge handler in
+  `porrtfolio/web/routes.py` (and helpers), add a regression test that
+  exercises the merge endpoint end-to-end and asserts non-500.
+- Source: INS-001.
+
+### FR-002 — Typed-entry schema refactor with shared location/time fields
+- Status: `[x] done` (commit `85a42b6`, 2026-05-05) — chose option (a) per-type tables; six typed-entry tables added with shared `city/state/date/time`. Polymorphic `project_entry_link` join added (additive — legacy `project_item_display` unchanged). No row migration; all new tables empty.
+- Foundation work for FR-003..FR-008. Decide table layout (per-type vs
+  parent+child) during design. Add `city`, `state`, `date`, `time` columns to
+  every entry type. Migration must preserve existing `portfolio_item`,
+  `employment`, and `project` rows.
+- Source: INS-002.
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert!(phases[0].name.starts_with("FR-001"));
+        assert!(phases[1].name.starts_with("FR-002"));
+        assert_eq!(feature_count(&phases), 6);
+    }
+
+    #[test]
+    fn fixture_orracle_development_phases_only() {
+        let content = r#"## Queued Features
+
+### Headless Image Generation API (for orradash integration)
+**Source**: orradash feedback pipeline 2026-03-27 | **Status**: DONE | **PLAN.md**: entry #1
+
+New authenticated API at `/api/image/` for headless image generation:
+- [x] `POST /api/image/generate` — batch_size, batch_count, profile, prompt
+- [x] `GET /api/image/status/<id>` — job progress
+- [x] `GET /api/image/result/<id>` — retrieve images
+- [x] `GET /api/image/profiles` — list profiles
+- [x] `X-Orracle-Key` header auth (API key in `.env`). Initially only orradash is authorized.
+
+## Development Phases
+
+### Phase A: Job Scheduler + Compute Load Watcher [DONE]
+**Source: feedback item 1.5**
+
+1. [x] **Pre-planned job configs** — `plan_job()` in job_queue.py, persists in queue.yaml, visible on dashboard as "waiting"
+2. [x] **Suspend/resume** — `suspend()`/`resume()` with SIGSTOP/SIGCONT via SSH
+3. [x] **Compute load watcher** — `ComputeWatcher` class in services.py, polls nvidia-smi + CPU load every 15s, auto-throttles jobs with `throttle=True`
+4. [x] **Dashboard quick-start** — Start button on waiting-job cards (`templates/dashboard_new.html:231`), `startWaitingJob()` in `static/js/dashboard.js:153`, `/api/queue/<id>/start` endpoint, `job_queue.start_waiting()` handles WAITING→PENDING transition with SSE broadcast
+5. [x] **Throttle toggle API** — `POST /api/queue/<id>/throttle`, SSE broadcasts load events
+
+### Phase B: Content Safety Layer [DONE]
+**Source: feedback items 3, 4, 6**
+
+1. [x] **Blurred output** — Blur toggle on both `/studio/image` and `/studio/forge`, shared localStorage key
+2. [x] **Guardrail training type** — "Safety Guardrail Fine-Tune" option in training type dropdown
+3. [x] **Model quarantine** — `visibility: private` on all model_registry.yaml profiles, export page warns before deploying private models
+4. [x] **ComfyUI output isolation** — See Phase E
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert_eq!(feature_count(&phases), 9);
+        assert!(!phases
+            .iter()
+            .flat_map(|phase| phase.features.iter())
+            .any(|feature| feature.title.contains("POST /api/image/generate")));
+    }
+
+    #[test]
+    fn fixture_omnipus_tables_parse_without_architecture_leak() {
+        let content = r#"## Architecture
+
+### Key Design Decisions
+
+- **One library crate (`glsr`) + one binary crate (`glsr-cli`)** — clean separation of logic and interface
+- **Platform trait abstraction** — all backends implement the same interface; new platforms are a single module file
+- **URL-first input model** — user submits URLs, platform auto-detected from domain, fallback to generic yt-dlp
+
+## Feature Roadmap
+
+### Phase 1: Workspace Init + Core Abstractions
+> Foundation — project scaffolding and the trait that everything builds on.
+
+| ID | Task | Status | Source |
+|----|------|--------|--------|
+| P1-01 | Initialize Cargo workspace with `glsr` (lib) + `glsr-cli` (bin) members | `[ ]` | INS-001 |
+| P1-02 | Create `.scope` (commercial), `.gitignore`, `CLAUDE.md` | `[ ]` | INS-001 |
+| P1-03 | Define `Platform` trait in `glsr/src/platform.rs` — `name()`, `check_status()`, `fetch_stream_url()`, `normalize_input()` | `[ ]` | INS-002 |
+
+## Open Conflicts
+
+### 1. Scope mismatch: `.scope` says `public`, INS-001 says `commercial`
+
+The existing `.scope` file contains `public`. INS-001 explicitly requests `commercial`.
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0].number, Some(1));
+        assert_eq!(phases[0].features.len(), 3);
+        assert!(!phases[0]
+            .features
+            .iter()
+            .any(|feature| feature.title.contains("One library crate")));
+    }
+
+    #[test]
+    fn fixture_orrgent_numbered_architecture_not_scooped() {
+        let content = r#"# orrgent — Design Plan
+
+## 1. Vision recap
+
+orrgent is two things at once. First, a personal career-guidance program that scrapes listings, parses them, filters them against the user's profile, and dispatches submissions — with the casting-call submitter for Casting Networks / Actors Access as the canonical first capability.
+
+## 2. Architecture overview
+
+### Module boundaries
+
+```
+orrgent/
+  daemon/                  # long-running scheduler + dispatch engine (Rust eventually; Python for Phase 0/1)
+    scheduler.{py,rs}      # twice-daily run loop, retry policy, jitter
+    dispatch.{py,rs}       # submission state machine, idempotency
+  adapters/                # one subdir per source — fully self-contained
+    casting_networks/      # the blueprint
+```
+"#;
+        let phases = parse_plan(content);
+        assert!(phases.is_empty());
+    }
 }
