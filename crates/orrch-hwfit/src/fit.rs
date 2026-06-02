@@ -9,6 +9,8 @@ use crate::models::{
 use crate::types::{CatalogModel, FitResult, FitScores, SystemInfo};
 
 pub const RUN_MODE_MOE_OFFLOAD: &str = "moe_offload";
+pub const RUN_MODE_DISK_STREAM: &str = "disk_stream";
+const DISK_STREAM_FALLBACK_GBPS: f64 = 0.25;
 
 // Verbatim tables (same keys/values/order as Python):
 pub const GPU_BANDWIDTH: &[(&str, u32)] = &[
@@ -192,6 +194,10 @@ pub fn estimate_speed(
         }
     }
 
+    if run_mode == RUN_MODE_DISK_STREAM {
+        return estimate_disk_stream_speed(model, quant, system);
+    }
+
     let k = lookup_u32(FALLBACK_K, backend, 70) as f64;
     if pb <= 0.0 {
         return 0.0;
@@ -238,6 +244,11 @@ fn moe_offload_memory_gb(model: &CatalogModel, quant: &str, ctx: u64) -> Option<
         + 0.5;
     let full_weight_gb = params_b(model) * bpp + 0.5;
     Some((resident_gb, full_weight_gb))
+}
+
+fn moe_operating_context(ctx: u64, use_case: &str) -> u64 {
+    let target = lookup_u32(CONTEXT_TARGET, use_case, 4096) as u64;
+    ctx.min(target.max(1024))
 }
 
 fn moe_offload_speed_factor(model: &CatalogModel) -> Option<f64> {
@@ -291,6 +302,66 @@ fn try_moe_offload_at_or_below(
         }
     }
     None
+}
+
+fn disk_stream_active_weight_gb(model: &CatalogModel, quant: &str) -> Option<f64> {
+    Some(moe_active_slice_b(model)? * quant_bytes_per_param(quant))
+}
+
+fn try_disk_stream(
+    model: &CatalogModel,
+    quant: &str,
+    ctx: u64,
+    gpu_vram: f64,
+    available_ram: f64,
+) -> Option<(String, String, u64, f64)> {
+    if gpu_vram <= 0.0 || available_ram <= 0.0 {
+        return None;
+    }
+
+    let (resident_gb, _) = moe_offload_memory_gb(model, quant, ctx)?;
+    if resident_gb > gpu_vram {
+        return None;
+    }
+
+    let active_working_set_gb = disk_stream_active_weight_gb(model, quant)?
+        + 0.000008 * active_params_b(model) * (ctx as f64)
+        + 0.5;
+    if active_working_set_gb > available_ram {
+        return None;
+    }
+
+    Some((
+        RUN_MODE_DISK_STREAM.to_string(),
+        quant.to_string(),
+        ctx,
+        resident_gb,
+    ))
+}
+
+fn estimate_disk_stream_speed(model: &CatalogModel, quant: &str, system: &SystemInfo) -> f64 {
+    let active_gb = match disk_stream_active_weight_gb(model, quant) {
+        Some(gb) if gb > 0.0 => gb,
+        _ => return 0.0,
+    };
+
+    let total_weight_gb = (params_b(model) * quant_bpp(quant)).max(active_gb);
+    let expert_bank_gb = (total_weight_gb - active_gb).max(active_gb);
+    let gpu_vram = system.gpu_vram_gb.unwrap_or(0.0);
+    let ram_cache_gb = (system.available_ram_gb - active_gb).max(0.0);
+    let vram_hot_gb = (gpu_vram - active_gb).max(0.0);
+    let cache_fraction = ((ram_cache_gb + vram_hot_gb) / expert_bank_gb).clamp(0.0, 0.85);
+
+    // Even cold-start disk streaming normally has a small shared/hot portion in
+    // RAM/VRAM; the rest is bounded by random, page-fault-shaped storage reads.
+    let hot_fraction = (0.15 + cache_fraction * 0.75).clamp(0.0, 0.90);
+    let uncached_active_gb = (active_gb * (1.0 - hot_fraction)).max(0.05);
+    let storage_gbps = system
+        .storage_rand_read_gbps
+        .unwrap_or(DISK_STREAM_FALLBACK_GBPS)
+        .max(0.01);
+
+    ((storage_gbps / uncached_active_gb) * 0.85).clamp(0.05, 3.0)
 }
 
 /// _quality_score
@@ -394,11 +465,19 @@ pub fn try_quant_at(
     gpu_vram: f64,
     available_ram: f64,
 ) -> Option<(String, String, u64, f64)> {
+    let use_case = infer_use_case(model);
+    let moe_ctx = if model.is_moe {
+        moe_operating_context(ctx, &use_case)
+    } else {
+        ctx
+    };
     let mem = estimate_memory_gb(model, quant, ctx);
     if gpu_vram > 0.0 && mem <= gpu_vram {
         return Some(("gpu".to_string(), quant.to_string(), ctx, mem));
     }
-    if let Some(result) = try_moe_offload_at_or_below(model, quant, ctx, gpu_vram, available_ram) {
+    if let Some(result) =
+        try_moe_offload_at_or_below(model, quant, moe_ctx, gpu_vram, available_ram)
+    {
         return Some(result);
     }
     if gpu_vram > 0.0 && mem <= available_ram {
@@ -423,6 +502,9 @@ pub fn try_quant_at(
             return Some((mode.to_string(), quant.to_string(), cur_ctx, mem));
         }
         cur_ctx /= 2;
+    }
+    if let Some(result) = try_disk_stream(model, quant, moe_ctx, gpu_vram, available_ram) {
+        return Some(result);
     }
     None
 }
@@ -655,7 +737,10 @@ pub fn analyze_model(
     };
 
     // Determine fit level
-    let budget = if run_mode == "gpu" || run_mode == RUN_MODE_MOE_OFFLOAD {
+    let budget = if run_mode == "gpu"
+        || run_mode == RUN_MODE_MOE_OFFLOAD
+        || run_mode == RUN_MODE_DISK_STREAM
+    {
         effective_vram
     } else {
         available_ram
@@ -678,6 +763,8 @@ pub fn analyze_model(
         } else {
             "marginal"
         }
+    } else if run_mode == RUN_MODE_DISK_STREAM {
+        "marginal"
     } else if run_mode == "cpu_offload" {
         if available_ram >= required_gb * 1.2 {
             "good"
@@ -744,6 +831,20 @@ mod tests {
         }
     }
 
+    fn rtx_3070_low_ram_nvme() -> SystemInfo {
+        SystemInfo {
+            total_ram_gb: 27.0,
+            available_ram_gb: 17.0,
+            has_gpu: true,
+            gpu_name: Some("NVIDIA GeForce RTX 3070".to_string()),
+            gpu_vram_gb: Some(8.0),
+            gpu_count: 1,
+            backend: "cuda".to_string(),
+            storage_rand_read_gbps: Some(2.0),
+            ..Default::default()
+        }
+    }
+
     fn deepseek_v4_flash_class() -> CatalogModel {
         CatalogModel {
             name: "deepseek-ai/DeepSeek-V4-Flash".to_string(),
@@ -793,6 +894,24 @@ mod tests {
     }
 
     #[test]
+    fn disk_stream_rates_deepseek_v4_flash_class_runnable_on_8gb_vram_17gb_ram_nvme() {
+        let result = analyze_model(&deepseek_v4_flash_class(), &rtx_3070_low_ram_nvme(), None)
+            .expect("model should analyze");
+        println!("{result:#?}");
+
+        assert_eq!(result.run_mode, RUN_MODE_DISK_STREAM);
+        assert_eq!(result.fit_level, "marginal");
+        assert!(
+            result.required_gb <= 8.0,
+            "resident VRAM footprint should fit"
+        );
+        assert!(
+            (0.2..5.0).contains(&result.speed_tps),
+            "disk stream speed should be slow but non-zero"
+        );
+    }
+
+    #[test]
     fn dense_70b_does_not_use_moe_offload_on_8gb_vram() {
         let result =
             analyze_model(&dense_70b(), &rtx_3070_with_ram(), None).expect("model should analyze");
@@ -801,6 +920,16 @@ mod tests {
         assert_ne!(result.run_mode, RUN_MODE_MOE_OFFLOAD);
         assert_ne!(result.run_mode, "gpu");
         assert!(result.required_gb > 8.0);
+    }
+
+    #[test]
+    fn dense_70b_does_not_use_disk_stream_on_8gb_vram_17gb_ram() {
+        let result = analyze_model(&dense_70b(), &rtx_3070_low_ram_nvme(), None)
+            .expect("model should analyze");
+        println!("{result:#?}");
+
+        assert_ne!(result.run_mode, RUN_MODE_DISK_STREAM);
+        assert_ne!(result.run_mode, RUN_MODE_MOE_OFFLOAD);
     }
 
     #[test]
