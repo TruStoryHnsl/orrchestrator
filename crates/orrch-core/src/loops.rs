@@ -12,12 +12,15 @@
 //! - "Until done" sessions that iterate until a checker agent confirms the
 //!   user's task is complete.
 //!
-//! Loops are stored as JSON at `<projects_dir>/.orrch/loops.json`. The TUI's
+//! Loops are stored as JSON at the global app-data `loops.json`. The TUI's
 //! Hypervise > Loops sub-tab and the Oversee project action menu both read
-//! and mutate this file.
+//! and mutate this file. A read fallback preserves legacy
+//! `<projects_dir>/.orrch/loops.json` data until migration runs.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+use crate::context_location::{artifact_path, Artifact};
 
 /// LOOP-011 — the destructiveness class of a loop. Two top-level kinds; Support
 /// carries a sub-kind purely for UI/diagnostics (it does NOT change the policy —
@@ -113,15 +116,30 @@ impl LoopSchedule {
     }
 }
 
-/// Resolve the loops storage path for a given top-level projects directory.
-pub fn loops_path(projects_dir: &Path) -> PathBuf {
+/// Resolve the canonical global loops storage path.
+pub fn loops_path(_projects_dir: &Path) -> PathBuf {
+    artifact_path(Artifact::LoopRegistry, None)
+        .expect("global loop registry path should not require a project")
+}
+
+/// Resolve the legacy loops storage path under the top-level projects directory.
+pub fn legacy_loops_path(projects_dir: &Path) -> PathBuf {
     projects_dir.join(".orrch").join("loops.json")
 }
 
 /// Load every saved loop schedule. Returns an empty vec if the file is
-/// missing or unreadable.
+/// missing or unreadable. Falls back to the legacy projects-dir location only
+/// when the canonical global file does not exist.
 pub fn load_loops(projects_dir: &Path) -> Vec<LoopSchedule> {
-    let path = loops_path(projects_dir);
+    let canonical = loops_path(projects_dir);
+    let legacy = legacy_loops_path(projects_dir);
+    let path = if canonical.exists() {
+        canonical
+    } else if legacy.exists() {
+        legacy
+    } else {
+        canonical
+    };
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
@@ -129,8 +147,8 @@ pub fn load_loops(projects_dir: &Path) -> Vec<LoopSchedule> {
     serde_json::from_str(&content).unwrap_or_default()
 }
 
-/// Persist the supplied loop schedules to disk. Creates the parent `.orrch/`
-/// directory if missing. Overwrites the existing file atomically.
+/// Persist the supplied loop schedules to the canonical global path. Creates
+/// the parent directory if missing. Overwrites the existing file atomically.
 pub fn save_loops(projects_dir: &Path, loops: &[LoopSchedule]) -> std::io::Result<()> {
     let path = loops_path(projects_dir);
     if let Some(parent) = path.parent() {
@@ -183,7 +201,13 @@ pub fn delete_loop(projects_dir: &Path, id: &str) -> std::io::Result<bool> {
 
 fn slugify(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -199,6 +223,29 @@ fn iso_now() -> String {
 mod tests {
     use super::*;
 
+    struct HomeGuard {
+        old_home: Option<String>,
+    }
+
+    impl HomeGuard {
+        fn set(home: &Path) -> Self {
+            let old_home = std::env::var("HOME").ok();
+            unsafe { std::env::set_var("HOME", home) };
+            Self { old_home }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.old_home {
+                    Some(home) => std::env::set_var("HOME", home),
+                    None => std::env::remove_var("HOME"),
+                }
+            }
+        }
+    }
+
     fn fresh_dir() -> PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -209,15 +256,28 @@ mod tests {
         p
     }
 
+    fn isolated_home() -> (std::sync::MutexGuard<'static, ()>, HomeGuard, PathBuf) {
+        let lock = crate::shadow::TEST_ENV_LOCK.lock().unwrap();
+        let home = fresh_dir();
+        let guard = HomeGuard::set(&home);
+        (lock, guard, home)
+    }
+
     #[test]
     fn save_and_load_round_trip() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
         let s = LoopSchedule::new(
             "Continuous Dev",
             dir.join("orrchestrator"),
-            vec!["general_software_development".into(), "commercial_software_development".into()],
+            vec![
+                "general_software_development".into(),
+                "commercial_software_development".into(),
+            ],
         );
         save_loops(&dir, &[s.clone()]).unwrap();
+        assert!(loops_path(&dir).exists());
+        assert!(!legacy_loops_path(&dir).exists());
         let loaded = load_loops(&dir);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], s);
@@ -225,12 +285,9 @@ mod tests {
 
     #[test]
     fn upsert_replaces_existing_id() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
-        let mut s1 = LoopSchedule::new(
-            "Same Name",
-            dir.join("p1"),
-            vec!["a".into()],
-        );
+        let mut s1 = LoopSchedule::new("Same Name", dir.join("p1"), vec!["a".into()]);
         s1.enabled = false;
         save_loops(&dir, &[s1.clone()]).unwrap();
 
@@ -245,6 +302,7 @@ mod tests {
 
     #[test]
     fn toggle_flips_enabled() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
         let s = LoopSchedule::new("toggle me", dir.join("p"), vec!["x".into()]);
         let id = s.id.clone();
@@ -258,6 +316,7 @@ mod tests {
 
     #[test]
     fn delete_removes_matching_loop() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
         let s = LoopSchedule::new("kill me", dir.join("p"), vec!["x".into()]);
         let id = s.id.clone();
@@ -270,9 +329,36 @@ mod tests {
 
     #[test]
     fn empty_load_when_no_file() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
         // Don't save anything; load should yield empty vec.
         assert!(load_loops(&dir).is_empty());
+    }
+
+    #[test]
+    fn load_falls_back_to_legacy_and_save_writes_canonical() {
+        let (_lock, _home_guard, _home) = isolated_home();
+        let dir = fresh_dir();
+        let legacy_path = legacy_loops_path(&dir);
+        std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+        let s = LoopSchedule::new("legacy loop", dir.join("p"), vec!["legacy".into()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&vec![s.clone()]).unwrap(),
+        )
+        .unwrap();
+
+        assert!(!loops_path(&dir).exists());
+        let loaded = load_loops(&dir);
+        assert_eq!(loaded, vec![s.clone()]);
+
+        save_loops(&dir, &[s]).unwrap();
+
+        assert!(loops_path(&dir).exists());
+        assert!(legacy_path.exists());
+        let canonical = load_loops(&dir);
+        assert_eq!(canonical.len(), 1);
+        assert_eq!(canonical[0].name, "legacy loop");
     }
 
     // ── LOOP-011: LoopClass ──────────────────────────────────────────────
@@ -331,6 +417,7 @@ mod tests {
 
     #[test]
     fn schedule_with_support_class_round_trips() {
+        let (_lock, _home_guard, _home) = isolated_home();
         let dir = fresh_dir();
         let mut s = LoopSchedule::new("Planner", dir.join("p"), vec!["plan".into()]);
         s.class = LoopClass::Support(SupportKind::Planning);
