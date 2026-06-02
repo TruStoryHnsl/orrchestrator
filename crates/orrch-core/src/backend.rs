@@ -82,6 +82,7 @@ impl BackendKind {
                             flags: cfg.flags.clone(),
                         },
                         available: cfg.available,
+                        env_overrides: vec![],
                     }
                 } else {
                     ProviderConfig {
@@ -91,6 +92,7 @@ impl BackendKind {
                             flags: vec![],
                         },
                         available: false,
+                        env_overrides: vec![],
                     }
                 }
             }
@@ -102,6 +104,7 @@ impl BackendKind {
                     api_key_env: "ANTHROPIC_API_KEY".to_string(),
                 },
                 available: std::env::var("ANTHROPIC_API_KEY").is_ok(),
+                env_overrides: vec![],
             },
             Self::OpenAiApi => ProviderConfig {
                 name: "openai-api".to_string(),
@@ -111,8 +114,59 @@ impl BackendKind {
                     api_key_env: "OPENAI_API_KEY".to_string(),
                 },
                 available: std::env::var("OPENAI_API_KEY").is_ok(),
+                env_overrides: vec![],
             },
         }
+    }
+
+    /// ENG-001 / ENG-004: build a ProviderConfig whose endpoint/model come from a
+    /// RESOLVED engine (`ModelEntry`) rather than a hardcoded provider default,
+    /// with `env_overrides` populated from `engine_env(harness, engine, ..)`.
+    ///
+    /// CLI harnesses → CliPty (command+flags from `config`) plus engine env
+    /// overrides so the in-PTY harness talks to the engine's endpoint. API
+    /// harnesses → ApiHttp using the engine's `base_url`/`model_id`/`api_key_env`.
+    pub fn provider_for_engine(
+        harness: BackendKind,
+        engine: &orrch_library::ModelEntry,
+        config: &BackendsConfig,
+    ) -> anyhow::Result<ProviderConfig> {
+        let env = crate::engine::engine_env(harness, engine, |v| std::env::var(v).ok())?;
+        let provider = match harness {
+            BackendKind::Claude
+            | BackendKind::Codex
+            | BackendKind::Gemini
+            | BackendKind::Crush
+            | BackendKind::OpenCode
+            | BackendKind::Pi => harness.to_provider(config),
+            BackendKind::AnthropicApi | BackendKind::OpenAiApi => {
+                let base_url = engine
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| match harness {
+                        BackendKind::OpenAiApi => "https://api.openai.com".to_string(),
+                        _ => "https://api.anthropic.com".to_string(),
+                    });
+                let api_key_env = engine
+                    .api_key_env
+                    .clone()
+                    .unwrap_or_else(|| match harness {
+                        BackendKind::OpenAiApi => "OPENAI_API_KEY".to_string(),
+                        _ => "ANTHROPIC_API_KEY".to_string(),
+                    });
+                ProviderConfig {
+                    name: harness.label().to_string(),
+                    kind: ProviderKind::ApiHttp {
+                        base_url,
+                        model_id: engine.model_id.clone(),
+                        api_key_env: api_key_env.clone(),
+                    },
+                    available: std::env::var(&api_key_env).is_ok(),
+                    env_overrides: vec![],
+                }
+            }
+        };
+        Ok(provider.with_engine_env(env))
     }
 
     /// All known backend variants.
@@ -324,10 +378,15 @@ fn serde_yaml_or_json(contents: &str) -> Result<BackendsConfig, ()> {
 /// API key is read from the env var declared in its `ProviderConfig`. Uses blocking
 /// reqwest so the call is safe to make from synchronous contexts (e.g.
 /// `ProcessManager::spawn`). For private-scope iteration: no streaming, no retries.
-pub fn send_api_message(backend: BackendKind, model_id: &str, prompt: &str) -> anyhow::Result<String> {
+pub fn send_api_message(
+    backend: BackendKind,
+    base_url: &str,
+    model_id: &str,
+    prompt: &str,
+) -> anyhow::Result<String> {
     match backend {
-        BackendKind::AnthropicApi => send_anthropic(model_id, prompt),
-        BackendKind::OpenAiApi => send_openai(model_id, prompt),
+        BackendKind::AnthropicApi => send_anthropic(base_url, model_id, prompt),
+        BackendKind::OpenAiApi => send_openai(base_url, model_id, prompt),
         BackendKind::Pi => send_pi(prompt),
         _ => anyhow::bail!("{} is not an HTTP API backend", backend.label()),
     }
@@ -355,7 +414,7 @@ fn http_client() -> anyhow::Result<reqwest::blocking::Client> {
         .map_err(|e| anyhow::anyhow!("failed to build http client: {e}"))
 }
 
-fn send_anthropic(model_id: &str, prompt: &str) -> anyhow::Result<String> {
+fn send_anthropic(base_url: &str, model_id: &str, prompt: &str) -> anyhow::Result<String> {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY is not set"))?;
     let body = serde_json::json!({
@@ -367,7 +426,7 @@ fn send_anthropic(model_id: &str, prompt: &str) -> anyhow::Result<String> {
     });
     let client = http_client()?;
     let resp = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(crate::engine::anthropic_url(base_url))
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -396,7 +455,7 @@ fn send_anthropic(model_id: &str, prompt: &str) -> anyhow::Result<String> {
     Ok(text)
 }
 
-fn send_openai(model_id: &str, prompt: &str) -> anyhow::Result<String> {
+fn send_openai(base_url: &str, model_id: &str, prompt: &str) -> anyhow::Result<String> {
     let api_key = std::env::var("OPENAI_API_KEY")
         .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY is not set"))?;
     let body = serde_json::json!({
@@ -407,7 +466,7 @@ fn send_openai(model_id: &str, prompt: &str) -> anyhow::Result<String> {
     });
     let client = http_client()?;
     let resp = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(crate::engine::openai_url(base_url))
         .bearer_auth(api_key)
         .header("content-type", "application/json")
         .json(&body)

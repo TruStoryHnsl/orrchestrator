@@ -31,6 +31,10 @@ pub struct Config {
     /// Empty = all scopes visible. Default empty.
     #[serde(default)]
     pub hidden_scopes: HashSet<Scope>,
+    /// ENG-003 global-default engine id (`ModelEntry.name`). `None` → builtin
+    /// fallback. Feeds `EngineLayers.global_default`.
+    #[serde(default)]
+    pub default_engine: Option<String>,
 }
 
 impl Default for Config {
@@ -43,6 +47,7 @@ impl Default for Config {
             projects_dir: default_projects_dir(),
             primary_hostname: None,
             hidden_scopes: HashSet::new(),
+            default_engine: None,
         }
     }
 }

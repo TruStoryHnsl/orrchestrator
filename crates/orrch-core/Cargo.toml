@@ -13,6 +13,7 @@ tracing.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 libc.workspace = true
+orrch-library = { path = "../orrch-library" }
 sha2.workspace = true
 reqwest.workspace = true
 

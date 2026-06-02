@@ -79,6 +79,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::SpawnWorkforce => { draw_panel_content(frame, app, layout[1]); draw_spawn_workforce(frame, app); }
         SubView::SpawnAgent => { draw_panel_content(frame, app, layout[1]); draw_spawn_agent(frame, app); }
         SubView::SpawnBackend => { draw_panel_content(frame, app, layout[1]); draw_spawn_backend(frame, app); }
+        SubView::SpawnEngine => { draw_panel_content(frame, app, layout[1]); draw_spawn_engine(frame, app); }
         SubView::SpawnHost => { draw_panel_content(frame, app, layout[1]); draw_spawn_host(frame, app); }
         SubView::RoutingSummary => { draw_panel_content(frame, app, layout[1]); draw_routing_summary(frame, app); }
         SubView::ConfirmDeprecate(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_deprecate(frame, app, idx); }
@@ -4399,6 +4400,63 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
     }
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Backend ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+}
+
+fn draw_spawn_engine(frame: &mut Frame, app: &App) {
+    // ENG-006: engine (LLM endpoint) picker. Index 0 = resolver default (today's
+    // behavior); 1+ = a valve-passing engine from the library. Cloud engines are
+    // always shown; local engines are never valve-gated.
+    let engines = app.selectable_engines();
+    let height = (7 + engines.len() as u16).min(18);
+    let popup = centered_popup(frame.area(), 60, height);
+    frame.render_widget(Clear, popup);
+
+    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(format!("{} ", app.spawn_backend.label()), Style::default().fg(CYAN)),
+            Span::styled(goal_display, Style::default().fg(GREEN)),
+        ]),
+        Line::raw(""),
+        Line::styled("Engine (Tab/arrows to select):", Style::default().fg(TEXT_DIM)),
+    ];
+
+    // Index 0 — resolver default. Show which engine the precedence layers would
+    // pick (agent role / project / global default), or "harness default".
+    let default_sel = app.spawn_engine_idx == 0;
+    let resolver_hint = app
+        .resolved_default_engine_label()
+        .unwrap_or_else(|| "harness default endpoint".to_string());
+    lines.push(Line::styled(
+        format!("{} (default — resolver: {})", if default_sel { "▶" } else { " " }, resolver_hint),
+        if default_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+    ));
+
+    if engines.is_empty() {
+        lines.push(Line::styled(
+            "  (no selectable engines — open provider valves in Library)",
+            Style::default().fg(TEXT_MUTED),
+        ));
+    }
+
+    for (i, eng) in engines.iter().enumerate() {
+        let sel = app.spawn_engine_idx == i + 1;
+        let loc = match eng.location {
+            orrch_library::EngineLocation::Cloud => "cloud",
+            orrch_library::EngineLocation::Gateway => "gateway",
+            orrch_library::EngineLocation::Local => "local",
+        };
+        lines.push(Line::styled(
+            format!("{} {} ({} · {})", if sel { "▶" } else { " " }, eng.name, eng.provider, loc),
+            if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        ));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("Enter: continue · Esc: cancel", Style::default().fg(TEXT_MUTED)));
+
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Engine ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
 }
 
 fn draw_spawn_host(frame: &mut Frame, app: &App) {
