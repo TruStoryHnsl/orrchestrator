@@ -264,12 +264,31 @@ fn voice_toggle_poke() -> Result<()> {
         }
     };
 
+    // Prevent an infinite hang if the service accepts but never replies.
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+
     serde_json::to_writer(&mut stream, &orrch_voice::protocol::VoiceRequest::Toggle)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
 
     let mut line = String::new();
-    std::io::BufReader::new(stream).read_line(&mut line)?;
+    match std::io::BufReader::new(stream).read_line(&mut line) {
+        // Err path: explicit timeout error kind (WouldBlock / TimedOut).
+        Err(err)
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            println!("voice service timed out");
+            return Ok(());
+        }
+        Err(err) => return Err(err.into()),
+        // Ok(0) on Linux with SO_RCVTIMEO means the deadline fired (manifests as EOF).
+        Ok(0) => {
+            println!("voice service timed out");
+            return Ok(());
+        }
+        Ok(_) => {}
+    }
     match serde_json::from_str::<orrch_voice::protocol::VoiceResponse>(&line)? {
         orrch_voice::protocol::VoiceResponse::Ok => println!("voice toggle: ok"),
         orrch_voice::protocol::VoiceResponse::Error(err) => println!("voice toggle: error: {err}"),

@@ -7,7 +7,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::capture::capture_toggle;
 use crate::engine::{DEFAULT_MODEL_ID, VoiceEngine};
@@ -106,7 +106,7 @@ impl VoiceService {
         let language = self.config.language.clone();
         let engine = self.engine.clone();
         let model_ready = self.model_ready.clone();
-        std::thread::Builder::new()
+        if let Err(err) = std::thread::Builder::new()
             .name("orrch-voice-model".into())
             .spawn(move || {
                 let prompt = VocabStore::open()
@@ -124,15 +124,19 @@ impl VoiceService {
                     Err(err) => warn!("failed to load orrch-voice model '{model_id}': {err}"),
                 }
             })
-            .ok();
+        {
+            error!("failed to spawn orrch-voice-model thread: {err}");
+        }
     }
 
     fn spawn_capture_loop(&self) {
         let service = self.clone();
-        std::thread::Builder::new()
+        if let Err(err) = std::thread::Builder::new()
             .name("orrch-voice-capture".into())
             .spawn(move || service.capture_loop())
-            .ok();
+        {
+            error!("failed to spawn orrch-voice-capture thread: {err}");
+        }
     }
 
     fn capture_loop(&self) {

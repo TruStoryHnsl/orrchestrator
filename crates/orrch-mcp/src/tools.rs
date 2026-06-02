@@ -716,19 +716,30 @@ fn voice_listen(args: &Value) -> String {
         .get("timeout_ms")
         .and_then(|v| v.as_u64())
         .unwrap_or(30_000);
-    match voice_request(args, orrch_voice::protocol::VoiceRequest::NextUtterance { timeout_ms }) {
+    // Read timeout = request timeout + 2 s buffer so the socket can't hang forever.
+    let read_timeout = std::time::Duration::from_millis(timeout_ms + 2_000);
+    match voice_request(args, orrch_voice::protocol::VoiceRequest::NextUtterance { timeout_ms }, read_timeout) {
         Ok(orrch_voice::protocol::VoiceResponse::Utterance(Some(utterance))) => utterance.text,
         Ok(orrch_voice::protocol::VoiceResponse::Utterance(None)) => {
             "No voice utterance received before timeout.".into()
         }
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
+            || err.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            "voice service timed out".into()
+        }
         Err(_) => VOICE_OFFLINE.into(),
     }
 }
 
 fn voice_status(args: &Value) -> String {
-    match voice_request(args, orrch_voice::protocol::VoiceRequest::Status) {
+    match voice_request(
+        args,
+        orrch_voice::protocol::VoiceRequest::Status,
+        std::time::Duration::from_secs(5),
+    ) {
         Ok(orrch_voice::protocol::VoiceResponse::Status {
             listening,
             model_ready,
@@ -740,15 +751,29 @@ fn voice_status(args: &Value) -> String {
         ),
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
+            || err.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            "voice service timed out".into()
+        }
         Err(_) => VOICE_OFFLINE.into(),
     }
 }
 
 fn voice_toggle(args: &Value) -> String {
-    match voice_request(args, orrch_voice::protocol::VoiceRequest::Toggle) {
+    match voice_request(
+        args,
+        orrch_voice::protocol::VoiceRequest::Toggle,
+        std::time::Duration::from_secs(5),
+    ) {
         Ok(orrch_voice::protocol::VoiceResponse::Ok) => "voice toggle: ok".into(),
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
+            || err.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            "voice service timed out".into()
+        }
         Err(_) => VOICE_OFFLINE.into(),
     }
 }
@@ -756,6 +781,7 @@ fn voice_toggle(args: &Value) -> String {
 fn voice_request(
     args: &Value,
     request: orrch_voice::protocol::VoiceRequest,
+    read_timeout: std::time::Duration,
 ) -> std::io::Result<orrch_voice::protocol::VoiceResponse> {
     use std::io::{BufRead, Write};
     use std::os::unix::net::UnixStream;
@@ -767,12 +793,19 @@ fn voice_request(
         .or_else(|| std::env::var("ORRCH_VOICE_SOCKET").ok().map(std::path::PathBuf::from))
         .unwrap_or_else(orrch_voice::protocol::default_socket_path);
     let mut stream = UnixStream::connect(socket_path)?;
+    // Prevent an infinite hang if the voice service accepts but never replies.
+    stream.set_read_timeout(Some(read_timeout)).ok();
     serde_json::to_writer(&mut stream, &request)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
 
     let mut line = String::new();
     std::io::BufReader::new(stream).read_line(&mut line)?;
+    // On Linux, SO_RCVTIMEO expiry manifests as Ok(0) rather than Err(WouldBlock/TimedOut).
+    // An empty line here means the read deadline fired; treat it as a timeout.
+    if line.is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "read timed out"));
+    }
     serde_json::from_str(&line)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
 }
@@ -2918,6 +2951,58 @@ mod tests {
         let path = unique_socket_path("offline");
         let args = serde_json::json!({"socket_path": path.display().to_string()});
         assert_eq!(voice_status(&args), VOICE_OFFLINE);
+    }
+
+    /// Spawn a server that accepts a connection and reads the request, then
+    /// deliberately never writes a reply. The voice_listen read timeout (set to
+    /// timeout_ms + 2 s) must fire and return the graceful "timed out" message
+    /// rather than hanging forever.
+    ///
+    /// We pass `timeout_ms = 0` so the read deadline is 2 s, which keeps the
+    /// test wall-clock around 2 s — acceptable for a robustness test.
+    #[test]
+    fn test_voice_listen_timeout_returns_graceful_message() {
+        use std::os::unix::net::UnixListener;
+        use std::sync::mpsc;
+
+        let path = unique_socket_path("timeout");
+        let path2 = path.clone();
+        let (ready_tx, ready_rx) = mpsc::channel::<()>();
+
+        // Server: bind first, signal readiness, then accept and stall.
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            let _ = std::fs::remove_file(&path2);
+            let listener = UnixListener::bind(&path2).unwrap();
+            // Signal that the socket exists and is accepting before the client connects.
+            let _ = ready_tx.send(());
+            if let Ok((stream, _)) = listener.accept() {
+                // Keep the stream alive while we drain the request, then sleep
+                // without writing a reply.  We MUST NOT drop `stream` before
+                // the sleep, or the OS closes the connection and the client
+                // sees Ok(0) (EOF) rather than a stall.
+                let mut buf = String::new();
+                let cloned = stream.try_clone().unwrap();
+                let _ = std::io::BufReader::new(cloned).read_line(&mut buf);
+                // Stall — no reply written.  `stream` is still open.
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                // Explicit drop to silence "unused" warning.
+                drop(stream);
+            }
+            let _ = std::fs::remove_file(&path2);
+        });
+
+        // Wait until the server is bound and listening before connecting.
+        ready_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("server did not become ready");
+
+        // timeout_ms=0 → client read_timeout = 2 s. The call blocks ~2 s then
+        // unblocks with the graceful message.
+        let args = serde_json::json!({
+            "socket_path": path.display().to_string(),
+            "timeout_ms": 0_u64,
+        });
+        let result = voice_listen(&args);
+        assert_eq!(result, "voice service timed out", "got: {result}");
     }
 
     #[test]
