@@ -421,6 +421,7 @@ impl WorkforceTab {
 /// Tabs within the Library browser (Design > Library). Read-only view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibrarySub {
+    Fit,
     Agents,
     Models,
     Harnesses,
@@ -431,7 +432,8 @@ pub enum LibrarySub {
 }
 
 impl LibrarySub {
-    pub const ALL: [LibrarySub; 7] = [
+    pub const ALL: [LibrarySub; 8] = [
+        LibrarySub::Fit,
         LibrarySub::Agents, LibrarySub::Models, LibrarySub::Harnesses,
         LibrarySub::McpServers, LibrarySub::Skills, LibrarySub::Tools,
         LibrarySub::PiExtensions,
@@ -439,6 +441,7 @@ impl LibrarySub {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Fit => "Fit",
             Self::Agents => "Agents",
             Self::Models => "Models",
             Self::Harnesses => "Harnesses",
@@ -774,6 +777,15 @@ pub struct App {
     pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
     pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
     pub library_pi_extensions: Vec<orrch_library::LibraryItem>, // PI extensions (.ts)
+
+    // HWF-005 Fit panel state
+    pub fit_registry: orrch_hwfit::MachineRegistry,
+    pub fit_machine_idx: usize,                       // index into fit_registry.all()
+    pub fit_results: Vec<orrch_hwfit::FitResult>,     // cached ranked rows for selected machine
+    pub fit_system: Option<orrch_hwfit::SystemInfo>,  // cached probe result (for header / error)
+    pub fit_row: usize,                               // selected row in the fit table
+    pub fit_probed_machine: Option<String>,           // name of machine fit_results was computed for (lazy-probe guard)
+
     pub valve_store: orrch_library::ValveStore,
     pub usage_tracker: orrch_core::UsageTracker,
 
@@ -1196,10 +1208,16 @@ impl App {
             workforce_tab: WorkforceTab::Workflows,
             wf_selected: 0,
             wf_preview_scroll: 0,
-            library_sub: LibrarySub::Agents,
+            library_sub: LibrarySub::Fit,
             library_selected: 0,
             library_scroll: 0,
             library_preview_scroll: 0,
+            fit_registry: orrch_hwfit::MachineRegistry::load(),
+            fit_machine_idx: 0,
+            fit_results: Vec::new(),
+            fit_system: None,
+            fit_row: 0,
+            fit_probed_machine: None,
             library_models,
             library_harnesses,
             library_mcp_servers,
@@ -3147,6 +3165,15 @@ impl App {
                 self.library_selected = 0;
                 self.library_preview_scroll = 0;
             }
+            KeyCode::Up if self.library_sub == LibrarySub::Fit => {
+                if self.fit_row == 0 { self.focus_depth = self.content_depth() - 1; }
+                else { self.fit_row -= 1; }
+            }
+            KeyCode::Down if self.library_sub == LibrarySub::Fit => {
+                if !self.fit_results.is_empty() && self.fit_row < self.fit_results.len() - 1 {
+                    self.fit_row += 1;
+                }
+            }
             KeyCode::Up => {
                 if self.library_selected == 0 { self.focus_depth = self.content_depth() - 1; }
                 else { self.library_selected -= 1; self.library_preview_scroll = 0; }
@@ -3303,6 +3330,27 @@ impl App {
                     }
                 }
             }
+            // HWF-005: cycle selected machine (localhost + registry)
+            KeyCode::Char('m') if self.library_sub == LibrarySub::Fit => {
+                let n = self.fit_registry.all().len();
+                if n > 0 {
+                    self.fit_machine_idx = (self.fit_machine_idx + 1) % n;
+                    self.fit_row = 0;
+                    self.fit_probed_machine = None; // force lazy re-probe (cached, fast)
+                }
+            }
+            KeyCode::Char('M') if self.library_sub == LibrarySub::Fit => {
+                let n = self.fit_registry.all().len();
+                if n > 0 {
+                    self.fit_machine_idx = (self.fit_machine_idx + n - 1) % n;
+                    self.fit_row = 0;
+                    self.fit_probed_machine = None;
+                }
+            }
+            // HWF-005: force re-scan (bypass 30-min probe cache)
+            KeyCode::Char('R') if self.library_sub == LibrarySub::Fit => {
+                self.refresh_fit(true);
+            }
             _ => {}
         }
         Ok(())
@@ -3323,6 +3371,21 @@ impl App {
         }
     }
 
+    /// HWF-005: probe the selected machine (cached unless `fresh`) and re-rank.
+    /// Lazy: callers invoke from the draw path when fit_probed_machine != current
+    /// machine name, and from the 'R' handler with fresh=true.
+    pub(crate) fn refresh_fit(&mut self, fresh: bool) {
+        let machines = self.fit_registry.all();
+        if let Some(m) = machines.get(self.fit_machine_idx) {
+            let opts = orrch_hwfit::RankOptions { limit: 50, sort: "score", ..Default::default() };
+            let (system, results) = orrch_hwfit::rank_for_machine(m, fresh, &opts);
+            self.fit_system = Some(system);
+            self.fit_results = results;
+            self.fit_row = self.fit_row.min(self.fit_results.len().saturating_sub(1));
+            self.fit_probed_machine = Some(m.name.clone());
+        }
+    }
+
     /// Reload all library data from disk (after create/delete/edit).
     fn reload_library(&mut self) {
         self.reload_all_library_data();
@@ -3332,6 +3395,7 @@ impl App {
 
     fn library_item_count(&self) -> usize {
         match self.library_sub {
+            LibrarySub::Fit => self.fit_results.len(),
             LibrarySub::Agents => self.agent_profiles.len(),
             LibrarySub::Models => self.library_models.len(),
             LibrarySub::Harnesses => self.library_harnesses.len(),

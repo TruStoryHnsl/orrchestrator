@@ -39,7 +39,7 @@ scope_gate() {
   local sf="$PROJECT/.scope"
   if [ -f "$sf" ]; then
     local s; s="$(tr -d '[:space:]' < "$sf" | tr '[:upper:]' '[:lower:]')"
-    [ "$s" = "personal" ] && { echo "gui-sandbox: BANNED in personal-scope project ($PROJECT)." >&2; exit 3; }
+    if [ "$s" = "personal" ]; then echo "gui-sandbox: BANNED in personal-scope project ($PROJECT)." >&2; exit 3; fi
   fi
 }
 

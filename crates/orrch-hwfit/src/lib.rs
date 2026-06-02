@@ -6,6 +6,8 @@ pub mod types;
 pub mod models;
 pub mod probe;
 pub mod fit;
+pub mod machines;
+pub mod refresh;
 
 // Re-export key items at crate root.
 pub use types::*;
@@ -14,3 +16,7 @@ pub use models::{
 };
 pub use probe::{detect_local, detect_system};
 pub use fit::{analyze_model, rank_models, RankOptions};
+pub use machines::{probe_machine, rank_for_machine, Machine, MachineRegistry};
+pub use refresh::{
+    apply_override, merge_catalog, merge_into_file, MergeReport, OverrideMap,
+};
