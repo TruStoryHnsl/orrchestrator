@@ -545,13 +545,15 @@ impl PublishTab {
 pub enum HyperviseSub {
     Sessions,
     Loops,
+    Voice,
     TokenUsage,
 }
 
 impl HyperviseSub {
-    pub const ALL: [HyperviseSub; 3] = [
+    pub const ALL: [HyperviseSub; 4] = [
         HyperviseSub::Sessions,
         HyperviseSub::Loops,
+        HyperviseSub::Voice,
         HyperviseSub::TokenUsage,
     ];
 
@@ -559,6 +561,7 @@ impl HyperviseSub {
         match self {
             Self::Sessions => "Sessions",
             Self::Loops => "Loops",
+            Self::Voice => "Voice",
             Self::TokenUsage => "Token Usage",
         }
     }
@@ -2506,6 +2509,7 @@ impl App {
                         match self.hypervise_sub {
                             HyperviseSub::Sessions => self.key_sessions_tab(key),
                             HyperviseSub::Loops => self.key_hypervise_loops(key),
+                            HyperviseSub::Voice => self.key_placeholder(key),
                             HyperviseSub::TokenUsage => self.key_placeholder(key),
                         }
                     }

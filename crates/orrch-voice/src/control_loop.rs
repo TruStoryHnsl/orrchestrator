@@ -11,6 +11,7 @@ use tracing::{info, warn};
 
 use crate::intent::{OllamaInterpreter, VoiceAction, VoiceInterpreter};
 use crate::protocol::Utterance;
+use crate::update_voice_status;
 
 pub type VoiceActivityLog = Arc<Mutex<Vec<VoiceActivity>>>;
 
@@ -189,10 +190,14 @@ impl VoiceControlLoop {
                 if self.inner.config.auto_dispatch {
                     self.execute_heavy(utterance.text, action);
                 } else {
+                    let pending = action_summary(&action);
                     *self.inner.pending.lock().unwrap() = Some(PendingAction {
                         utterance: utterance.text.clone(),
                         action: action.clone(),
                         proposed_at: Instant::now(),
+                    });
+                    update_voice_status(|status| {
+                        status.pending = Some(pending);
                     });
                     self.record(utterance.text, action, VoiceActivityStatus::Proposed, None);
                 }
@@ -220,6 +225,9 @@ impl VoiceControlLoop {
 
     fn confirm_pending(&self, utterance: String) {
         let pending = self.inner.pending.lock().unwrap().take();
+        update_voice_status(|status| {
+            status.pending = None;
+        });
         let Some(pending) = pending else {
             self.record(
                 utterance,
@@ -256,6 +264,9 @@ impl VoiceControlLoop {
 
     fn cancel_pending(&self, utterance: String) {
         let pending = self.inner.pending.lock().unwrap().take();
+        update_voice_status(|status| {
+            status.pending = None;
+        });
         let action = pending
             .map(|pending| pending.action)
             .unwrap_or(VoiceAction::Cancel);
@@ -430,6 +441,17 @@ impl ActionDispatcher for CoreActionDispatcher {
             }
             _ => anyhow::bail!("voice action is not dispatchable"),
         }
+    }
+}
+
+fn action_summary(action: &VoiceAction) -> String {
+    match action {
+        VoiceAction::Dispatch { project, .. } => format!("Dispatch → {project}"),
+        VoiceAction::SpawnSession { project, .. } => format!("Spawn session → {project}"),
+        VoiceAction::Note { .. } => "Note".to_string(),
+        VoiceAction::Confirm => "Confirm".to_string(),
+        VoiceAction::Cancel => "Cancel".to_string(),
+        VoiceAction::None => "None".to_string(),
     }
 }
 

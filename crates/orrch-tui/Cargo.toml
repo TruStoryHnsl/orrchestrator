@@ -16,6 +16,7 @@ orrch-workforce = { path = "../orrch-workforce" }
 orrch-library = { path = "../orrch-library" }
 orrch-hwfit = { path = "../orrch-hwfit" }
 orrch-retrospect = { path = "../orrch-retrospect" }
+orrch-voice = { path = "../orrch-voice" }
 orrch-webedit = { path = "../orrch-webedit" }
 orrch-webui = { path = "../orrch-webui" }
 tokio.workspace = true

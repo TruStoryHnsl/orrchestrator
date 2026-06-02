@@ -14,6 +14,7 @@ use crate::engine::{DEFAULT_MODEL_ID, VoiceEngine};
 use crate::protocol::{Utterance, VoiceRequest, VoiceResponse, default_socket_path};
 use crate::toggle::ToggleState;
 use crate::vocab::VocabStore;
+use crate::{VoiceStatusSnapshot, publish_voice_status, update_voice_status};
 
 #[derive(Debug, Clone)]
 pub struct VoiceConfig {
@@ -59,14 +60,16 @@ pub struct VoiceService {
 
 impl VoiceService {
     pub fn new(config: VoiceConfig) -> Self {
-        Self {
+        let service = Self {
             config,
             toggle: ToggleState::new(),
             queue: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
             subscribers: Arc::new(Mutex::new(Vec::new())),
             model_ready: Arc::new(AtomicBool::new(false)),
             engine: Arc::new(Mutex::new(None)),
-        }
+        };
+        publish_voice_status(service.status_snapshot());
+        service
     }
 
     pub fn run(config: VoiceConfig) {
@@ -121,6 +124,57 @@ impl VoiceService {
         self.push_utterance(text.to_string());
     }
 
+    fn status_snapshot(&self) -> VoiceStatusSnapshot {
+        let (queue, _) = &*self.queue;
+        let queued = queue.lock().unwrap().len();
+        let model_ready = self.model_ready.load(Ordering::SeqCst);
+        let device = self
+            .engine
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|engine| engine.device_label().to_string())
+            .or_else(|| self.config.device_name.clone())
+            .unwrap_or_else(|| "loading".to_string());
+        VoiceStatusSnapshot {
+            listening: self.toggle.is_listening(),
+            model_ready,
+            model: self.config.model_id.clone(),
+            device,
+            pending: None,
+            queued,
+        }
+    }
+
+    fn refresh_status(&self) {
+        let snapshot = self.status_snapshot();
+        update_voice_status(|status| {
+            status.listening = snapshot.listening;
+            status.model_ready = snapshot.model_ready;
+            status.model = snapshot.model;
+            status.device = snapshot.device;
+            status.queued = snapshot.queued;
+        });
+    }
+
+    fn start_listening(&self) {
+        self.toggle.start();
+        self.refresh_status();
+    }
+
+    fn stop_listening(&self) {
+        self.toggle.stop();
+        self.refresh_status();
+    }
+
+    fn toggle_listening(&self) {
+        if self.toggle.is_listening() {
+            self.stop_listening();
+        } else {
+            self.start_listening();
+        }
+    }
+
     fn spawn_model_loader(&self) {
         let model_id = self.config.model_id.clone();
         let language = self.config.language.clone();
@@ -137,11 +191,24 @@ impl VoiceService {
                     });
                 match VoiceEngine::load(&model_id, &language, prompt) {
                     Ok(loaded) => {
+                        let device = loaded.device_label().to_string();
                         *engine.lock().unwrap() = Some(loaded);
                         model_ready.store(true, Ordering::SeqCst);
+                        update_voice_status(|status| {
+                            status.model_ready = true;
+                            status.model = model_id.clone();
+                            status.device = device;
+                        });
                         info!("orrch-voice model ready");
                     }
-                    Err(err) => warn!("failed to load orrch-voice model '{model_id}': {err}"),
+                    Err(err) => {
+                        update_voice_status(|status| {
+                            status.model_ready = false;
+                            status.model = model_id.clone();
+                            status.device = "unavailable".to_string();
+                        });
+                        warn!("failed to load orrch-voice model '{model_id}': {err}");
+                    }
                 }
             })
         {
@@ -181,7 +248,7 @@ impl VoiceService {
                 self.config.device_name.as_deref(),
                 stop,
             ) {
-                Ok(audio) if audio.is_empty() => self.toggle.stop(),
+                Ok(audio) if audio.is_empty() => self.stop_listening(),
                 Ok(audio) if self.model_ready.load(Ordering::SeqCst) => {
                     let text = {
                         let mut guard = self.engine.lock().unwrap();
@@ -195,15 +262,15 @@ impl VoiceService {
                         Ok(_) => {}
                         Err(err) => warn!("voice transcription failed: {err}"),
                     }
-                    self.toggle.stop();
+                    self.stop_listening();
                 }
                 Ok(_) => {
                     warn!("voice audio captured before model was ready");
-                    self.toggle.stop();
+                    self.stop_listening();
                 }
                 Err(err) => {
                     warn!("voice capture failed: {err}");
-                    self.toggle.stop();
+                    self.stop_listening();
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
@@ -252,19 +319,15 @@ impl VoiceService {
                 }
             }
             VoiceRequest::Toggle => {
-                if self.toggle.is_listening() {
-                    self.toggle.stop();
-                } else {
-                    self.toggle.start();
-                }
+                self.toggle_listening();
                 VoiceResponse::Ok
             }
             VoiceRequest::Start => {
-                self.toggle.start();
+                self.start_listening();
                 VoiceResponse::Ok
             }
             VoiceRequest::Stop => {
-                self.toggle.stop();
+                self.stop_listening();
                 VoiceResponse::Ok
             }
             VoiceRequest::NextUtterance { timeout_ms } => {
@@ -281,6 +344,7 @@ impl VoiceService {
         let (queue, condvar) = &*self.queue;
         queue.lock().unwrap().push_back(utterance.clone());
         condvar.notify_one();
+        self.refresh_status();
 
         let mut subscribers = self.subscribers.lock().unwrap();
         subscribers.retain(|tx| tx.send(utterance.clone()).is_ok());
@@ -290,6 +354,8 @@ impl VoiceService {
         let (queue, condvar) = &*self.queue;
         let mut guard = queue.lock().unwrap();
         if let Some(utterance) = guard.pop_front() {
+            drop(guard);
+            self.refresh_status();
             return Some(utterance);
         }
 
@@ -297,7 +363,10 @@ impl VoiceService {
         let (mut guard, _) = condvar
             .wait_timeout_while(guard, timeout, |queue| queue.is_empty())
             .unwrap();
-        guard.pop_front()
+        let utterance = guard.pop_front();
+        drop(guard);
+        self.refresh_status();
+        utterance
     }
 }
 
