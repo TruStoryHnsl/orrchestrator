@@ -4,4 +4,5 @@ pub mod clock;
 pub mod engine;
 pub mod scheduler;
 pub mod types;
+pub mod worker;
 pub use types::*;

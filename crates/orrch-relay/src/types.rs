@@ -52,3 +52,12 @@ pub enum TokenEvent {
     Done,
     Error(String),
 }
+
+use tokio::sync::mpsc;
+
+/// A request plus the channel its tokens stream back through.
+pub struct QueuedRequest {
+    pub id: u64,
+    pub request: CompletionRequest,
+    pub tx: mpsc::Sender<TokenEvent>,
+}
