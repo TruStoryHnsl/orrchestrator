@@ -16,6 +16,13 @@ supported_models:
 flags:
   - --dangerously-skip-permissions
 limitations: []
+env_injection: true
+rpc_steering: false
+prompt_injection: true
+mcp_tools: true
+tool_gating: true
+system_prompt_override: false
+mid_run_steering: false
 ---
 
 Primary harness for all Claude-model tasks. Most mature agentic coding environment available.

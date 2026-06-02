@@ -1,6 +1,99 @@
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+/// The control points orrchestrator can exert on a harness (CTX-004). Each is
+/// an independent capability bit. Default = all false (a harness we can only
+/// spawn blindly). `#[serde(default)]` on every field so a `HarnessEntry`
+/// deserialized from a legacy .md (no matrix keys) yields an all-false matrix
+/// cleanly.
+///
+/// CRITICAL: the harness frontmatter parser is FLAT (`extract_field_pub` —
+/// key:value lines only, no nested-map support). The matrix is therefore
+/// expressed as SEVEN flat scalar bool frontmatter keys, NOT a nested
+/// `flexibility:` object. Legacy harness .md files lack all seven → every
+/// field defaults false.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlexibilityMatrix {
+    /// Can we pass project context via environment variables at spawn?
+    #[serde(default)]
+    pub env_injection: bool,
+    /// Can we steer mid-flight over an RPC/JSONL channel (pi --mode rpc)?
+    #[serde(default)]
+    pub rpc_steering: bool,
+    /// Can we inject a context prompt blob at/after spawn?
+    #[serde(default)]
+    pub prompt_injection: bool,
+    /// Does it consume an MCP server for tools/resources (orrch MCP)?
+    #[serde(default)]
+    pub mcp_tools: bool,
+    /// Can we allow/deny specific tools (gate the tool surface)?
+    #[serde(default)]
+    pub tool_gating: bool,
+    /// Can we replace/augment the system prompt?
+    #[serde(default)]
+    pub system_prompt_override: bool,
+    /// Can we steer an already-running session (vs. spawn-time only)?
+    #[serde(default)]
+    pub mid_run_steering: bool,
+}
+
+impl FlexibilityMatrix {
+    /// The set of control points that are ENABLED (true), for superset tests.
+    /// Used by the CTX-004 acceptance test: pi ⊇ Claude Code.
+    pub fn enabled_points(&self) -> std::collections::BTreeSet<&'static str> {
+        let mut set = std::collections::BTreeSet::new();
+        if self.env_injection {
+            set.insert("env_injection");
+        }
+        if self.rpc_steering {
+            set.insert("rpc_steering");
+        }
+        if self.prompt_injection {
+            set.insert("prompt_injection");
+        }
+        if self.mcp_tools {
+            set.insert("mcp_tools");
+        }
+        if self.tool_gating {
+            set.insert("tool_gating");
+        }
+        if self.system_prompt_override {
+            set.insert("system_prompt_override");
+        }
+        if self.mid_run_steering {
+            set.insert("mid_run_steering");
+        }
+        set
+    }
+
+    /// True iff every control point enabled in `other` is also enabled in self
+    /// (self is a superset of other's controllable points). Drives the unit
+    /// test asserting `pi.is_superset_of(claude_code)`.
+    pub fn is_superset_of(&self, other: &FlexibilityMatrix) -> bool {
+        self.enabled_points().is_superset(&other.enabled_points())
+    }
+
+    /// Parse the seven flat bool keys from already-extracted frontmatter using
+    /// the existing `store::extract_field_pub`. A missing OR non-`true` value →
+    /// false. Never errors; legacy frontmatter yields `Default::default()`.
+    pub fn from_frontmatter(fm: &str) -> FlexibilityMatrix {
+        let flag = |key: &str| -> bool {
+            crate::store::extract_field_pub(fm, key)
+                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        };
+        FlexibilityMatrix {
+            env_injection: flag("env_injection"),
+            rpc_steering: flag("rpc_steering"),
+            prompt_injection: flag("prompt_injection"),
+            mcp_tools: flag("mcp_tools"),
+            tool_gating: flag("tool_gating"),
+            system_prompt_override: flag("system_prompt_override"),
+            mid_run_steering: flag("mid_run_steering"),
+        }
+    }
+}
+
 /// A registered AI coding harness in the library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessEntry {
@@ -18,6 +111,10 @@ pub struct HarnessEntry {
     /// the entry has never been verified (PLAN item 58).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_checked: Option<String>,
+    /// Per-harness control-depth metadata (CTX-004). Defaults all-false for
+    /// legacy .md files and JSON blobs that omit the key.
+    #[serde(default)]
+    pub flexibility: FlexibilityMatrix,
     #[serde(skip)]
     pub path: PathBuf,
 }
@@ -73,6 +170,7 @@ fn parse_harness_file(path: &Path) -> Option<HarnessEntry> {
         available: false, // set by load_harnesses
         notes: body.trim().to_string(),
         last_checked: extract(&fm, "last_checked"),
+        flexibility: FlexibilityMatrix::from_frontmatter(&fm),
         path: path.to_path_buf(),
     })
 }
@@ -102,6 +200,7 @@ mod tests {
             available: true,
             notes: String::new(),
             last_checked: None,
+            flexibility: FlexibilityMatrix::default(),
             path: PathBuf::new(),
         };
         assert!(h.summary_line().contains("●"));
@@ -132,5 +231,109 @@ mod tests {
         let parsed = parse_harness_file(&tmp).unwrap();
         assert_eq!(parsed.last_checked.as_deref(), Some("2026-04-08"));
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    // ---- CTX-004 FlexibilityMatrix --------------------------------------
+
+    fn repo_harness(name: &str) -> HarnessEntry {
+        // The real library harness .md files live two dirs up from the crate.
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../library/harnesses")
+            .join(name);
+        parse_harness_file(&path)
+            .unwrap_or_else(|| panic!("failed to parse {}", path.display()))
+    }
+
+    #[test]
+    fn test_pi_matrix_parses() {
+        let pi = repo_harness("pi.md");
+        let m = pi.flexibility;
+        assert!(m.rpc_steering, "pi should have rpc_steering");
+        assert!(m.mid_run_steering, "pi should have mid_run_steering");
+        assert!(m.system_prompt_override);
+        assert!(m.tool_gating);
+        assert!(m.mcp_tools);
+        assert!(m.env_injection);
+        assert!(m.prompt_injection);
+    }
+
+    #[test]
+    fn test_claude_code_matrix_parses() {
+        let claude = repo_harness("claude_code.md");
+        let m = claude.flexibility;
+        assert!(m.env_injection);
+        assert!(m.mcp_tools);
+        assert!(m.prompt_injection);
+        assert!(m.tool_gating);
+        // Claude Code cannot be steered over RPC/JSONL nor mid-run.
+        assert!(!m.rpc_steering);
+        assert!(!m.mid_run_steering);
+        assert!(!m.system_prompt_override);
+    }
+
+    #[test]
+    fn test_pi_is_superset_of_claude_code() {
+        let pi = repo_harness("pi.md").flexibility;
+        let claude = repo_harness("claude_code.md").flexibility;
+        assert!(
+            pi.is_superset_of(&claude),
+            "pi controllable points must be a superset of claude_code"
+        );
+        // And NOT vice-versa: pi has rpc_steering/mid_run_steering claude lacks.
+        assert!(
+            !claude.is_superset_of(&pi),
+            "claude_code is a strict subset, not a superset, of pi"
+        );
+    }
+
+    #[test]
+    fn test_legacy_harness_defaults_all_false() {
+        // A synthesized .md with ZERO matrix keys parses with the default
+        // (all-false) matrix and never panics.
+        let tmp = std::env::temp_dir().join("orrch_flex_legacy_test.md");
+        std::fs::write(&tmp, "---\nname: X\ncommand: x\n---\nbody").unwrap();
+        let parsed = parse_harness_file(&tmp).unwrap();
+        assert_eq!(parsed.flexibility, FlexibilityMatrix::default());
+        assert!(parsed.flexibility.enabled_points().is_empty());
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn test_from_frontmatter_sets_exactly_named_keys() {
+        let m = FlexibilityMatrix::from_frontmatter(
+            "env_injection: true\nmcp_tools: true\n",
+        );
+        assert!(m.env_injection);
+        assert!(m.mcp_tools);
+        assert!(!m.rpc_steering);
+        assert!(!m.prompt_injection);
+        assert!(!m.tool_gating);
+        assert!(!m.system_prompt_override);
+        assert!(!m.mid_run_steering);
+        assert_eq!(
+            m.enabled_points(),
+            ["env_injection", "mcp_tools"].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn test_harness_entry_json_roundtrip_with_flexibility() {
+        let mut h = repo_harness("pi.md");
+        h.path = PathBuf::new(); // path is #[serde(skip)]
+        let json = serde_json::to_string(&h).unwrap();
+        let back: HarnessEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.flexibility, h.flexibility);
+    }
+
+    #[test]
+    fn test_harness_entry_json_omitting_flexibility_defaults_false() {
+        // A JSON blob with no `flexibility` key deserializes to all-false.
+        let json = r#"{
+            "name":"L","command":"l","description":"",
+            "capabilities":[],"limitations":[],"supported_models":[],
+            "flags":[],"available":false,"notes":""
+        }"#;
+        let h: HarnessEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(h.flexibility, FlexibilityMatrix::default());
     }
 }
