@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,7 @@ struct VoiceControlLoopInner {
     interpreter: Arc<dyn VoiceInterpreter>,
     dispatcher: Arc<dyn ActionDispatcher>,
     config: VoiceControlConfig,
+    confirm_ttl: Duration,
     pending: Mutex<Option<PendingAction>>,
     recent_context: Mutex<VecDeque<String>>,
     activity_log: VoiceActivityLog,
@@ -83,6 +84,7 @@ struct VoiceControlLoopInner {
 struct PendingAction {
     utterance: String,
     action: VoiceAction,
+    proposed_at: Instant,
 }
 
 impl VoiceControlLoop {
@@ -91,11 +93,22 @@ impl VoiceControlLoop {
         dispatcher: Arc<dyn ActionDispatcher>,
         config: VoiceControlConfig,
     ) -> Self {
+        Self::with_ttl(interpreter, dispatcher, config, confirm_ttl_from_env())
+    }
+
+    /// Construct with an explicit TTL — preferred in tests to avoid env-var cross-bleed.
+    pub fn with_ttl(
+        interpreter: Arc<dyn VoiceInterpreter>,
+        dispatcher: Arc<dyn ActionDispatcher>,
+        config: VoiceControlConfig,
+        confirm_ttl: Duration,
+    ) -> Self {
         Self {
             inner: Arc::new(VoiceControlLoopInner {
                 interpreter,
                 dispatcher,
                 config,
+                confirm_ttl,
                 pending: Mutex::new(None),
                 recent_context: Mutex::new(VecDeque::new()),
                 activity_log: Arc::new(Mutex::new(Vec::new())),
@@ -179,6 +192,7 @@ impl VoiceControlLoop {
                     *self.inner.pending.lock().unwrap() = Some(PendingAction {
                         utterance: utterance.text.clone(),
                         action: action.clone(),
+                        proposed_at: Instant::now(),
                     });
                     self.record(utterance.text, action, VoiceActivityStatus::Proposed, None);
                 }
@@ -215,6 +229,21 @@ impl VoiceControlLoop {
             );
             return;
         };
+
+        let elapsed = pending.proposed_at.elapsed();
+        let ttl = self.inner.confirm_ttl;
+        if elapsed > ttl {
+            self.record(
+                utterance,
+                pending.action,
+                VoiceActivityStatus::Rejected,
+                Some(format!(
+                    "pending proposal expired (>{:.0}s) — say the command again",
+                    ttl.as_secs_f64()
+                )),
+            );
+            return;
+        }
 
         self.record(
             utterance,
@@ -454,6 +483,14 @@ fn normalize_backend_label(value: &str) -> String {
     value.trim().to_lowercase().replace('_', "-")
 }
 
+fn confirm_ttl_from_env() -> Duration {
+    let secs = std::env::var("ORRCH_VOICE_CONFIRM_TTL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(60);
+    Duration::from_secs(secs)
+}
+
 fn env_flag(name: &str) -> bool {
     matches!(
         std::env::var(name).ok().as_deref(),
@@ -537,6 +574,13 @@ mod tests {
         panic!("timed out waiting for predicate");
     }
 
+    fn safe_config() -> VoiceControlConfig {
+        VoiceControlConfig {
+            auto_dispatch: false,
+            max_concurrent_dispatches: 2,
+        }
+    }
+
     #[test]
     fn safe_mode_proposes_before_dispatching_and_confirm_executes() {
         let interpreter = Arc::new(MockInterpreter::new(vec![
@@ -544,13 +588,12 @@ mod tests {
             VoiceAction::Confirm,
         ]));
         let dispatcher = Arc::new(RecordingDispatcher::default());
-        let control_loop = VoiceControlLoop::new(
+        // Use an explicit long TTL so this test is immune to env-var TTL=0 bleed.
+        let control_loop = VoiceControlLoop::with_ttl(
             interpreter,
             dispatcher.clone(),
-            VoiceControlConfig {
-                auto_dispatch: false,
-                max_concurrent_dispatches: 2,
-            },
+            safe_config(),
+            Duration::from_secs(60),
         );
 
         control_loop.handle_text_for_test("route this to the project");
@@ -577,13 +620,11 @@ mod tests {
     fn safe_mode_blocks_dispatch_without_confirm() {
         let interpreter = Arc::new(MockInterpreter::new(vec![dispatch_action()]));
         let dispatcher = Arc::new(RecordingDispatcher::default());
-        let control_loop = VoiceControlLoop::new(
+        let control_loop = VoiceControlLoop::with_ttl(
             interpreter,
             dispatcher.clone(),
-            VoiceControlConfig {
-                auto_dispatch: false,
-                max_concurrent_dispatches: 2,
-            },
+            safe_config(),
+            Duration::from_secs(60),
         );
 
         control_loop.handle_text_for_test("please implement this");
@@ -609,13 +650,14 @@ mod tests {
             dispatch_action(),
             VoiceAction::Confirm,
         ]));
-        let control_loop = VoiceControlLoop::new(
+        let control_loop = VoiceControlLoop::with_ttl(
             interpreter,
             dispatcher.clone(),
             VoiceControlConfig {
                 auto_dispatch: false,
                 max_concurrent_dispatches: 1,
             },
+            Duration::from_secs(60),
         );
 
         control_loop.handle_text_for_test("first task");
@@ -637,6 +679,52 @@ mod tests {
         });
 
         release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn expired_confirm_is_rejected_and_dispatcher_not_called() {
+        let interpreter = Arc::new(MockInterpreter::new(vec![
+            dispatch_action(),
+            VoiceAction::Confirm,
+        ]));
+        let dispatcher = Arc::new(RecordingDispatcher::default());
+        // TTL of zero: the proposal is stale the instant it is stored.
+        let control_loop = VoiceControlLoop::with_ttl(
+            interpreter,
+            dispatcher.clone(),
+            safe_config(),
+            Duration::from_millis(0),
+        );
+
+        // Propose action — should be recorded as Proposed.
+        control_loop.handle_text_for_test("route this to the project");
+        {
+            let log = control_loop.activity_handle();
+            let log = log.lock().unwrap();
+            assert_eq!(log[0].status, VoiceActivityStatus::Proposed);
+        }
+
+        // No sleep needed: TTL=0 means elapsed() > Duration::ZERO is always true.
+        control_loop.handle_text_for_test("yes, do it");
+
+        // Dispatcher must NOT have been called.
+        assert!(
+            dispatcher.calls.lock().unwrap().is_empty(),
+            "dispatcher was called despite expired TTL"
+        );
+
+        // Activity log must contain a Rejected entry with the expiry message.
+        let log = control_loop.activity_handle();
+        let log = log.lock().unwrap();
+        let rejected = log
+            .iter()
+            .find(|a| a.status == VoiceActivityStatus::Rejected);
+        assert!(rejected.is_some(), "no Rejected entry in activity log");
+        let detail = rejected.unwrap().detail.as_deref().unwrap_or("");
+        assert!(
+            detail.contains("expired"),
+            "Rejected detail does not mention expiry: {detail:?}"
+        );
     }
 
     #[tokio::test]
