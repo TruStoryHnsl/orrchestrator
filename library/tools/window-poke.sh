@@ -68,7 +68,7 @@ done
 # scope gate
 if [ -f "$project/.scope" ]; then
   s="$(tr -d '[:space:]' < "$project/.scope" | tr '[:upper:]' '[:lower:]')"
-  [ "$s" = "personal" ] && { echo "window-poke: BANNED in personal-scope project ($project)." >&2; exit 3; }
+  if [ "$s" = "personal" ]; then echo "window-poke: BANNED in personal-scope project ($project)." >&2; exit 3; fi
 fi
 
 [ -n "$display" ] || die "--display :N is required (this tool only drives isolated displays)"
