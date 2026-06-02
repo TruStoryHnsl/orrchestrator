@@ -619,6 +619,8 @@ mod tests {
             department: "development".into(),
             role: "Developer".into(),
             description: "Implements code".into(),
+            optimal_engine: None,
+            standard_engine: None,
             prompt: "You are the Developer. Write clean code.".into(),
             path: PathBuf::from("agents/developer.md"),
         }
@@ -652,6 +654,8 @@ mod tests {
             department: "development".into(),
             role: "Feature Tester".into(),
             description: "Tests features".into(),
+            optimal_engine: None,
+            standard_engine: None,
             prompt: "You are the Feature Tester.".into(),
             path: PathBuf::new(),
         };
@@ -741,6 +745,8 @@ mod tests {
             department: "development".into(),
             role: "QA / Testing".into(),
             description: "Runs cargo test and validates behavior".into(),
+            optimal_engine: None,
+            standard_engine: None,
             prompt: "You are the Feature Tester. You run tests and review failures.".into(),
             path: std::path::PathBuf::from("agents/feature_tester.md"),
         }
@@ -752,6 +758,8 @@ mod tests {
             department: "".into(),
             role: "".into(),
             description: "".into(),
+            optimal_engine: None,
+            standard_engine: None,
             // Body uses words that are NOT in MENTOR_TOPIC_KEYWORDS.
             prompt: "Do abstract zzzz things. Consider xyzqplk carefully.".into(),
             path: std::path::PathBuf::from("agents/zzz.md"),

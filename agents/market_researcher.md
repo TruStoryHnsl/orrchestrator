@@ -14,6 +14,8 @@ capabilities:
   - trend_identification
   - web_search
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Market Researcher Agent

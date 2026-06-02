@@ -14,6 +14,8 @@ capabilities:
   - report_generation
   - library_comparison
 preferred_backend: claude, gemini
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Researcher Agent

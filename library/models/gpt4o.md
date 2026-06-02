@@ -5,7 +5,11 @@ model_id: gpt-4o
 tier: enterprise
 pricing: per_token
 max_context: 128000
+base_url: https://api.openai.com
+location: cloud
 api_key_env: OPENAI_API_KEY
+api_format:
+  - openai
 capabilities:
   - strong reasoning
   - code generation

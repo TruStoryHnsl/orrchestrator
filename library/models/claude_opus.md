@@ -5,7 +5,11 @@ model_id: claude-opus-4-6
 tier: enterprise
 pricing: per_token
 max_context: 1000000
+base_url: https://api.anthropic.com
+location: cloud
 api_key_env: ANTHROPIC_API_KEY
+api_format:
+  - anthropic
 capabilities:
   - full agentic coding
   - tool use

@@ -13,6 +13,8 @@ capabilities:
   - solution_evaluation
   - code_review
 preferred_backend: claude
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 ---
 
 # Software Engineer Agent

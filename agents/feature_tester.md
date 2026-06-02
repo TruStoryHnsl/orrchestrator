@@ -15,6 +15,8 @@ capabilities:
   - network_isolation_testing
   - manual_test_guide_creation
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Feature Tester Agent

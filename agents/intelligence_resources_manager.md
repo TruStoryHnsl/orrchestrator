@@ -13,6 +13,8 @@ capabilities:
   - pause_resume_directives
   - cost_estimation
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Intelligence Resources Manager Agent

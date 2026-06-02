@@ -14,6 +14,8 @@ capabilities:
   - release_packaging
   - changelog_generation
 preferred_backend: claude
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 ---
 
 # Repository Manager Agent

@@ -15,6 +15,8 @@ capabilities:
   - session_logging
   - cross_project_awareness
 preferred_backend: claude
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 # engine: <model-id>  # optional ENG-003 LLM override; absent → resolver falls through layers
 ---
 

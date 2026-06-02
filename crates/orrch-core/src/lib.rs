@@ -38,7 +38,7 @@ pub use agent::{AgentProfile, load_agents, agents_dir};
 pub use audit::{AuditEntry, ChunkCoordinate, compute_source_hash, write_audit_entry, load_audit_entries};
 pub use backend::{BackendKind, BackendsConfig, is_provider_available};
 pub use provider::{ProviderConfig, ProviderKind};
-pub use engine::{EngineLayers, EngineSource, ResolvedEngineId, resolve_engine, resolve_engine_id, engine_env, engine_selectable, agent_role_engine, project_default_engine, anthropic_url, openai_url};
+pub use engine::{EngineLayers, EngineSource, ResolvedEngineId, resolve_engine, resolve_engine_id, engine_env, engine_selectable, agent_role_engine, project_default_engine, anthropic_url, openai_url, Importance, agent_layer_engine, agent_role_engine_for, agent_engine_pair, EngineDecision, decide_engine};
 pub use config::Config;
 pub use shadow::{ShadowRepo, data_dir, shadow_git_dir, DEFAULT_TRACKED_PATHS};
 pub use backup::{BackupConfig, BackupTier, PushOutcome, ProvisionPlan, configure_remote, push_backup, provision_plan};

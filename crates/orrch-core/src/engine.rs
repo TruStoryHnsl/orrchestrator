@@ -78,6 +78,90 @@ pub fn resolve_engine<'a>(
     (resolved, entry)
 }
 
+// ─── ENG-009: deploy handoff — resolved engine + human rationale ────────────
+
+/// ENG-009 outcome: the resolved engine id, which layer won, the importance that
+/// drove the agent layer, and a one-line human rationale shown at spawn time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineDecision {
+    pub engine_id: String,    // "" when no layer named an engine (legacy no-engine path)
+    pub source: EngineSource, // which precedence layer won
+    pub importance: Importance, // the importance that drove the agent layer
+    pub rationale: String,    // one-line human explanation, shown at spawn
+}
+
+/// ENG-009. PURE given the collected layer strings. Builds the agent layer from
+/// the agent's (standard, optimal) + importance, runs the existing 4-level
+/// precedence (resolve_engine_id), and emits a rationale. Caller (TUI) collects
+/// the impure layer strings (session pick, project default, global default) and
+/// the agent's two engine ids, then calls this.
+pub fn decide_engine(
+    session_pick: Option<&str>,
+    agent_standard: Option<&str>,
+    agent_optimal: Option<&str>,
+    project_default: Option<&str>,
+    global_default: Option<&str>,
+    importance: Importance,
+    fallback: &str,
+) -> EngineDecision {
+    let agent_role = agent_layer_engine(agent_standard, agent_optimal, importance);
+    let layers = EngineLayers {
+        session_pick: session_pick.map(str::to_string),
+        agent_role,
+        project_default: project_default.map(str::to_string),
+        global_default: global_default.map(str::to_string),
+    };
+    let r = resolve_engine_id(&layers, fallback);
+    let rationale = match r.source {
+        EngineSource::Session => format!("user-picked '{}' (overrides computed default)", r.engine_id),
+        EngineSource::AgentRole => format!(
+            "agent's {} engine '{}' for a {:?} task",
+            if importance.wants_optimal() { "optimal" } else { "standard" },
+            r.engine_id,
+            importance
+        ),
+        EngineSource::ProjectDefault => format!("project default engine '{}'", r.engine_id),
+        EngineSource::GlobalDefault => format!("global default engine '{}'", r.engine_id),
+        EngineSource::Builtin => {
+            "no engine declared at any layer — harness uses its own default".into()
+        }
+    };
+    EngineDecision { engine_id: r.engine_id, source: r.source, importance, rationale }
+}
+
+// ─── ENG-007: task importance dimension (PURE) ──────────────────────────────
+
+/// ENG-007: task importance dimension. Selects optimal vs standard engine at the
+/// AGENT layer, BEFORE the existing 4-level precedence runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Importance {
+    #[default]
+    Routine,   // standard_engine
+    Important, // optimal_engine
+    Critical,  // optimal_engine
+}
+impl Importance {
+    pub fn wants_optimal(self) -> bool {
+        matches!(self, Importance::Important | Importance::Critical)
+    }
+}
+
+/// PURE. ENG-007: given an agent's declared (standard, optimal) engine ids and a
+/// task importance, return the id that should populate `EngineLayers.agent_role`.
+/// `None` when the agent declared neither (legacy) — caller leaves agent_role None
+/// and the existing precedence falls through to project/global/builtin.
+pub fn agent_layer_engine(
+    standard: Option<&str>,
+    optimal: Option<&str>,
+    importance: Importance,
+) -> Option<String> {
+    if importance.wants_optimal() {
+        optimal.or(standard).map(str::to_string)
+    } else {
+        standard.or(optimal).map(str::to_string)
+    }
+}
+
 // ─── ENG-003 layer collectors (impure, kept OUT of the pure core) ───────────
 
 /// Read the `engine:` field from an `agents/<role>.md` frontmatter. Returns
@@ -87,6 +171,27 @@ pub fn agent_role_engine(agent_md: &Path) -> Option<String> {
     let content = std::fs::read_to_string(agent_md).ok()?;
     let (fm, _body) = orrch_library::store::parse_frontmatter_pub(&content)?;
     orrch_library::store::extract_field_pub(&fm, "engine")
+}
+
+/// ENG-007: read an agent md's `(standard_engine, optimal_engine)` ids, with the
+/// legacy `engine:` field used as the standard fallback. Either side `None` when
+/// absent. Used by callers that pass both ids into `decide_engine`.
+pub fn agent_engine_pair(agent_md: &Path) -> (Option<String>, Option<String>) {
+    let Ok(content) = std::fs::read_to_string(agent_md) else { return (None, None) };
+    let Some((fm, _b)) = orrch_library::store::parse_frontmatter_pub(&content) else {
+        return (None, None);
+    };
+    let f = |k| orrch_library::store::extract_field_pub(&fm, k);
+    let standard = f("standard_engine").or_else(|| f("engine"));
+    let optimal = f("optimal_engine");
+    (standard, optimal)
+}
+
+/// ENG-007: read an agent md's standard_engine/optimal_engine (falling back to the
+/// legacy `engine:` field for standard) and apply importance. Absent both → None.
+pub fn agent_role_engine_for(agent_md: &Path, importance: Importance) -> Option<String> {
+    let (standard, optimal) = agent_engine_pair(agent_md);
+    agent_layer_engine(standard.as_deref(), optimal.as_deref(), importance)
 }
 
 /// Read a project default engine id from `<project_dir>/.orrch/engine`
@@ -468,5 +573,120 @@ mod tests {
         // open valve → selectable (mutate map directly, avoid disk save())
         valves.valves.remove("DeepSeek");
         assert!(engine_selectable(&cloud, &valves));
+    }
+
+    // ── ENG-007: importance → agent-layer engine ─────────────────────────
+
+    #[test]
+    fn test_agent_layer_engine_routine_picks_standard() {
+        assert_eq!(
+            agent_layer_engine(Some("std"), Some("opt"), Importance::Routine),
+            Some("std".to_string())
+        );
+    }
+
+    #[test]
+    fn test_agent_layer_engine_critical_picks_optimal() {
+        assert_eq!(
+            agent_layer_engine(Some("std"), Some("opt"), Importance::Critical),
+            Some("opt".to_string())
+        );
+        assert_eq!(
+            agent_layer_engine(Some("std"), Some("opt"), Importance::Important),
+            Some("opt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_agent_layer_engine_critical_falls_back_to_standard() {
+        // optimal absent → critical falls back to standard
+        assert_eq!(
+            agent_layer_engine(Some("std"), None, Importance::Critical),
+            Some("std".to_string())
+        );
+    }
+
+    #[test]
+    fn test_agent_layer_engine_none_yields_none() {
+        assert_eq!(agent_layer_engine(None, None, Importance::Routine), None);
+        assert_eq!(agent_layer_engine(None, None, Importance::Critical), None);
+    }
+
+    #[test]
+    fn test_importance_integration_with_precedence() {
+        // Critical-resolved agent id populates the agent layer and wins over
+        // project/global, picking the OPTIMAL id.
+        let agent_role =
+            agent_layer_engine(Some("sonnet"), Some("opus"), Importance::Critical);
+        let layers = EngineLayers {
+            session_pick: None,
+            agent_role: agent_role.clone(),
+            project_default: Some("proj-engine".into()),
+            global_default: Some("glob-engine".into()),
+        };
+        let r = resolve_engine_id(&layers, "fb");
+        assert_eq!(r.source, EngineSource::AgentRole);
+        assert_eq!(r.engine_id, "opus");
+
+        // a session pick still overrides the importance-driven agent layer.
+        let layers2 = EngineLayers { session_pick: Some("user-pick".into()), ..layers };
+        let r2 = resolve_engine_id(&layers2, "fb");
+        assert_eq!(r2.source, EngineSource::Session);
+        assert_eq!(r2.engine_id, "user-pick");
+    }
+
+    // ── ENG-009: decide_engine deploy handoff ────────────────────────────
+
+    #[test]
+    fn test_decide_engine_routine_standard_agent() {
+        let d = decide_engine(None, Some("sonnet"), None, None, None, Importance::Routine, "");
+        assert_eq!(d.source, EngineSource::AgentRole);
+        assert_eq!(d.engine_id, "sonnet");
+        assert!(d.rationale.contains("standard"), "rationale: {}", d.rationale);
+    }
+
+    #[test]
+    fn test_decide_engine_critical_optimal_agent() {
+        let d = decide_engine(
+            None,
+            Some("sonnet"),
+            Some("opus"),
+            None,
+            None,
+            Importance::Critical,
+            "",
+        );
+        assert_eq!(d.source, EngineSource::AgentRole);
+        assert_eq!(d.engine_id, "opus");
+        assert!(d.rationale.contains("optimal"), "rationale: {}", d.rationale);
+    }
+
+    #[test]
+    fn test_decide_engine_session_pick_overrides() {
+        let d = decide_engine(
+            Some("user-pick"),
+            Some("sonnet"),
+            Some("opus"),
+            Some("proj"),
+            Some("glob"),
+            Importance::Critical,
+            "",
+        );
+        assert_eq!(d.source, EngineSource::Session);
+        assert_eq!(d.engine_id, "user-pick");
+        assert!(d.rationale.contains("overrides"), "rationale: {}", d.rationale);
+    }
+
+    #[test]
+    fn test_decide_engine_all_none_builtin_legacy_path() {
+        // legacy no-engine spawn: fallback "" → Builtin, engine_id "".
+        let d = decide_engine(None, None, None, None, None, Importance::Routine, "");
+        assert_eq!(d.source, EngineSource::Builtin);
+        assert_eq!(d.engine_id, "");
+        assert!(
+            d.rationale.contains("harness uses its own default"),
+            "rationale: {}",
+            d.rationale
+        );
     }
 }

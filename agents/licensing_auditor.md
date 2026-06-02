@@ -13,6 +13,8 @@ capabilities:
   - license_compatibility_checking
   - obligation_documentation
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Licensing Auditor Agent

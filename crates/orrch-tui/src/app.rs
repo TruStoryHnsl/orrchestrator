@@ -753,6 +753,10 @@ pub struct App {
     pub spawn_goal_text: String,
     pub spawn_goal_from_roadmap: Option<usize>,
     pub spawn_agent_idx: usize, // 0 = no agent, 1+ = index into agent_profiles
+    /// ENG-007: task importance driving the agent-layer engine choice
+    /// (standard vs optimal). Default `Routine`; a future spawn-picker control
+    /// lets the user bump to Important/Critical.
+    pub spawn_importance: orrch_core::Importance,
     pub spawn_backend: BackendKind,
     /// ENG-006: engine picker index. 0 = "(default — resolver)", 1+ = index into
     /// the valve-filtered engine list (see `selectable_engines`).
@@ -1206,6 +1210,7 @@ impl App {
             spawn_goal_text: String::new(),
             spawn_goal_from_roadmap: None,
             spawn_agent_idx: 0,
+            spawn_importance: orrch_core::Importance::default(),
             spawn_backend: BackendKind::Claude,
             spawn_engine_idx: 0,
             spawn_host_idx: 0,
@@ -1731,29 +1736,48 @@ impl App {
     /// produces a `Builtin` source with no matching `ModelEntry` → `None`,
     /// preserving the no-engine path unless a layer explicitly names an engine.
     fn resolve_spawn_engine(&self, project_dir: &Path) -> Option<orrch_library::ModelEntry> {
-        // Map the session picker index → engine id (None for index 0).
+        let decision = self.spawn_engine_decision(project_dir);
+        // Empty engine_id (Builtin / no-engine) → legacy no-engine spawn path.
+        if decision.engine_id.is_empty() {
+            return None;
+        }
+        self.library_models
+            .iter()
+            .find(|m| m.name == decision.engine_id)
+            .cloned()
+    }
+
+    /// ENG-009: compute the full engine decision (id + winning layer + rationale)
+    /// for a spawn. Collects the impure layer strings (session pick, agent
+    /// standard/optimal, project default, global default) plus a session
+    /// importance (default `Routine`; a future spawn-picker control lets the user
+    /// bump to Important/Critical), then runs the pure `decide_engine`.
+    fn spawn_engine_decision(&self, project_dir: &Path) -> orrch_core::EngineDecision {
         let session_pick = self.picked_engine_id();
 
-        // agents/<role>.md `engine:` frontmatter for the chosen agent (if any).
-        let agent_role = self
+        let agent_path = self
             .spawn_agent_idx
             .checked_sub(1)
             .and_then(|i| self.agent_profiles.get(i))
-            .and_then(|p| orrch_core::agent_role_engine(&p.path));
+            .map(|p| p.path.clone());
+        // Reads standard_engine/optimal_engine, falling back to legacy `engine:`.
+        let (agent_standard, agent_optimal) = agent_path
+            .as_deref()
+            .map(orrch_core::agent_engine_pair)
+            .unwrap_or((None, None));
 
         let project_default = orrch_core::project_default_engine(project_dir);
         let global_default = orrch_core::Config::load().default_engine;
 
-        let layers = orrch_core::EngineLayers {
-            session_pick,
-            agent_role,
-            project_default,
-            global_default,
-        };
-        // Empty fallback → all-None resolves to a Builtin id that won't match a
-        // model, yielding `None` and the legacy no-engine spawn path.
-        let (_resolved, entry) = orrch_core::resolve_engine(&layers, &self.library_models, "");
-        entry.cloned()
+        orrch_core::decide_engine(
+            session_pick.as_deref(),
+            agent_standard.as_deref(),
+            agent_optimal.as_deref(),
+            project_default.as_deref(),
+            global_default.as_deref(),
+            self.spawn_importance,
+            "",
+        )
     }
 
     /// ENG-006 UI hint: the engine the resolver would pick for the *default*
@@ -1764,25 +1788,38 @@ impl App {
     pub fn resolved_default_engine_label(&self) -> Option<String> {
         let project_dir = self.projects.get(self.spawn_project_idx).map(|p| p.path.clone());
 
-        let agent_role = self
+        let agent_path = self
             .spawn_agent_idx
             .checked_sub(1)
             .and_then(|i| self.agent_profiles.get(i))
-            .and_then(|p| orrch_core::agent_role_engine(&p.path));
+            .map(|p| p.path.clone());
+        let (agent_standard, agent_optimal) = agent_path
+            .as_deref()
+            .map(orrch_core::agent_engine_pair)
+            .unwrap_or((None, None));
         let project_default = project_dir
             .as_deref()
             .and_then(orrch_core::project_default_engine);
         let global_default = orrch_core::Config::load().default_engine;
 
-        let layers = orrch_core::EngineLayers {
-            session_pick: None,
-            agent_role,
-            project_default,
-            global_default,
-        };
-        let (resolved, _entry) = orrch_core::resolve_engine(&layers, &self.library_models, "");
-        // Builtin fallback id was empty → "no preference"; report None.
-        if resolved.engine_id.is_empty() { None } else { Some(resolved.engine_id) }
+        // Default-picker label ignores the session pick (passes None).
+        let decision = orrch_core::decide_engine(
+            None,
+            agent_standard.as_deref(),
+            agent_optimal.as_deref(),
+            project_default.as_deref(),
+            global_default.as_deref(),
+            self.spawn_importance,
+            "",
+        );
+        if decision.engine_id.is_empty() { None } else { Some(decision.engine_id) }
+    }
+
+    /// ENG-009: human-readable rationale for the engine the spawn picker will
+    /// pre-select, shown next to the picker so the user sees WHY.
+    pub fn spawn_engine_rationale(&self) -> Option<String> {
+        let project_dir = self.projects.get(self.spawn_project_idx).map(|p| p.path.clone())?;
+        Some(self.spawn_engine_decision(&project_dir).rationale)
     }
 
     /// ENG-006: engine-aware spawn delegator. Validates the (harness, engine)

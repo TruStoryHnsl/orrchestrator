@@ -13,6 +13,8 @@ capabilities:
   - concurrency_testing
   - failure_reproduction
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Beta Tester Agent

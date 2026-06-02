@@ -13,6 +13,8 @@ capabilities:
   - security_reporting
   - threat_modeling
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Penetration Tester Agent
