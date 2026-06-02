@@ -13,6 +13,7 @@ orrch-agents = { path = "../orrch-agents" }
 orrch-workforce = { path = "../orrch-workforce" }
 orrch-core = { path = "../orrch-core" }
 orrch-db = { path = "../orrch-db" }
+orrch-voice = { path = "../orrch-voice" }
 anyhow.workspace = true
 tokio.workspace = true
 serde.workspace = true
