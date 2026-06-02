@@ -9,6 +9,7 @@ pub mod engine;
 pub mod feedback;
 pub mod file_registry;
 pub mod hide;
+pub mod loop_review;
 pub mod git;
 pub mod intake_review;
 pub mod output_parser;
@@ -53,6 +54,12 @@ pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
 pub use loops::{LoopSchedule, load_loops, save_loops, upsert_loop, toggle_loop, delete_loop, loops_path};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};
+pub use loop_review::{
+    loop_review, loop_review_with, parse_task_blocks, render_ranked_plan, ActionCoeffs, CandidateStep,
+    EnergyScorer, HistoryRow, LagrangianScorer, LinearCoeffs, LinearLagrangianScorer, LoopReviewOutcome,
+    ScoredStep, ScorerKind, ScoringContext, TermBreakdown, WorkspaceState, DEFAULT_COEFFS_PATH,
+    DEFAULT_HISTORY_PATH, DEFAULT_PRELIMINARY_PATH, DEFAULT_RANKED_PATH,
+};
 pub use compliance::{scan_licenses, check_copyright, LicenseReport, LicenseDep, LicenseStatus, CopyrightReport, MissingHeader};
 pub use release::{BumpKind, BuildTarget, BuildTargetKind, BuildResult, BuildStatus, detect_build_targets, build_artifact, bump_version, generate_changelog_entry, next_version_string};
 pub use file_registry::{AgentId, ChangeSpec, Clock, EditHandle, EditStatus, FileRegistry, ManualClock, Ownership, RegistryError, SystemClock, CRASH_GRACE, DEFAULT_AUDIT_LOG, DEFAULT_REGISTRY_PATH, SOFT_DOUBLE_READ_ENV};
