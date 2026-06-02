@@ -3,10 +3,12 @@
 // are VERBATIM from the Python; parity with odysseus is the point.
 
 use crate::models::{
-    active_params_b, estimate_memory_gb, infer_use_case, is_prequantized, params_b,
-    quant_bytes_per_param, quant_quality_penalty, quant_speed_mult, QUANT_HIERARCHY,
+    QUANT_HIERARCHY, active_params_b, estimate_memory_gb, infer_use_case, is_prequantized,
+    params_b, quant_bpp, quant_bytes_per_param, quant_quality_penalty, quant_speed_mult,
 };
 use crate::types::{CatalogModel, FitResult, FitScores, SystemInfo};
+
+pub const RUN_MODE_MOE_OFFLOAD: &str = "moe_offload";
 
 // Verbatim tables (same keys/values/order as Python):
 pub const GPU_BANDWIDTH: &[(&str, u32)] = &[
@@ -84,8 +86,12 @@ pub const GPU_BANDWIDTH: &[(&str, u32)] = &[
     ("9070", 488),
 ];
 
-pub const FALLBACK_K: &[(&str, u32)] =
-    &[("cuda", 220), ("rocm", 180), ("cpu_x86", 70), ("cpu_arm", 90)];
+pub const FALLBACK_K: &[(&str, u32)] = &[
+    ("cuda", 220),
+    ("rocm", 180),
+    ("cpu_x86", 70),
+    ("cpu_arm", 90),
+];
 
 // (wq, ws, wf, wc); default (0.45, 0.30, 0.15, 0.10)
 pub const USE_CASE_WEIGHTS: &[(&str, (f64, f64, f64, f64))] = &[
@@ -165,7 +171,7 @@ pub fn estimate_speed(
     };
 
     if let Some(bw) = bw {
-        if run_mode == "gpu" || run_mode == "cpu_offload" {
+        if run_mode == "gpu" || run_mode == "cpu_offload" || run_mode == RUN_MODE_MOE_OFFLOAD {
             let bpp = quant_bytes_per_param(quant);
             let model_gb = pb * bpp;
             if model_gb <= 0.0 {
@@ -175,6 +181,8 @@ pub fn estimate_speed(
             let raw_tps = (bw as f64 / model_gb) * efficiency;
             let mode_factor = if run_mode == "cpu_offload" {
                 0.5
+            } else if run_mode == RUN_MODE_MOE_OFFLOAD {
+                moe_offload_speed_factor(model).unwrap_or(0.65)
             } else if is_moe {
                 0.8
             } else {
@@ -190,6 +198,99 @@ pub fn estimate_speed(
     }
     let sm = quant_speed_mult(quant);
     k / pb * sm
+}
+
+fn moe_active_slice_b(model: &CatalogModel) -> Option<f64> {
+    if !model.is_moe {
+        return None;
+    }
+    let total_pb = params_b(model);
+    let active_pb = active_params_b(model);
+    if total_pb <= 0.0 || active_pb <= 0.0 || active_pb >= total_pb * 0.95 {
+        return None;
+    }
+
+    let active_slice = match (model.num_experts, model.active_experts) {
+        (Some(num), Some(active)) if num > 0 && active > 0 && active < num => {
+            let expert_fraction = active as f64 / num as f64;
+            let dense_pb = ((active_pb - total_pb * expert_fraction) / (1.0 - expert_fraction))
+                .max(0.0)
+                .min(active_pb);
+            let expert_bank_pb = (total_pb - dense_pb).max(0.0);
+            dense_pb + expert_bank_pb * expert_fraction
+        }
+        _ => active_pb,
+    };
+
+    if active_slice > 0.0 && active_slice < total_pb * 0.95 {
+        Some(active_slice.min(active_pb))
+    } else {
+        None
+    }
+}
+
+fn moe_offload_memory_gb(model: &CatalogModel, quant: &str, ctx: u64) -> Option<(f64, f64)> {
+    let resident_params_pb = moe_active_slice_b(model)?;
+    let active_pb = active_params_b(model);
+    let bpp = quant_bpp(quant);
+    let resident_gb = resident_params_pb * quant_bytes_per_param(quant)
+        + 0.000008 * active_pb * (ctx as f64)
+        + 0.5;
+    let full_weight_gb = params_b(model) * bpp + 0.5;
+    Some((resident_gb, full_weight_gb))
+}
+
+fn moe_offload_speed_factor(model: &CatalogModel) -> Option<f64> {
+    let total_pb = params_b(model);
+    let active_pb = active_params_b(model);
+    if total_pb <= 0.0 || active_pb <= 0.0 || active_pb >= total_pb {
+        return None;
+    }
+    let active_fraction = match (model.num_experts, model.active_experts) {
+        (Some(num), Some(active)) if num > 0 && active > 0 && active < num => {
+            active as f64 / num as f64
+        }
+        _ => (active_pb / total_pb).clamp(0.01, 0.95),
+    };
+
+    // Hybrid MoE still streams/runs selected experts through host memory, but
+    // attention, KV, shared weights, and hot expert work remain GPU-side.
+    Some((0.82 - 0.18 * (1.0 - active_fraction)).clamp(0.60, 0.82))
+}
+
+fn try_moe_offload_at_or_below(
+    model: &CatalogModel,
+    quant: &str,
+    ctx: u64,
+    gpu_vram: f64,
+    available_ram: f64,
+) -> Option<(String, String, u64, f64)> {
+    if gpu_vram <= 0.0 {
+        return None;
+    }
+
+    let mut cur_ctx = ctx;
+    loop {
+        if let Some((resident_gb, full_weight_gb)) = moe_offload_memory_gb(model, quant, cur_ctx) {
+            if resident_gb <= gpu_vram && full_weight_gb <= available_ram {
+                return Some((
+                    RUN_MODE_MOE_OFFLOAD.to_string(),
+                    quant.to_string(),
+                    cur_ctx,
+                    resident_gb,
+                ));
+            }
+        }
+
+        if cur_ctx < 2048 {
+            break;
+        }
+        cur_ctx /= 2;
+        if cur_ctx < 1024 {
+            break;
+        }
+    }
+    None
 }
 
 /// _quality_score
@@ -297,6 +398,9 @@ pub fn try_quant_at(
     if gpu_vram > 0.0 && mem <= gpu_vram {
         return Some(("gpu".to_string(), quant.to_string(), ctx, mem));
     }
+    if let Some(result) = try_moe_offload_at_or_below(model, quant, ctx, gpu_vram, available_ram) {
+        return Some(result);
+    }
     if gpu_vram > 0.0 && mem <= available_ram {
         return Some(("cpu_offload".to_string(), quant.to_string(), ctx, mem));
     }
@@ -403,7 +507,11 @@ pub fn quant_bits(q: &str) -> u32 {
 
 /// Parse 1-2 leading digits (Python \d{1,2}). Returns None if no leading digit.
 fn parse_leading_digits(s: &str) -> Option<u32> {
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).take(2).collect();
+    let digits: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .take(2)
+        .collect();
     if digits.is_empty() {
         None
     } else {
@@ -503,6 +611,15 @@ pub fn analyze_model(
                     break;
                 }
             }
+        } else if is_moe {
+            if let Some(idx) = QUANT_HIERARCHY.iter().position(|&q| q == quant_to_try) {
+                for q in &QUANT_HIERARCHY[idx + 1..] {
+                    result = try_quant_at(model, q, ctx, effective_vram, eff_ram);
+                    if result.is_some() {
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -538,7 +655,7 @@ pub fn analyze_model(
     };
 
     // Determine fit level
-    let budget = if run_mode == "gpu" {
+    let budget = if run_mode == "gpu" || run_mode == RUN_MODE_MOE_OFFLOAD {
         effective_vram
     } else {
         available_ram
@@ -551,6 +668,12 @@ pub fn analyze_model(
         if rec <= gpu_vram {
             "perfect"
         } else if gpu_vram >= required_gb * 1.2 {
+            "good"
+        } else {
+            "marginal"
+        }
+    } else if run_mode == RUN_MODE_MOE_OFFLOAD {
+        if gpu_vram >= required_gb * 1.2 {
             "good"
         } else {
             "marginal"
@@ -604,6 +727,98 @@ pub fn analyze_model(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rtx_3070_with_ram() -> SystemInfo {
+        SystemInfo {
+            total_ram_gb: 128.0,
+            available_ram_gb: 96.0,
+            has_gpu: true,
+            gpu_name: Some("NVIDIA GeForce RTX 3070".to_string()),
+            gpu_vram_gb: Some(8.0),
+            gpu_count: 1,
+            backend: "cuda".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn deepseek_v4_flash_class() -> CatalogModel {
+        CatalogModel {
+            name: "deepseek-ai/DeepSeek-V4-Flash".to_string(),
+            provider: "DeepSeek".to_string(),
+            parameter_count: "158B".to_string(),
+            parameters_raw: Some(158_000_000_000),
+            quantization: "Q4_K_M".to_string(),
+            context_length: Some(1_000_000),
+            use_case: "General purpose, reasoning (MoE)".to_string(),
+            architecture: "deepseek_v4".to_string(),
+            is_moe: true,
+            active_parameters: Some(13_000_000_000),
+            gguf_sources: vec![serde_json::json!({
+                "repo": "unsloth/DeepSeek-V4-Flash",
+                "provider": "unsloth"
+            })],
+            ..Default::default()
+        }
+    }
+
+    fn dense_70b() -> CatalogModel {
+        CatalogModel {
+            name: "meta-llama/Llama-3.3-70B-Instruct".to_string(),
+            provider: "Meta".to_string(),
+            parameter_count: "70B".to_string(),
+            parameters_raw: Some(70_000_000_000),
+            quantization: "Q4_K_M".to_string(),
+            context_length: Some(131_072),
+            use_case: "General purpose".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn moe_expert_offload_makes_deepseek_v4_flash_class_runnable_on_8gb_vram() {
+        let result = analyze_model(&deepseek_v4_flash_class(), &rtx_3070_with_ram(), None)
+            .expect("model should analyze");
+        println!("{result:#?}");
+
+        assert_eq!(result.run_mode, RUN_MODE_MOE_OFFLOAD);
+        assert_ne!(result.fit_level, "too_tight");
+        assert!(
+            result.required_gb <= 8.0,
+            "resident VRAM footprint should fit"
+        );
+        assert!(result.speed_tps > 5.0, "speed should not be trivial");
+    }
+
+    #[test]
+    fn dense_70b_does_not_use_moe_offload_on_8gb_vram() {
+        let result =
+            analyze_model(&dense_70b(), &rtx_3070_with_ram(), None).expect("model should analyze");
+        println!("{result:#?}");
+
+        assert_ne!(result.run_mode, RUN_MODE_MOE_OFFLOAD);
+        assert_ne!(result.run_mode, "gpu");
+        assert!(result.required_gb > 8.0);
+    }
+
+    #[test]
+    fn catalog_deepseek_v4_flash_uses_moe_offload_on_8gb_vram() {
+        let catalog = crate::models::load_catalog(&crate::models::default_catalog_path());
+        let model = catalog
+            .iter()
+            .find(|m| m.name == "deepseek-ai/DeepSeek-V4-Flash")
+            .expect("vendored DeepSeek V4 Flash row should exist");
+
+        let result =
+            analyze_model(model, &rtx_3070_with_ram(), None).expect("model should analyze");
+        assert_eq!(result.run_mode, RUN_MODE_MOE_OFFLOAD);
+        assert_ne!(result.fit_level, "too_tight");
+        assert!(result.required_gb <= 8.0);
+    }
+}
+
 /// SORT_KEYS: score->score, speed->speed_tps, vram->required_gb,
 /// params->params_b, context->context.
 pub fn sort_key(result: &FitResult, key: &str) -> f64 {
@@ -642,8 +857,7 @@ pub fn rank_models(
 
     // MLX-quantized models only run on Apple Silicon (Metal).
     let system_backend = system.backend.to_lowercase();
-    let apple_silicon =
-        matches!(system_backend.as_str(), "mps" | "metal" | "apple");
+    let apple_silicon = matches!(system_backend.as_str(), "mps" | "metal" | "apple");
 
     for m in models {
         let native_q = m.quantization.as_str();
@@ -701,7 +915,11 @@ pub fn rank_models(
     let limit = if opts.limit == 0 { 50 } else { opts.limit };
     results.truncate(limit);
 
-    let sort = if opts.sort.is_empty() { "score" } else { opts.sort };
+    let sort = if opts.sort.is_empty() {
+        "score"
+    } else {
+        opts.sort
+    };
     // vram ascending (smallest first), everything else descending (biggest first)
     if sort == "vram" {
         results.sort_by(|a, b| {
