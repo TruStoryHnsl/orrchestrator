@@ -13,12 +13,14 @@ cpal = "0.16"
 hf-hub = "0.4"
 hound = "3.5"
 orrch-core = { path = "../orrch-core" }
+reqwest.workspace = true
 rubato = "0.16"
 rusqlite.workspace = true
 safetensors = "0.5"
 serde.workspace = true
 serde_json.workspace = true
 tokenizers = "0.21"
+tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

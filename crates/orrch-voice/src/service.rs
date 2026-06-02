@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -45,12 +45,14 @@ impl VoiceConfig {
 }
 
 type UtteranceQueue = Arc<(Mutex<VecDeque<Utterance>>, Condvar)>;
+type UtteranceSubscribers = Arc<Mutex<Vec<mpsc::Sender<Utterance>>>>;
 
 #[derive(Clone)]
 pub struct VoiceService {
     config: VoiceConfig,
     toggle: ToggleState,
     queue: UtteranceQueue,
+    subscribers: UtteranceSubscribers,
     model_ready: Arc<AtomicBool>,
     engine: Arc<Mutex<Option<VoiceEngine>>>,
 }
@@ -61,6 +63,7 @@ impl VoiceService {
             config,
             toggle: ToggleState::new(),
             queue: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
+            subscribers: Arc::new(Mutex::new(Vec::new())),
             model_ready: Arc::new(AtomicBool::new(false)),
             engine: Arc::new(Mutex::new(None)),
         }
@@ -68,32 +71,49 @@ impl VoiceService {
 
     pub fn run(config: VoiceConfig) {
         let service = Self::new(config);
-        service.spawn_model_loader();
-        service.spawn_capture_loop();
-        if let Err(err) = service.serve_socket() {
+        if let Err(err) = service.start() {
             warn!("orrch-voice socket server exited: {err}");
         }
     }
 
+    pub fn start(&self) -> Result<()> {
+        self.spawn_model_loader();
+        self.spawn_capture_loop();
+        self.serve_socket()
+    }
+
+    /// Subscribe to in-process utterance delivery without consuming the socket
+    /// queue used by `VoiceRequest::NextUtterance`.
+    ///
+    /// When the control loop is enabled it should use this fan-out as the
+    /// primary utterance stream. The socket queue remains intact for manual
+    /// tools and session-driven polling.
+    pub fn subscribe_utterances(&self) -> mpsc::Receiver<Utterance> {
+        let (tx, rx) = mpsc::channel();
+        self.subscribers.lock().unwrap().push(tx);
+        rx
+    }
+
     pub fn serve_socket(&self) -> Result<()> {
-        bind_socket(&self.config.socket_path).with_context(|| {
-            format!(
-                "failed to bind voice socket {}",
-                self.config.socket_path.display()
-            )
-        })?
-        .incoming()
-        .for_each(|stream| match stream {
-            Ok(stream) => {
-                let service = self.clone();
-                std::thread::spawn(move || {
-                    if let Err(err) = service.handle_connection(stream) {
-                        warn!("voice socket connection failed: {err}");
-                    }
-                });
-            }
-            Err(err) => warn!("voice socket accept failed: {err}"),
-        });
+        bind_socket(&self.config.socket_path)
+            .with_context(|| {
+                format!(
+                    "failed to bind voice socket {}",
+                    self.config.socket_path.display()
+                )
+            })?
+            .incoming()
+            .for_each(|stream| match stream {
+                Ok(stream) => {
+                    let service = self.clone();
+                    std::thread::spawn(move || {
+                        if let Err(err) = service.handle_connection(stream) {
+                            warn!("voice socket connection failed: {err}");
+                        }
+                    });
+                }
+                Err(err) => warn!("voice socket accept failed: {err}"),
+            });
         Ok(())
     }
 
@@ -259,8 +279,11 @@ impl VoiceService {
             ts_ms: now_ms(),
         };
         let (queue, condvar) = &*self.queue;
-        queue.lock().unwrap().push_back(utterance);
+        queue.lock().unwrap().push_back(utterance.clone());
         condvar.notify_one();
+
+        let mut subscribers = self.subscribers.lock().unwrap();
+        subscribers.retain(|tx| tx.send(utterance.clone()).is_ok());
     }
 
     fn next_utterance(&self, timeout_ms: u64) -> Option<Utterance> {
@@ -341,7 +364,10 @@ mod tests {
 
         service.push_utterance_for_test("hello from test");
 
-        let response = send(&socket_path, VoiceRequest::NextUtterance { timeout_ms: 250 });
+        let response = send(
+            &socket_path,
+            VoiceRequest::NextUtterance { timeout_ms: 250 },
+        );
         match response {
             VoiceResponse::Utterance(Some(utterance)) => {
                 assert_eq!(utterance.text, "hello from test");
@@ -363,6 +389,25 @@ mod tests {
                 assert_eq!(model, "test-model");
                 assert_eq!(queued, 0);
             }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subscriber_receives_utterance_without_consuming_socket_queue() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket_path = temp.path().join("voice.sock");
+        let service = VoiceService::new(test_config(socket_path.clone()));
+        let rx = service.subscribe_utterances();
+
+        service.push_utterance_for_test("fan out");
+
+        let delivered = rx.recv_timeout(Duration::from_millis(250)).unwrap();
+        assert_eq!(delivered.text, "fan out");
+
+        let response = service.handle_request(VoiceRequest::NextUtterance { timeout_ms: 1 });
+        match response {
+            VoiceResponse::Utterance(Some(utterance)) => assert_eq!(utterance.text, "fan out"),
             other => panic!("unexpected response: {other:?}"),
         }
     }
