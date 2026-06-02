@@ -13,6 +13,8 @@ capabilities:
   - task_complexity_analysis
   - library_lookup
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # Resource Optimizer

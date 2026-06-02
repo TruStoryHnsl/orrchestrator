@@ -13,6 +13,8 @@ capabilities:
   - cross_platform_design
   - design_specification
 preferred_backend: claude
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 ---
 
 # UI Designer Agent

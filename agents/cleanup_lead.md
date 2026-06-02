@@ -15,6 +15,8 @@ capabilities:
   - dev_log_authorship
   - cleanup_summary_authorship
 preferred_backend: claude
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 ---
 
 # Cleanup Lead Agent

@@ -13,6 +13,8 @@ capabilities:
   - persona_development
   - competitive_ux_comparison
 preferred_backend: claude
+standard_engine: GPT-4o
+optimal_engine: GPT-4o
 ---
 
 # UX Specialist Agent

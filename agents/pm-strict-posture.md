@@ -4,6 +4,8 @@ posture: STRICT
 effective: 2026-05-14
 authority: user-direct
 review_cycle: per-deliverable
+standard_engine: Claude Sonnet 4.6
+optimal_engine: Claude Opus 4.6
 ---
 
 # PM Strict Posture — Architecture Stability & Performance

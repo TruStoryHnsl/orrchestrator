@@ -17,8 +17,10 @@ fn real_deepseek_files_parse() {
     assert_eq!(oll.location, EngineLocation::Gateway);
     assert_eq!(oll.api_key_env, None);
 
+    // ENG bindability fix: claude_opus.md now declares anthropic format + a
+    // base_url so the engine binding (engine_env) can target it explicitly.
     let opus = models.iter().find(|m| m.name == "Claude Opus 4.6").expect("opus present");
-    assert_eq!(opus.api_format, vec![ApiFormat::Cli]);
+    assert_eq!(opus.api_format, vec![ApiFormat::Anthropic]);
     assert_eq!(opus.location, EngineLocation::Cloud);
-    assert_eq!(opus.base_url, None);
+    assert_eq!(opus.base_url.as_deref(), Some("https://api.anthropic.com"));
 }

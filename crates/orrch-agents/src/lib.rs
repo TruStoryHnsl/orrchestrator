@@ -2,7 +2,7 @@ pub mod profile;
 pub mod department;
 pub mod runner;
 
-pub use profile::{AgentProfile, load_agents, agents_dir};
+pub use profile::{AgentProfile, Importance, agent_layer_engine, load_agents, agents_dir};
 pub use department::{Department, AgentRole};
 pub use runner::{
     AgentRunner,

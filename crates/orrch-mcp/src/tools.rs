@@ -1205,6 +1205,8 @@ fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
                 description: String::new(),
                 prompt: content,
                 path: path.clone(),
+                optimal_engine: None,
+                standard_engine: None,
             }
         }
     };
