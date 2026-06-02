@@ -102,3 +102,7 @@ compatibility.
 
 The parser is tolerant of the variants documented above so existing plans do not
 need to be rewritten before they can be tracked.
+
+Existing roadmap tables are also tolerated when a row has a status-marker cell,
+such as `| P1-01 | Initialize workspace | [ ] | INS-001 |`. Table rows outside
+roadmap phases remain prose and are ignored.

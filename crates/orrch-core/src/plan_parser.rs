@@ -16,16 +16,16 @@ pub enum RemovalContext {
 /// strikethrough=Deprecated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureStatus {
-    Planned,         // [ ] — not started
-    Implementing,    // [~] — work in progress
-    Implemented,     // [=] — code done, not tested
-    Testing,         // [t] — tests running
-    Verified,        // [v] — tests passed
-    UserConfirmed,   // [✓] — user manually confirmed
-    Done,            // [x] — shipped
-    Deprecated,      // strikethrough text
-    Pending,         // alias for Planned (backward compat)
-    InProgress,      // alias for Implementing (backward compat)
+    Planned,       // [ ] — not started
+    Implementing,  // [~] — work in progress
+    Implemented,   // [=] — code done, not tested
+    Testing,       // [t] — tests running
+    Verified,      // [v] — tests passed
+    UserConfirmed, // [✓] — user manually confirmed
+    Done,          // [x] — shipped
+    Deprecated,    // strikethrough text
+    Pending,       // alias for Planned (backward compat)
+    InProgress,    // alias for Implementing (backward compat)
     Removed(RemovalContext),
 }
 
@@ -66,7 +66,15 @@ impl FeatureStatus {
 
     /// Whether this status counts as "open" (still needs work).
     pub fn is_open(&self) -> bool {
-        matches!(self, Self::Planned | Self::Pending | Self::Implementing | Self::InProgress | Self::Implemented | Self::Testing)
+        matches!(
+            self,
+            Self::Planned
+                | Self::Pending
+                | Self::Implementing
+                | Self::InProgress
+                | Self::Implemented
+                | Self::Testing
+        )
     }
 
     /// The markdown checkbox marker for write-back.
@@ -79,7 +87,7 @@ impl FeatureStatus {
             Self::Verified => "[v]",
             Self::UserConfirmed => "[✓]",
             Self::Done => "[x]",
-            Self::Deprecated => "[ ]",   // deprecated indicated by strikethrough, not marker
+            Self::Deprecated => "[ ]", // deprecated indicated by strikethrough, not marker
             Self::Removed(_) => "[ ]",
         }
     }
@@ -190,26 +198,65 @@ pub fn parse_plan(content: &str) -> Vec<PlanPhase> {
     let mut phases: Vec<PlanPhase> = Vec::new();
     let mut current_phase: Option<PlanPhase> = None;
     let mut last_feature: Option<usize> = None; // index into current_phase.features for continuation lines
+    let mut region = RoadmapRegion::Outside;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Detect phase headers: ## Phase N: Name, ### Phase N: Name,
-        // or section headers like "### CRITICAL PATH ...", "### Cross-Cutting: ..."
-        if let Some(phase) = try_parse_phase_header(trimmed) {
-            // Save previous phase
-            if let Some(p) = current_phase.take() {
-                if !p.features.is_empty() {
-                    phases.push(p);
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            if level == 2 && is_roadmap_region_heading(heading) {
+                flush_phase(&mut phases, &mut current_phase);
+                region = RoadmapRegion::Explicit;
+                last_feature = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Outside && is_implicit_roadmap_phase(level, heading) {
+                flush_phase(&mut phases, &mut current_phase);
+                region = RoadmapRegion::Implicit;
+                current_phase = Some(parse_phase_heading(heading));
+                last_feature = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Explicit {
+                if level == 3 || (level == 2 && is_phase_like_heading(heading)) {
+                    flush_phase(&mut phases, &mut current_phase);
+                    current_phase = Some(parse_phase_heading(heading));
+                    last_feature = None;
+                    continue;
+                }
+
+                if level == 2 {
+                    flush_phase(&mut phases, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    last_feature = None;
+                    continue;
                 }
             }
-            current_phase = Some(phase);
+
+            if region == RoadmapRegion::Implicit {
+                if is_implicit_roadmap_phase(level, heading) {
+                    flush_phase(&mut phases, &mut current_phase);
+                    current_phase = Some(parse_phase_heading(heading));
+                    last_feature = None;
+                    continue;
+                }
+
+                if level <= 2 {
+                    flush_phase(&mut phases, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    last_feature = None;
+                    continue;
+                }
+            }
+
             last_feature = None;
             continue;
         }
 
         // Detect feature lines within a phase
-        if current_phase.is_some() {
+        if region != RoadmapRegion::Outside && current_phase.is_some() {
             if let Some(feature) = try_parse_feature_line(trimmed) {
                 let phase = current_phase.as_mut().unwrap();
                 phase.features.push(feature);
@@ -245,99 +292,132 @@ pub fn parse_plan(content: &str) -> Vec<PlanPhase> {
         }
     }
 
-    // Don't forget the last phase
-    if let Some(p) = current_phase {
-        if !p.features.is_empty() {
-            phases.push(p);
-        }
-    }
+    flush_phase(&mut phases, &mut current_phase);
 
     phases
 }
 
-/// Try to parse a line as a phase/section header.
-fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
-    // Must start with ## or ###
-    let rest = if let Some(r) = line.strip_prefix("### ") {
-        r
-    } else if let Some(r) = line.strip_prefix("## ") {
-        r
-    } else {
-        return None;
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoadmapRegion {
+    Outside,
+    Explicit,
+    Implicit,
+}
 
-    // Skip non-phase headings we don't want as phases
-    let lower = rest.to_lowercase();
-    if lower.starts_with("design decisions")
-        || lower.starts_with("architecture")
-        || lower.starts_with("key workflows")
-        || lower.starts_with("technical stack")
-        || lower.starts_with("keybindings")
-        || lower.starts_with("q1 ")
-        || lower.starts_with("q2 ")
-        || lower.starts_with("q3 ")
-        || lower.starts_with("q4 ")
-        || lower.starts_with("q5 ")
-        || lower.starts_with("q6 ")
-        || lower.starts_with("q7 ")
-        || lower.starts_with("q8 ")
-        || lower.starts_with("core concept")
-        || lower.starts_with("hard requirements")
-        || lower.starts_with("panel layout")
-        || lower.starts_with("crate structure")
-        || lower.starts_with("agent department")
-        || lower.starts_with("operation module")
-        || lower.starts_with("multi-backend")
-        || lower.starts_with("order of operations")
-    {
+fn flush_phase(phases: &mut Vec<PlanPhase>, current_phase: &mut Option<PlanPhase>) {
+    if let Some(p) = current_phase.take() {
+        if !p.features.is_empty() {
+            phases.push(p);
+        }
+    }
+}
+
+fn markdown_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|c| *c == '#').count();
+    if !(2..=6).contains(&level) {
         return None;
     }
 
-    // Try to extract "Phase N: Name" pattern
+    let rest = line.get(level..)?;
+    if !rest.starts_with(' ') {
+        return None;
+    }
+
+    Some((level, rest.trim()))
+}
+
+fn normalized_heading(heading: &str) -> String {
+    heading
+        .replace("~~", "")
+        .trim()
+        .trim_end_matches('#')
+        .trim()
+        .to_lowercase()
+}
+
+fn is_roadmap_region_heading(heading: &str) -> bool {
+    const ROADMAP_HEADINGS: &[&str] = &[
+        "feature roadmap",
+        "roadmap",
+        "development phases",
+        "phases",
+        "plan",
+        "milestones",
+        "critical path",
+    ];
+
+    let normalized = normalized_heading(heading);
+    ROADMAP_HEADINGS.iter().any(|candidate| {
+        normalized == *candidate
+            || normalized.strip_prefix(candidate).is_some_and(|rest| {
+                let rest = rest.trim_start();
+                rest.starts_with(':')
+                    || rest.starts_with('-')
+                    || rest.starts_with('—')
+                    || rest.starts_with('–')
+                    || rest.starts_with('(')
+            })
+    })
+}
+
+fn is_phase_like_heading(heading: &str) -> bool {
+    let lower = normalized_heading(heading);
+    lower.starts_with("phase ")
+        || lower.contains("critical path")
+        || lower.contains("cross-cutting")
+        || lower.contains("cross cutting")
+}
+
+fn is_implicit_roadmap_phase(level: usize, heading: &str) -> bool {
+    (level == 2 || level == 3) && is_phase_like_heading(heading)
+}
+
+/// Try to parse a line as a phase/section header.
+#[cfg(test)]
+fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
+    let (level, rest) = markdown_heading(line)?;
+    if level == 2 || level == 3 {
+        Some(parse_phase_heading(rest))
+    } else {
+        None
+    }
+}
+
+fn parse_phase_heading(heading: &str) -> PlanPhase {
+    let clean = heading.replace("~~", "").trim().to_string();
+    let lower = clean.to_lowercase();
+
     if let Some(after_phase) = lower.strip_prefix("phase ") {
-        // Find the number
-        let num_str: String = after_phase.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = after_phase
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         let number = num_str.parse::<u8>().ok();
 
-        // Name is everything after "Phase N: " or "Phase N — "
-        let name_start = rest.find(':').or_else(|| rest.find('—')).map(|i| i + rest[i..].chars().next().unwrap().len_utf8());
-        let name = if let Some(start) = name_start {
-            rest[start..].trim().to_string()
+        let name_start = clean
+            .find(':')
+            .or_else(|| clean.find('—'))
+            .or_else(|| clean.find('–'));
+        let name = if let Some(pos) = name_start {
+            clean[pos + clean[pos..].chars().next().unwrap().len_utf8()..]
+                .trim()
+                .to_string()
         } else {
-            rest.to_string()
+            clean.clone()
         };
 
-        return Some(PlanPhase {
+        return PlanPhase {
             name,
             number,
             features: Vec::new(),
-        });
+        };
     }
 
-    // Section headers like "CRITICAL PATH ...", "Cross-Cutting: ...", "Roadmap ...", etc.
-    // Accept them as phases if they contain feature-like content
-    if lower.contains("critical path")
-        || lower.contains("cross-cutting")
-        || lower.contains("roadmap")
-        || lower.contains("ui polish")
-        || lower.contains("carried forward")
-        || lower.starts_with("1.0.0")
-    {
-        // Clean up the name: strip markdown formatting
-        let name = rest
-            .replace("~~", "")
-            .trim()
-            .to_string();
-
-        // Try to extract a version number from names like "1.0.0 Feature Roadmap"
-        return Some(PlanPhase {
-            name,
-            number: None,
-            features: Vec::new(),
-        });
+    PlanPhase {
+        name: clean,
+        number: None,
+        features: Vec::new(),
     }
-
-    None
 }
 
 /// Try to parse a feature line.
@@ -360,6 +440,10 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     // bullets in other contexts are not mistaken for features.
 
     let trimmed = line.trim();
+
+    if let Some(feature) = try_parse_table_feature_line(trimmed) {
+        return Some(feature);
+    }
 
     // Strip the leading prefix to get to the checkbox
     let (id, rest) = strip_feature_prefix(trimmed)?;
@@ -414,13 +498,86 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     })
 }
 
+fn try_parse_table_feature_line(line: &str) -> Option<PlanFeature> {
+    if !line.starts_with('|') || !line.ends_with('|') {
+        return None;
+    }
+
+    let cells: Vec<&str> = line
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim())
+        .collect();
+
+    if cells.len() < 3
+        || cells
+            .iter()
+            .all(|cell| !cell.is_empty() && cell.chars().all(|c| c == '-' || c == ':' || c == ' '))
+    {
+        return None;
+    }
+
+    let status_cell = cells
+        .iter()
+        .position(|cell| parse_status_cell(cell).is_some())?;
+    let (status, _) = parse_status_cell(cells[status_cell])?;
+
+    let title_cell = if cells.len() >= 2 && cells[0].eq_ignore_ascii_case("id") {
+        return None;
+    } else if status_cell >= 1 {
+        cells.get(1).copied().unwrap_or("")
+    } else {
+        cells
+            .iter()
+            .enumerate()
+            .find(|(idx, cell)| *idx != status_cell && !cell.is_empty())
+            .map(|(_, cell)| *cell)
+            .unwrap_or("")
+    };
+
+    let (title, parsed_description) = parse_title_description(title_cell);
+    if title.is_empty() {
+        return None;
+    }
+
+    let id = cells.first().and_then(|cell| cell.parse::<u32>().ok());
+    let description = if parsed_description.is_empty() {
+        cells
+            .iter()
+            .enumerate()
+            .filter(|(idx, cell)| *idx != status_cell && *idx != 0 && *idx != 1 && !cell.is_empty())
+            .map(|(_, cell)| *cell)
+            .collect::<Vec<_>>()
+            .join(" | ")
+    } else {
+        parsed_description
+    };
+    let user_verified = status == FeatureStatus::Verified;
+
+    Some(PlanFeature {
+        id,
+        title,
+        description,
+        status,
+        user_verified,
+    })
+}
+
+fn parse_status_cell(cell: &str) -> Option<(FeatureStatus, usize)> {
+    let trimmed = cell.trim().trim_matches('`').trim();
+    parse_status_marker(trimmed)
+}
+
 /// Strip the leading numbering prefix and return (optional id, remaining text).
 fn strip_feature_prefix(line: &str) -> Option<(Option<u32>, &str)> {
     let trimmed = line.trim_start();
 
     // "CP-N." prefix
     if let Some(after_cp) = trimmed.strip_prefix("CP-") {
-        let num_str: String = after_cp.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = after_cp
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if !num_str.is_empty() {
             let after_num = &after_cp[num_str.len()..];
             let rest = after_num.trim_start_matches('.').trim_start();
@@ -535,7 +692,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 } else {
                     let last_feat = prev_phase.features.last().unwrap();
@@ -544,7 +705,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target } else { target + 1 };
+                    let insert_at = if source_line < target {
+                        target
+                    } else {
+                        target + 1
+                    };
                     new_lines.insert(insert_at, removed);
                 }
             } else {
@@ -569,7 +734,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 } else {
                     let first_feat = &next_phase.features[0];
@@ -578,7 +747,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 }
             } else {
@@ -616,7 +789,8 @@ pub fn append_feature_to_plan(
     let lines: Vec<&str> = contents.lines().collect();
 
     // Compute next feature number: max across ALL phases + 1
-    let max_id = phases.iter()
+    let max_id = phases
+        .iter()
         .flat_map(|p| p.features.iter())
         .filter_map(|f| f.id)
         .max()
@@ -767,7 +941,9 @@ fn find_feature_line(lines: &[&str], title: &str) -> Option<usize> {
 fn find_phase_header_line(lines: &[&str], phase_name: &str) -> Option<usize> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if (trimmed.starts_with("## ") || trimmed.starts_with("### ")) && trimmed.contains(phase_name) {
+        if (trimmed.starts_with("## ") || trimmed.starts_with("### "))
+            && trimmed.contains(phase_name)
+        {
             return Some(i);
         }
     }
@@ -780,7 +956,8 @@ mod tests {
 
     #[test]
     fn test_parse_done_feature() {
-        let f = try_parse_feature_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
+        let f =
+            try_parse_feature_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
         assert_eq!(f.id, Some(1));
         assert_eq!(f.title, "Core process manager");
         assert_eq!(f.status, FeatureStatus::Done);
@@ -788,7 +965,8 @@ mod tests {
 
     #[test]
     fn test_parse_pending_feature() {
-        let f = try_parse_feature_line("44. [ ] **Plan.md syntax parser** — parse into tree").unwrap();
+        let f =
+            try_parse_feature_line("44. [ ] **Plan.md syntax parser** — parse into tree").unwrap();
         assert_eq!(f.id, Some(44));
         assert_eq!(f.title, "Plan.md syntax parser");
         assert_eq!(f.status, FeatureStatus::Planned);
@@ -796,13 +974,18 @@ mod tests {
 
     #[test]
     fn test_parse_deprecated() {
-        let f = try_parse_feature_line("15. [ ] **Template selector** — *DEPRECATED. Replaced by CP-4.*").unwrap();
+        let f = try_parse_feature_line(
+            "15. [ ] **Template selector** — *DEPRECATED. Replaced by CP-4.*",
+        )
+        .unwrap();
         assert_eq!(f.status, FeatureStatus::Deprecated);
     }
 
     #[test]
     fn test_parse_cp_feature() {
-        let f = try_parse_feature_line("CP-1. [x] **Workflow skills** — Convert workflow definitions").unwrap();
+        let f =
+            try_parse_feature_line("CP-1. [x] **Workflow skills** — Convert workflow definitions")
+                .unwrap();
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Workflow skills");
         assert_eq!(f.status, FeatureStatus::Done);
@@ -810,7 +993,8 @@ mod tests {
 
     #[test]
     fn test_parse_unnumbered() {
-        let f = try_parse_feature_line("- [ ] **Agent profile management** — swappable profiles").unwrap();
+        let f = try_parse_feature_line("- [ ] **Agent profile management** — swappable profiles")
+            .unwrap();
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Agent profile management");
         assert_eq!(f.status, FeatureStatus::Planned);
@@ -878,14 +1062,18 @@ mod tests {
 
     #[test]
     fn test_phase_header() {
-        let p = try_parse_phase_header("## Phase 4: Multi-Provider & Resource Management (1.5.0)").unwrap();
+        let p = try_parse_phase_header("## Phase 4: Multi-Provider & Resource Management (1.5.0)")
+            .unwrap();
         assert_eq!(p.number, Some(4));
         assert!(p.name.contains("Multi-Provider"));
     }
 
     #[test]
     fn test_critical_path_header() {
-        let p = try_parse_phase_header("### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)").unwrap();
+        let p = try_parse_phase_header(
+            "### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)",
+        )
+        .unwrap();
         assert!(p.name.contains("CRITICAL PATH"));
         assert_eq!(p.number, None);
     }
@@ -904,9 +1092,15 @@ mod tests {
         let feats = &phases[0].features;
         assert_eq!(feats.len(), 2);
         assert_eq!(feats[0].status, FeatureStatus::Verified);
-        assert!(feats[0].user_verified, "[v] feature should be user_verified");
+        assert!(
+            feats[0].user_verified,
+            "[v] feature should be user_verified"
+        );
         assert_eq!(feats[1].status, FeatureStatus::Done);
-        assert!(!feats[1].user_verified, "[x] feature must not be user_verified");
+        assert!(
+            !feats[1].user_verified,
+            "[x] feature must not be user_verified"
+        );
     }
 
     #[test]
@@ -930,7 +1124,10 @@ mod tests {
 
         let after = std::fs::read_to_string(&plan_path).unwrap();
         let expected = "# Plan\n\n## Phase 0: Test\n\n1. [v] **My Feature** — did a thing\n2. [x] **Other Feature** — untouched\n";
-        assert_eq!(after, expected, "only the matched line's [x] should become [v]");
+        assert_eq!(
+            after, expected,
+            "only the matched line's [x] should become [v]"
+        );
 
         // Idempotency: second call should find no `[x]` matching the title and return false.
         let changed2 = mark_verified_in_plan(&plan_path, "My Feature").unwrap();
@@ -975,7 +1172,10 @@ mod tests {
         // previously panicked at `&s[..3]` because byte 3 lands inside the
         // codepoint. Observed crash on 2026-04-27 against the line
         // "🟢 WebUI port: PM proposes 8492. ..." in PLAN.md.
-        assert_eq!(parse_status_marker("🟢 WebUI port: PM proposes 8492."), None);
+        assert_eq!(
+            parse_status_marker("🟢 WebUI port: PM proposes 8492."),
+            None
+        );
         assert_eq!(parse_status_marker("é foo"), None);
     }
 }
