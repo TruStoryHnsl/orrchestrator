@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use candle_core::{Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self, Config};
-use hf_hub::{api::sync::Api, Repo};
+use hf_hub::{Repo, RepoType, api::sync::Api};
 use tokenizers::Tokenizer;
 use tracing::{debug, info, warn};
 
@@ -65,16 +65,13 @@ pub struct VoiceEngine {
     language: String,
     initial_prompt: Option<String>,
     suppress_tokens: Tensor,
+    begin_suppress_tokens: Tensor,
     config: Config,
     is_english_only: bool,
 }
 
 impl VoiceEngine {
-    pub fn load(
-        model_id: &str,
-        language: &str,
-        initial_prompt: Option<String>,
-    ) -> Result<Self> {
+    pub fn load(model_id: &str, language: &str, initial_prompt: Option<String>) -> Result<Self> {
         let device = select_device();
         info!("Loading Whisper model on {}", device_label(&device));
 
@@ -86,7 +83,13 @@ impl VoiceEngine {
         let is_quantized = is_direct_gguf || is_dir_gguf;
 
         let (config, tokenizer, model) = if is_local {
-            load_local_model(model_path, is_direct_gguf, is_dir_gguf, is_quantized, &device)?
+            load_local_model(
+                model_path,
+                is_direct_gguf,
+                is_dir_gguf,
+                is_quantized,
+                &device,
+            )?
         } else {
             load_hf_model(model_id, &device)?
         };
@@ -96,7 +99,9 @@ impl VoiceEngine {
             info!("Detected English-only Whisper model");
         }
 
-        let suppress_tokens = build_suppress_mask(&tokenizer, &device)?;
+        let suppress_tokens = build_suppress_mask(&tokenizer, config.vocab_size, &device)?;
+        let begin_suppress_tokens =
+            build_begin_suppress_mask(&tokenizer, config.vocab_size, &device)?;
 
         info!(
             "Whisper model loaded: mel_bins={}, vocab={}, device={}",
@@ -112,6 +117,7 @@ impl VoiceEngine {
             language: language.to_string(),
             initial_prompt,
             suppress_tokens,
+            begin_suppress_tokens,
             config,
             is_english_only,
         })
@@ -178,26 +184,17 @@ impl VoiceEngine {
         let padded_audio = pad_chunk(audio);
         let filters = mel_filters(self.config.num_mel_bins)?;
         let mel_data = whisper::audio::pcm_to_mel(&self.config, &padded_audio, &filters);
-        let frames = mel_data
-            .len()
-            .checked_div(self.config.num_mel_bins)
-            .context("invalid mel shape")?;
+        let (frames, mel_data) =
+            normalize_mel_frames(mel_data, self.config.num_mel_bins, whisper::N_FRAMES)?;
 
         if frames == 0 {
             anyhow::bail!("empty mel spectrogram");
         }
 
-        debug!(
-            "Mel spectrogram: {}x{}",
-            self.config.num_mel_bins, frames
-        );
+        debug!("Mel spectrogram: {}x{}", self.config.num_mel_bins, frames);
 
-        let mel = Tensor::from_vec(
-            mel_data,
-            (self.config.num_mel_bins, frames),
-            &self.device,
-        )?
-        .unsqueeze(0)?;
+        let mel = Tensor::from_vec(mel_data, (self.config.num_mel_bins, frames), &self.device)?
+            .unsqueeze(0)?;
 
         self.decode_with_fallback(&mel)
     }
@@ -268,11 +265,17 @@ impl VoiceEngine {
             let decoder_output =
                 self.model
                     .decoder_forward(&input, &audio_features, iteration == 0)?;
-            let logits = self.model.decoder_final_linear(&decoder_output)?.squeeze(0)?;
+            let logits = self
+                .model
+                .decoder_final_linear(&decoder_output)?
+                .squeeze(0)?;
             let seq_len = logits.dim(0)?;
             let mut last_logit = logits.i((seq_len - 1, ..))?;
 
             last_logit = last_logit.broadcast_add(&self.suppress_tokens)?;
+            if iteration == 0 {
+                last_logit = last_logit.broadcast_add(&self.begin_suppress_tokens)?;
+            }
             if temperature > 0.0 {
                 last_logit = (last_logit / temperature)?;
             }
@@ -356,7 +359,7 @@ impl VoiceEngine {
 fn load_hf_model(model_id: &str, device: &Device) -> Result<(Config, Tokenizer, Model)> {
     info!("Downloading/loading Hugging Face model: {model_id}");
     let api = Api::new()?;
-    let repo = api.repo(Repo::model(model_id.to_string()));
+    let repo = api.repo(hf_repo(model_id));
     let config_path = repo.get("config.json")?;
     let tokenizer_path = repo.get("tokenizer.json")?;
     let config: Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
@@ -426,12 +429,33 @@ fn load_local_config_tokenizer(model_dir: &Path) -> Result<(Config, Tokenizer)> 
 
 fn load_hf_config_tokenizer(model_id: &str) -> Result<(Config, Tokenizer)> {
     let api = Api::new()?;
-    let repo = api.repo(Repo::model(model_id.to_string()));
+    let repo = api.repo(hf_repo(model_id));
     let config_path = repo.get("config.json")?;
     let tokenizer_path = repo.get("tokenizer.json")?;
     let config: Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
     let tokenizer = load_tokenizer(&tokenizer_path)?;
     Ok((config, tokenizer))
+}
+
+fn hf_repo(model_id: &str) -> Repo {
+    match candle_revision(model_id) {
+        Some(revision) => {
+            Repo::with_revision(model_id.to_string(), RepoType::Model, revision.to_string())
+        }
+        None => Repo::model(model_id.to_string()),
+    }
+}
+
+fn candle_revision(model_id: &str) -> Option<&'static str> {
+    match model_id {
+        "openai/whisper-tiny.en" => Some("refs/pr/15"),
+        "openai/whisper-base" => Some("refs/pr/22"),
+        "openai/whisper-base.en" => Some("refs/pr/13"),
+        "openai/whisper-small.en" => Some("refs/pr/10"),
+        "openai/whisper-large" => Some("refs/pr/36"),
+        "openai/whisper-large-v2" => Some("refs/pr/57"),
+        _ => None,
+    }
 }
 
 fn load_tokenizer(path: &Path) -> Result<Tokenizer> {
@@ -448,9 +472,10 @@ fn load_normal_model(paths: Vec<PathBuf>, config: &Config, device: &Device) -> R
 
 fn load_quantized_model(path: &Path, config: &Config, device: &Device) -> Result<Model> {
     let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(path, device)?;
-    Ok(Model::Quantized(
-        whisper::quantized_model::Whisper::load(&vb, config.clone())?,
-    ))
+    Ok(Model::Quantized(whisper::quantized_model::Whisper::load(
+        &vb,
+        config.clone(),
+    )?))
 }
 
 fn is_valid_gguf(path: &Path) -> bool {
@@ -470,8 +495,22 @@ fn is_english_only_model(model_id: &str) -> bool {
         || model_id.contains("whisper-medium-en")
 }
 
-fn build_suppress_mask(tokenizer: &Tokenizer, device: &Device) -> Result<Tensor> {
-    let mask = build_suppress_mask_values(tokenizer.get_vocab_size(true), no_ts_token(tokenizer)?);
+fn build_suppress_mask(
+    tokenizer: &Tokenizer,
+    vocab_size: usize,
+    device: &Device,
+) -> Result<Tensor> {
+    let mask = build_suppress_mask_values(vocab_size, no_ts_token(tokenizer)?);
+    Ok(Tensor::new(mask.as_slice(), device)?)
+}
+
+fn build_begin_suppress_mask(
+    tokenizer: &Tokenizer,
+    vocab_size: usize,
+    device: &Device,
+) -> Result<Tensor> {
+    let mask =
+        build_begin_suppress_mask_values(vocab_size, token_id(tokenizer, whisper::EOT_TOKEN)?);
     Ok(Tensor::new(mask.as_slice(), device)?)
 }
 
@@ -486,10 +525,25 @@ fn build_suppress_mask_values(vocab_size: usize, no_ts_token: u32) -> Vec<f32> {
     mask
 }
 
+fn build_begin_suppress_mask_values(vocab_size: usize, eot_token: u32) -> Vec<f32> {
+    let mut mask = vec![0f32; vocab_size];
+    if 220 < vocab_size {
+        mask[220] = f32::NEG_INFINITY;
+    }
+    if (eot_token as usize) < vocab_size {
+        mask[eot_token as usize] = f32::NEG_INFINITY;
+    }
+    mask
+}
+
 fn no_ts_token(tokenizer: &Tokenizer) -> Result<u32> {
+    token_id(tokenizer, whisper::NO_TIMESTAMPS_TOKEN)
+}
+
+fn token_id(tokenizer: &Tokenizer, token: &str) -> Result<u32> {
     tokenizer
-        .token_to_id(whisper::NO_TIMESTAMPS_TOKEN)
-        .ok_or_else(|| anyhow::anyhow!("{} token not found", whisper::NO_TIMESTAMPS_TOKEN))
+        .token_to_id(token)
+        .ok_or_else(|| anyhow::anyhow!("{token} token not found"))
 }
 
 fn pad_chunk(audio: &[f32]) -> Vec<f32> {
@@ -509,6 +563,34 @@ fn mel_filters(num_mel_bins: usize) -> Result<Vec<f32>> {
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect())
+}
+
+fn normalize_mel_frames(
+    mel_data: Vec<f32>,
+    num_mel_bins: usize,
+    target_frames: usize,
+) -> Result<(usize, Vec<f32>)> {
+    let frames = mel_data
+        .len()
+        .checked_div(num_mel_bins)
+        .context("invalid mel shape")?;
+    if frames == target_frames {
+        return Ok((frames, mel_data));
+    }
+
+    let mut normalized = Vec::with_capacity(num_mel_bins * target_frames);
+    for mel_bin in 0..num_mel_bins {
+        let start = mel_bin * frames;
+        let end = start + frames;
+        let row = &mel_data[start..end];
+        if frames > target_frames {
+            normalized.extend_from_slice(&row[..target_frames]);
+        } else {
+            normalized.extend_from_slice(row);
+            normalized.extend(std::iter::repeat_n(0.0, target_frames - frames));
+        }
+    }
+    Ok((target_frames, normalized))
 }
 
 #[derive(Debug, Clone)]
@@ -582,6 +664,14 @@ mod tests {
     }
 
     #[test]
+    fn begin_suppress_mask_blocks_blank_and_eot_only() {
+        let mask = build_begin_suppress_mask_values(300, 100);
+        assert_eq!(mask[100], f32::NEG_INFINITY);
+        assert_eq!(mask[220], f32::NEG_INFINITY);
+        assert_eq!(mask[221], 0.0);
+    }
+
+    #[test]
     fn english_only_prefix_omits_language_and_task_tokens() {
         let special = special_tokens();
         let prefix = build_decoder_prefix(&[], &special, true);
@@ -628,5 +718,13 @@ mod tests {
     fn mel_filters_match_expected_lengths() {
         assert_eq!(mel_filters(80).unwrap().len(), 80 * 201);
         assert_eq!(mel_filters(128).unwrap().len(), 128 * 201);
+    }
+
+    #[test]
+    fn normalize_mel_frames_trims_each_mel_row() {
+        let mel = vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0];
+        let (frames, normalized) = normalize_mel_frames(mel, 2, 3).unwrap();
+        assert_eq!(frames, 3);
+        assert_eq!(normalized, vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0]);
     }
 }

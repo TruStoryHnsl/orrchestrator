@@ -34,9 +34,8 @@ pub fn list_input_devices() -> Vec<String> {
 pub fn capture(duration_secs: u32, device_name: Option<&str>) -> Result<Vec<f32>> {
     info!("Starting fixed audio capture: {duration_secs}s");
     let setup = setup_audio_device(device_name)?;
-    let expected_samples = setup.sample_rate as usize
-        * duration_secs as usize
-        * usize::from(setup.channels);
+    let expected_samples =
+        setup.sample_rate as usize * duration_secs as usize * usize::from(setup.channels);
     let buffer = Arc::new(Mutex::new(Vec::with_capacity(expected_samples)));
     let started = Arc::new(AtomicBool::new(false));
 
@@ -92,7 +91,10 @@ fn setup_audio_device(device_name: Option<&str>) -> Result<AudioSetup> {
 
     info!(
         "Audio input: {} ({}Hz, {}ch, {})",
-        setup.device.name().unwrap_or_else(|_| "unknown".to_string()),
+        setup
+            .device
+            .name()
+            .unwrap_or_else(|_| "unknown".to_string()),
         setup.sample_rate,
         setup.channels,
         setup.sample_format
@@ -179,8 +181,7 @@ fn finish_capture(buffer: Arc<Mutex<Vec<f32>>>, setup: &AudioSetup) -> Result<Ve
     let samples = Arc::try_unwrap(buffer)
         .map(|mutex| mutex.into_inner().unwrap())
         .unwrap_or_else(|buffer| buffer.lock().unwrap().clone());
-    let duration =
-        samples.len() as f32 / (setup.sample_rate * u32::from(setup.channels)) as f32;
+    let duration = samples.len() as f32 / (setup.sample_rate * u32::from(setup.channels)) as f32;
     info!(
         "Captured {} interleaved samples ({duration:.2}s)",
         samples.len()
@@ -203,7 +204,11 @@ fn to_mono(samples: Vec<f32>, channels: u16) -> Vec<f32> {
         .collect()
 }
 
-fn finalize_audio_samples(samples: Vec<f32>, source_rate: u32, target_rate: u32) -> Result<Vec<f32>> {
+fn finalize_audio_samples(
+    samples: Vec<f32>,
+    source_rate: u32,
+    target_rate: u32,
+) -> Result<Vec<f32>> {
     if samples.is_empty() {
         warn!("No audio captured");
         return Ok(Vec::new());

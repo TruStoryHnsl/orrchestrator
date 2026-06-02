@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VocabEntry {
