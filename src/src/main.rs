@@ -39,6 +39,20 @@ async fn main() -> Result<()> {
         })
         .init();
 
+    let migration_report = orrch_core::migrate_context();
+    tracing::info!(
+        "context migration: {} moved, {} conflicts, {} skipped",
+        migration_report.moved.len(),
+        migration_report.conflicts.len(),
+        migration_report.skipped
+    );
+    if !migration_report.conflicts.is_empty() {
+        tracing::warn!(
+            "context migration preserved {} conflicting legacy artifact(s)",
+            migration_report.conflicts.len()
+        );
+    }
+
     // Start the staleness monitor early. Reads compile-time env vars
     // (ORRCH_BUILD_TIMESTAMP_NS / ORRCH_BUILD_REPO_ROOT) injected by
     // src/build.rs. The monitor spawns a background thread that polls
