@@ -14,6 +14,7 @@ egui-window = ["dep:eframe", "dep:egui"]
 orrch-core = { path = "../orrch-core" }
 orrch-workforce = { path = "../orrch-workforce" }
 orrch-library = { path = "../orrch-library" }
+orrch-hwfit = { path = "../orrch-hwfit" }
 orrch-retrospect = { path = "../orrch-retrospect" }
 orrch-webedit = { path = "../orrch-webedit" }
 orrch-webui = { path = "../orrch-webui" }

@@ -1654,6 +1654,7 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         .flat_map(|sub| {
             let sel = *sub == app.library_sub;
             let count = match sub {
+                LibrarySub::Fit => app.fit_results.len(),
                 LibrarySub::Agents => app.agent_profiles.len(),
                 LibrarySub::Models => app.library_models.len(),
                 LibrarySub::Harnesses => app.library_harnesses.len(),
@@ -1684,7 +1685,18 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(outer[1]);
 
+    // HWF-005: lazy-probe the selected machine on first view of the Fit tab and
+    // whenever the selected machine changes. refresh_fit reuses the per-host
+    // 30-min probe cache (fresh=false), so this is NOT a per-frame re-probe.
+    if app.library_sub == crate::app::LibrarySub::Fit {
+        let cur = app.fit_registry.all().get(app.fit_machine_idx).map(|m| m.name.clone());
+        if app.fit_probed_machine != cur {
+            app.refresh_fit(false);
+        }
+    }
+
     match app.library_sub {
+        LibrarySub::Fit => draw_library_fit(frame, app, chunks[0], chunks[1]),
         LibrarySub::Agents => draw_library_agents(frame, app, chunks[0], chunks[1]),
         LibrarySub::Models => draw_library_models(frame, app, chunks[0], chunks[1]),
         LibrarySub::Harnesses => draw_library_harnesses(frame, app, chunks[0], chunks[1]),
@@ -1812,6 +1824,145 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
         lines
     } else { vec![Line::styled("No model selected", Style::default().fg(TEXT_MUTED))] };
     frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+/// HWF-005: hardware-fit assessment panel. LIST area = machine selector header +
+/// ranked model table; PREVIEW area = details for the selected row.
+fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    // Color helper for fit_level → severity color.
+    fn fit_color(level: &str) -> Color {
+        match level {
+            "perfect" => GREEN,
+            "good" => CYAN,
+            "marginal" => WAITING_COLOR,
+            _ => ACCENT, // "too_tight" / "no_fit"
+        }
+    }
+
+    let machines = app.fit_registry.all();
+    let machine_name = machines
+        .get(app.fit_machine_idx)
+        .map(|m| m.name.clone())
+        .unwrap_or_else(|| "localhost".into());
+
+    // ── header (3 lines) ───────────────────────────────────────────────
+    let mut header: Vec<Line> = Vec::new();
+    header.push(Line::from(vec![
+        Span::styled(" Machine: ", Style::default().fg(TEXT)),
+        Span::styled(machine_name.clone(), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(" (m/M switch · R rescan)", Style::default().fg(TEXT_DIM)),
+    ]));
+    // probe summary line
+    let summary_line = match &app.fit_system {
+        Some(sys) if sys.error.is_some() => Line::styled(
+            format!(" {}", sys.error.as_deref().unwrap_or("probe error")),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Some(sys) => {
+            let gpu = match (&sys.gpu_name, sys.gpu_vram_gb) {
+                (Some(name), Some(v)) => format!("{} {:.1}GB", name, v),
+                (Some(name), None) => name.clone(),
+                _ => "no GPU".to_string(),
+            };
+            Line::styled(
+                format!(" {} · {:.1}GB RAM · {}", sys.backend, sys.total_ram_gb, gpu),
+                Style::default().fg(TEXT),
+            )
+        }
+        None => Line::styled(" probing…", Style::default().fg(TEXT_DIM)),
+    };
+    header.push(summary_line);
+    // column headers
+    header.push(Line::styled(
+        format!(
+            " {:<20}{:<10}{:<12}{:<10}{:<8}{:<10}{:<8}{:<6}",
+            "model", "fit", "run_mode", "quant", "ctx", "req_gb", "tok/s", "score"
+        ),
+        Style::default().fg(TEXT_DIM).add_modifier(Modifier::BOLD),
+    ));
+
+    // ── table rows (scrolled by fit_row) ───────────────────────────────
+    // Available height = list_area minus 2 borders minus 3 header lines.
+    let body_rows = list_area.height.saturating_sub(2).saturating_sub(3) as usize;
+    let scroll_offset = if app.fit_row >= body_rows && body_rows > 0 {
+        app.fit_row - body_rows + 1
+    } else {
+        0
+    };
+
+    let mut lines: Vec<Line> = header;
+    if app.fit_results.is_empty() {
+        lines.push(Line::styled(
+            "  No fit results — press R to scan",
+            Style::default().fg(TEXT_MUTED),
+        ));
+    } else {
+        for (i, r) in app.fit_results.iter().enumerate().skip(scroll_offset).take(body_rows.max(1)) {
+            let sel = app.fit_row == i;
+            let marker = if sel { "■ " } else { "  " };
+            let base = if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT)
+            };
+            let name_trunc: String = if r.name.chars().count() > 17 {
+                format!("{}…", r.name.chars().take(16).collect::<String>())
+            } else {
+                r.name.clone()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{marker}{:<18}", name_trunc), base),
+                Span::styled(format!("{:<10}", r.fit_level), Style::default().fg(fit_color(&r.fit_level))),
+                Span::styled(format!("{:<12}", r.run_mode), Style::default().fg(TEXT_DIM)),
+                Span::styled(format!("{:<10}", r.quant), Style::default().fg(TEXT)),
+                Span::styled(format!("{:<8}", r.context), Style::default().fg(TEXT)),
+                Span::styled(format!("{:<10.1}", r.required_gb), Style::default().fg(TEXT)),
+                Span::styled(format!("{:<8.1}", r.speed_tps), Style::default().fg(TEXT)),
+                Span::styled(format!("{:<6.1}", r.score), base),
+            ]));
+        }
+    }
+
+    let title = format!(" Fit — {} ({} models) ", machine_name, app.fit_results.len());
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
+
+    // ── preview: details for selected row ──────────────────────────────
+    let preview = if let Some(r) = app.fit_results.get(app.fit_row) {
+        vec![
+            Line::styled(&r.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("Provider: {}", r.provider), Style::default().fg(TEXT)),
+            Line::styled(format!("Params: {:.1}B", r.params_b), Style::default().fg(TEXT)),
+            Line::styled(format!("MoE: {}", r.is_moe), Style::default().fg(TEXT)),
+            Line::styled(format!("Use case: {}", r.use_case), Style::default().fg(TEXT)),
+            Line::raw(""),
+            Line::styled(format!("Fit level: {}", r.fit_level), Style::default().fg(fit_color(&r.fit_level)).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("Run mode: {}", r.run_mode), Style::default().fg(TEXT)),
+            Line::styled(format!("Quant: {}", r.quant), Style::default().fg(TEXT)),
+            Line::styled(format!("Context length: {}", r.context_length), Style::default().fg(TEXT)),
+            Line::styled(format!("Required: {:.1}GB", r.required_gb), Style::default().fg(TEXT)),
+            Line::styled(format!("Speed: {:.1} tok/s", r.speed_tps), Style::default().fg(TEXT)),
+            Line::raw(""),
+            Line::styled("Scores:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Line::styled(format!("  quality: {:.1}", r.scores.quality), Style::default().fg(TEXT_DIM)),
+            Line::styled(format!("  speed:   {:.1}", r.scores.speed), Style::default().fg(TEXT_DIM)),
+            Line::styled(format!("  fit:     {:.1}", r.scores.fit), Style::default().fg(TEXT_DIM)),
+            Line::styled(format!("  context: {:.1}", r.scores.context), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled(format!("Composite score: {:.1}", r.score), Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
+        ]
+    } else {
+        vec![Line::styled("No machine probed", Style::default().fg(TEXT_MUTED))]
+    };
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(Block::default().title(" Fit Details (PgUp/PgDn) ").borders(Borders::ALL))
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 fn draw_library_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
