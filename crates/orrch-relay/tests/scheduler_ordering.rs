@@ -3,7 +3,7 @@
 use orrch_relay::clock::SystemClock;
 use orrch_relay::engine::MockEngine;
 use orrch_relay::scheduler::{Scheduler, SchedulerPolicy};
-use orrch_relay::types::{AffinityDescriptor, ChatMessage, CompletionRequest, QueuedRequest, TokenEvent};
+use orrch_relay::types::{AffinityDescriptor, ChatMessage, CompletionRequest, QueuedRequest};
 use orrch_relay::worker::Worker;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};

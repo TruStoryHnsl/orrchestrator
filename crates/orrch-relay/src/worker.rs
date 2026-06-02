@@ -41,11 +41,11 @@ impl<C: Clock + 'static> Worker<C> {
     /// Enqueue a request with its descriptor. Errors if the queue is full.
     pub async fn submit(&self, qr: QueuedRequest, desc: AffinityDescriptor) -> Result<(), EnqueueError> {
         let id = qr.id;
-        {
-            let mut s = self.sched.lock().await;
-            s.enqueue(id, desc)?;
-        }
         self.pending.lock().await.insert(id, qr);
+        if let Err(e) = self.sched.lock().await.enqueue(id, desc) {
+            self.pending.lock().await.remove(&id);
+            return Err(e);
+        }
         self.notify.notify_one();
         Ok(())
     }

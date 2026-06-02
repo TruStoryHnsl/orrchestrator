@@ -4,9 +4,10 @@ use crate::server::RelayState;
 use crate::types::{CompletionRequest, QueuedRequest, TokenEvent};
 use axum::{
     extract::State,
+    http::StatusCode,
     response::{
         sse::{Event, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -14,7 +15,6 @@ use axum::{
 use futures::stream::Stream;
 use futures::StreamExt;
 use std::convert::Infallible;
-use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -36,17 +36,19 @@ async fn models() -> impl IntoResponse {
 async fn chat_completions(
     State(state): State<RelayState>,
     Json(req): Json<CompletionRequest>,
-) -> impl IntoResponse {
-    let id = state.next_id.fetch_add(1, Ordering::SeqCst);
+) -> Response {
+    let id = state.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let desc = classify(&req, state.embedder.as_ref()).await;
     let (tx, rx) = mpsc::channel::<TokenEvent>(64);
     let qr = QueuedRequest { id, request: req, tx };
     if state.worker.submit(qr, desc).await.is_err() {
-        let (etx, erx) = mpsc::channel::<TokenEvent>(1);
-        let _ = etx.send(TokenEvent::Error("queue full (429)".into())).await;
-        return sse_from(erx);
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({ "error": { "message": "relay queue full", "type": "rate_limit_exceeded" } })),
+        )
+            .into_response();
     }
-    sse_from(rx)
+    sse_from(rx).into_response()
 }
 
 fn sse_from(rx: mpsc::Receiver<TokenEvent>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -60,5 +62,7 @@ fn sse_from(rx: mpsc::Receiver<TokenEvent>) -> Sse<impl Stream<Item = Result<Eve
         };
         Ok(Event::default().data(data))
     });
-    Sse::new(stream)
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
+    )
 }

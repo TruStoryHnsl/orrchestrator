@@ -40,38 +40,46 @@ impl Engine for OpenAiEngine {
         }
         let resp = rb.send().await?.error_for_status()?;
         let byte_stream = resp.bytes_stream();
-        let mapped = byte_stream.flat_map(|chunk| {
-            let events = match chunk {
-                Ok(bytes) => parse_sse_chunk(&bytes),
-                Err(e) => vec![TokenEvent::Error(e.to_string())],
-            };
-            futures::stream::iter(events)
-        });
+        let mapped = byte_stream
+            .scan(SseLineParser::default(), |parser, chunk| {
+                let events = match chunk {
+                    Ok(bytes) => parser.push_bytes(&bytes),
+                    Err(e) => vec![TokenEvent::Error(e.to_string())],
+                };
+                futures::future::ready(Some(futures::stream::iter(events)))
+            })
+            .flatten();
         Ok(mapped.boxed())
     }
 }
 
-/// Parse one (possibly multi-line) SSE byte chunk into token events.
-fn parse_sse_chunk(bytes: &[u8]) -> Vec<TokenEvent> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        let Some(payload) = line.strip_prefix("data:") else { continue };
-        let payload = payload.trim();
-        if payload == "[DONE]" {
-            out.push(TokenEvent::Done);
-            continue;
-        }
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(payload) {
-            if let Some(tok) = json["choices"][0]["delta"]["content"].as_str() {
-                if !tok.is_empty() {
-                    out.push(TokenEvent::Token(tok.to_string()));
+/// Accumulates SSE bytes and emits token events for each COMPLETE line,
+/// retaining any partial trailing line across chunk boundaries.
+#[derive(Default)]
+pub(crate) struct SseLineParser {
+    buf: String,
+}
+impl SseLineParser {
+    pub(crate) fn push_bytes(&mut self, bytes: &[u8]) -> Vec<TokenEvent> {
+        self.buf.push_str(&String::from_utf8_lossy(bytes));
+        let mut out = Vec::new();
+        while let Some(pos) = self.buf.find('\n') {
+            let line: String = self.buf.drain(..=pos).collect();
+            let line = line.trim();
+            let Some(payload) = line.strip_prefix("data:") else { continue };
+            let payload = payload.trim();
+            if payload == "[DONE]" {
+                out.push(TokenEvent::Done);
+            } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(payload) {
+                if let Some(tok) = json["choices"][0]["delta"]["content"].as_str() {
+                    if !tok.is_empty() {
+                        out.push(TokenEvent::Token(tok.to_string()));
+                    }
                 }
             }
         }
+        out
     }
-    out
 }
 
 /// Test engine: streams canned tokens, records the models it was asked to run
@@ -130,5 +138,25 @@ mod tests {
         }
         assert_eq!(out, "hello");
         assert_eq!(eng.received_models(), vec!["m".to_string()]);
+    }
+
+    #[test]
+    fn sse_parser_survives_chunk_boundary() {
+        let mut p = SseLineParser::default();
+        let mut toks = String::new();
+        // A data line split mid-token across two byte chunks.
+        for ev in p.push_bytes(b"data: {\"choices\":[{\"delta\":{\"content\":\"hel") {
+            if let TokenEvent::Token(t) = ev { toks.push_str(&t); }
+        }
+        let mut saw_done = false;
+        for ev in p.push_bytes(b"lo\"}}]}\n\ndata: [DONE]\n\n") {
+            match ev {
+                TokenEvent::Token(t) => toks.push_str(&t),
+                TokenEvent::Done => saw_done = true,
+                TokenEvent::Error(e) => panic!("{e}"),
+            }
+        }
+        assert_eq!(toks, "hello", "token split across chunks must be reassembled");
+        assert!(saw_done, "[DONE] after the token must be emitted");
     }
 }
