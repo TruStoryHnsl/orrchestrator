@@ -13,6 +13,7 @@ cpal = "0.16"
 hf-hub = "0.4"
 hound = "3.5"
 orrch-core = { path = "../orrch-core" }
+reqwest.workspace = true
 rubato = "0.16"
 rusqlite.workspace = true
 safetensors = "0.5"
