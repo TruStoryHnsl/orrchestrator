@@ -10,6 +10,8 @@ pub mod feedback;
 pub mod file_registry;
 pub mod hide;
 pub mod loop_review;
+pub mod loop_controller;
+pub mod loop_watchdog;
 pub mod git;
 pub mod intake_review;
 pub mod output_parser;
@@ -53,6 +55,14 @@ pub use session_brief::{SESSION_BRIEFS_SUBDIR, SessionBrief, SessionBriefInput, 
 pub use usage::{RateLimitConfig, UsageTracker};
 pub use intake_review::{IntakeReview, IntakeReviewFile, load_intake_review, load_review_at, write_intake_decision, distribute_to_inbox_from_intake};
 pub use loops::{LoopSchedule, load_loops, save_loops, upsert_loop, toggle_loop, delete_loop, loops_path};
+// NOTE: `Clock`/`SystemClock`/`ManualClock`/`Tstamp` collide with file_registry's
+// own identically-named types, so they are NOT re-exported flat here — reach them
+// via `loop_controller::` (e.g. `orrch_core::loop_controller::ManualClock`).
+pub use loop_controller::{
+    LoopState, BlockedReason, WorkAssessment, WorkEvaluator,
+    WorkforceHandle, RunStatus, WorkflowRunner, RunnerError, ResolvingFeedback, LoopConfig,
+    LoopInstance, LoopController,
+};
 pub use workflow_status::{WorkflowStatus, WorkflowAgentStatus, load_workflow_status};
 pub use loop_review::{
     loop_review, loop_review_with, parse_task_blocks, render_ranked_plan, ActionCoeffs, CandidateStep,
