@@ -364,6 +364,29 @@ On exit `1`: STOP the workflow and surface the escalated files to the user. The 
 
 Do NOT report workflow complete until the tool exits `0`. A committed-but-unmerged branch is NOT done.
 
+### Repo-wide reconciliation (not just this branch)
+
+Merging THIS session's branch is necessary but not sufficient. Before DONE,
+sweep the whole repository so the next session inherits a clean `main`:
+
+```bash
+git fetch --all --prune
+git branch --merged main | grep -vE '^\*|main|master|develop' \
+  | xargs -r -n1 git branch -d                 # delete local branches already in main
+git for-each-ref --format='%(refname:short)' refs/remotes/origin \
+  | sed 's@^origin/@@' | grep -vE 'main|master|develop|HEAD' \
+  | while read b; do git cherry main "origin/$b" 2>/dev/null | grep -q '^+' \
+      || git push origin --delete "$b"; done    # delete remote branches fully in main
+git worktree prune                              # drop worktree refs whose dir is gone
+git worktree list                               # SURVIVING worktrees: inspect each
+```
+
+For any surviving non-primary worktree or any branch with unmerged commits:
+apply the PM's Repository Reconciliation ACTIVE test (`agents/project_manager.md`).
+INACTIVE → merge/escalate/salvage. ACTIVE (a live parallel session) → leave it,
+but report it. NEVER `rm -rf` a worktree with uncommitted changes — salvage to
+`salvage/<orig>-<ts>` first. Do NOT report DONE while inactive debris remains.
+
 ---
 
 ## DONE

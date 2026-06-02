@@ -104,6 +104,17 @@ deployed consumers.
    → BLOCK. See global rule "Worktree Location".
 4. **Branch left unmerged at session close**: BLOCK session close
    until merged or explicitly deferred.
+5. **Repository not reconciled**: at session start AND close, the PM runs the
+   Repository Reconciliation sweep (`agents/project_manager.md`). Any INACTIVE
+   branch, dangling PR, or orphaned worktree left unresolved → BLOCK. Scope is
+   the WHOLE repo, not just this session's work. A merged-but-undeleted branch
+   counts as unresolved debris.
+6. **Orphaned worktree with uncommitted work**: never discarded blind →
+   salvage to `salvage/<orig>-<ts>` and report, else BLOCK.
+7. **Fake completion**: a task marked `[x]`, "pinned for later," or
+   SHIP_WITH_ISSUES used to paper over an implementation that did not actually
+   work → BLOCK. The branch's real state is reported and escalated, never hidden
+   behind a checked box.
 
 ## Anti-patterns rejected on sight
 

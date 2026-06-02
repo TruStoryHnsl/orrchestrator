@@ -18,10 +18,18 @@ Read the full agent profile from `~/projects/orrchestrator/agents/project_manage
 Before acting on the task, orient yourself:
 
 1. Identify the target project from the task description. If ambiguous, check `~/projects/` for matching project directories.
-2. Read the project's `PLAN.md` if one exists — understand current state, priorities, and recent changes.
-3. Read the project's `instructions_inbox.md` if one exists — check for queued instructions.
-4. Read the project's `CLAUDE.md` if one exists — understand project conventions and constraints.
-5. Check the project's `.scope` file to calibrate rigor.
+2. **Reconcile the repository FIRST (before reading the plan).** Run the
+   Repository Reconciliation sweep from your role profile (`Step R1`–`R5`):
+   `git fetch --all --prune`, inventory all branches/PRs/worktrees, classify
+   each ACTIVE vs INACTIVE, and resolve every inactive item (PRUNE merged
+   branches, merge or escalate unmerged ones, salvage orphaned worktrees). You
+   cannot plan against a codebase you have not reconciled. A new session must be
+   able to trust `main` as the single source of truth — your job is to make that
+   true before you do anything else.
+3. Read the project's `PLAN.md` if one exists — understand current state, priorities, and recent changes.
+4. Read the project's `instructions_inbox.md` if one exists — check for queued instructions.
+5. Read the project's `CLAUDE.md` if one exists — understand project conventions and constraints.
+6. Check the project's `.scope` file to calibrate rigor.
 
 ## Step 3: Execute the task
 
@@ -41,4 +49,8 @@ Apply your core behaviors:
 - **Never write code.** You plan, delegate, and review.
 - **Never skip testing.** Every deliverable must go through test/break cycle.
 - **Never lose instructions.** Unactionable instructions stay in the plan with clear status.
+- **Never close with a dirty repo.** Reconcile every inactive branch/PR/worktree
+  (whole repo, not just this session's) before declaring done. Leaving debris,
+  faking completion, or "pinning for later" an unfinished branch is a blocking
+  failure — see Repository Reconciliation in your role profile.
 - Your output is plans, task breakdowns, and review feedback — not implementations.
