@@ -25,9 +25,20 @@ pub struct ProviderConfig {
     pub name: String,
     pub kind: ProviderKind,
     pub available: bool,
+    /// Env vars injected into the spawned child (ENG-004). Default empty so the
+    /// no-engine path behaves exactly as before. Populated by the spawn path via
+    /// `with_engine_env` / `provider_for_engine` when an engine is bound.
+    #[serde(default)]
+    pub env_overrides: Vec<(String, String)>,
 }
 
 impl ProviderConfig {
+    /// Bind a set of engine env-var overrides onto this provider (ENG-004).
+    pub fn with_engine_env(mut self, env: Vec<(String, String)>) -> Self {
+        self.env_overrides = env;
+        self
+    }
+
     /// Check if this provider's binary/API is available on the system.
     pub fn check_available(&mut self) {
         match &self.kind {

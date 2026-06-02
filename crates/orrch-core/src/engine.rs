@@ -1,0 +1,472 @@
+//! ENG-003 / ENG-004 / ENG-005 — engine resolution, env injection, valve gating.
+//!
+//! An "engine" is the LLM/endpoint a session talks to (a `ModelEntry` from
+//! `library/models/*.md`). It is ORTHOGONAL to the harness (`BackendKind`), which
+//! is the CLI/transport. The resolver here picks the engine; the harness is still
+//! chosen in the spawn flow. The ENG-004 binding (`engine_env`) is what marries a
+//! resolved engine to a chosen harness by emitting the env vars the harness needs
+//! to talk to the engine's endpoint.
+
+use std::path::Path;
+
+use orrch_library::{ApiFormat, EngineLocation, ModelEntry, ValveStore};
+
+use crate::backend::BackendKind;
+
+// ─── ENG-003: four-level precedence resolver (PURE) ─────────────────────────
+
+/// One engine choice from each precedence layer. `None` = "this layer expressed
+/// no preference". The engine-id is `ModelEntry.name` (the stable id used in
+/// `library/models/*.md` and in agent/project/global config).
+#[derive(Debug, Clone, Default)]
+pub struct EngineLayers {
+    /// Per-spawn override chosen in the TUI picker (ENG-006). Highest priority.
+    pub session_pick: Option<String>,
+    /// agents/<role>.md frontmatter `engine:` field.
+    pub agent_role: Option<String>,
+    /// <project>/.orrch/ project default.
+    pub project_default: Option<String>,
+    /// ~/.config/orrchestrator/config.json `default_engine`.
+    pub global_default: Option<String>,
+}
+
+/// Outcome of resolution: which engine id won and from which layer (for UI/debug).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedEngineId {
+    pub engine_id: String,
+    pub source: EngineSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineSource {
+    Session,
+    AgentRole,
+    ProjectDefault,
+    GlobalDefault,
+    Builtin,
+}
+
+/// PURE. Picks the first `Some` layer; if every layer is `None`, returns the
+/// builtin `fallback` id (caller passes e.g. "claude-sonnet" — the id of the
+/// shipped default model file). Never reads disk, never panics.
+pub fn resolve_engine_id(layers: &EngineLayers, fallback: &str) -> ResolvedEngineId {
+    if let Some(id) = &layers.session_pick {
+        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::Session };
+    }
+    if let Some(id) = &layers.agent_role {
+        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::AgentRole };
+    }
+    if let Some(id) = &layers.project_default {
+        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::ProjectDefault };
+    }
+    if let Some(id) = &layers.global_default {
+        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::GlobalDefault };
+    }
+    ResolvedEngineId { engine_id: fallback.to_string(), source: EngineSource::Builtin }
+}
+
+/// Convenience: resolve the id, then look the `ModelEntry` up in a loaded slice
+/// (the slice comes from `orrch_library::load_models`). Returns `None` for the
+/// entry if the winning id isn't a known model.
+pub fn resolve_engine<'a>(
+    layers: &EngineLayers,
+    models: &'a [ModelEntry],
+    fallback: &str,
+) -> (ResolvedEngineId, Option<&'a ModelEntry>) {
+    let resolved = resolve_engine_id(layers, fallback);
+    let entry = models.iter().find(|m| m.name == resolved.engine_id);
+    (resolved, entry)
+}
+
+// ─── ENG-003 layer collectors (impure, kept OUT of the pure core) ───────────
+
+/// Read the `engine:` field from an `agents/<role>.md` frontmatter. Returns
+/// `None` when the file is missing or the key is absent (legacy agents that only
+/// declare `preferred_backend` stay `None` — the field is ADDITIVE).
+pub fn agent_role_engine(agent_md: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(agent_md).ok()?;
+    let (fm, _body) = orrch_library::store::parse_frontmatter_pub(&content)?;
+    orrch_library::store::extract_field_pub(&fm, "engine")
+}
+
+/// Read a project default engine id from `<project_dir>/.orrch/engine`
+/// (single-line id) or an `engine:` key in `.orrch/config.{json,yaml,yml,toml}`.
+/// Absent → `None`.
+pub fn project_default_engine(project_dir: &Path) -> Option<String> {
+    let orrch_dir = project_dir.join(".orrch");
+
+    // 1. plain single-line `.orrch/engine`
+    let engine_file = orrch_dir.join("engine");
+    if let Ok(s) = std::fs::read_to_string(&engine_file) {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    // 2. `engine:` key inside a `.orrch/config.*`
+    for cfg_name in ["config.json", "config.yaml", "config.yml", "config.toml"] {
+        let cfg_path = orrch_dir.join(cfg_name);
+        if let Ok(s) = std::fs::read_to_string(&cfg_path) {
+            if let Some(id) = extract_engine_key(&s) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// Tiny tolerant `engine:`/`"engine":` extractor for the project config file.
+/// Avoids pulling a yaml/toml parser into orrch-core for one optional key.
+fn extract_engine_key(s: &str) -> Option<String> {
+    for line in s.lines() {
+        let l = line.trim();
+        // JSON: "engine": "id"  /  YAML/TOML: engine: id  | engine = "id"
+        let rest = l
+            .strip_prefix("\"engine\"")
+            .or_else(|| l.strip_prefix("engine"))?;
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix(':').or_else(|| rest.strip_prefix('='))?;
+        let val = rest.trim().trim_matches([',', '"', '\'']).trim();
+        if !val.is_empty() {
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
+// ─── ENG-004: pure env-injection binding ────────────────────────────────────
+
+/// PURE. Given a harness (`BackendKind`) and a resolved engine (`ModelEntry`),
+/// produce the env-var pairs that must be injected into the spawned child so the
+/// harness talks to the engine's endpoint/model. The API-KEY VALUE is resolved
+/// here from `engine.api_key_env` via the injected `resolve_key` closure so the
+/// function stays pure & testable (tests pass a stub mapping
+/// `"DEEPSEEK_API_KEY" -> "sk-test"`; production passes
+/// `|var| std::env::var(var).ok()`). Returns `Err` for an incompatible
+/// (harness, api_format) pair.
+///
+/// NOTE: secrets are returned as values to inject into the child env at spawn
+/// time and are NEVER written to disk (ENG-004).
+pub fn engine_env(
+    harness: BackendKind,
+    engine: &ModelEntry,
+    resolve_key: impl Fn(&str) -> Option<String>,
+) -> anyhow::Result<Vec<(String, String)>> {
+    let has = |f: ApiFormat| engine.api_format.contains(&f);
+    let base = engine.base_url.clone();
+    let model = engine.model_id.clone();
+    let key = || -> anyhow::Result<String> {
+        let var = engine
+            .api_key_env
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("engine '{}' has no api_key_env", engine.name))?;
+        resolve_key(var).ok_or_else(|| anyhow::anyhow!("{var} is not set"))
+    };
+    match harness {
+        // claude code speaks Anthropic format
+        BackendKind::Claude => {
+            if !has(ApiFormat::Anthropic) {
+                anyhow::bail!("engine '{}' does not speak Anthropic format (claude harness)", engine.name);
+            }
+            let mut v = vec![("ANTHROPIC_MODEL".into(), model)];
+            if let Some(b) = base {
+                v.push(("ANTHROPIC_BASE_URL".into(), b));
+            }
+            // local engines may have no key (ollama signin); only add when present
+            if engine.api_key_env.is_some() {
+                v.push(("ANTHROPIC_AUTH_TOKEN".into(), key()?));
+            }
+            Ok(v)
+        }
+        // opencode / crush / aider speak OpenAI format
+        BackendKind::OpenCode | BackendKind::Crush => {
+            if !has(ApiFormat::OpenAI) {
+                anyhow::bail!(
+                    "engine '{}' does not speak OpenAI format ({} harness)",
+                    engine.name,
+                    harness.label()
+                );
+            }
+            let mut v = vec![("OPENAI_MODEL".into(), model)]; // harness also gets model via flag; see provider.cli_args
+            if let Some(b) = base {
+                v.push(("OPENAI_BASE_URL".into(), b));
+            }
+            if engine.api_key_env.is_some() {
+                v.push(("OPENAI_API_KEY".into(), key()?));
+            }
+            Ok(v)
+        }
+        // pi multiplexes providers via its own flags, not env; accepts either
+        // format, so env injection is a no-op here.
+        BackendKind::Pi => Ok(vec![]),
+        // Native HTTP backends: send_api_message reads from the engine directly,
+        // no child env needed.
+        BackendKind::AnthropicApi | BackendKind::OpenAiApi => Ok(vec![]),
+        // codex/gemini: not yet bound to arbitrary engines — only compatible if
+        // the engine is their native cloud default (api_format Cli). Reject
+        // explicit cross-engine binding for now with a clear message.
+        BackendKind::Codex | BackendKind::Gemini => {
+            if engine.api_format == vec![ApiFormat::Cli] {
+                Ok(vec![])
+            } else {
+                anyhow::bail!("{} harness has no engine binding for '{}'", harness.label(), engine.name)
+            }
+        }
+    }
+}
+
+// ─── ENG-001 URL composition helpers (pure, offline-testable) ───────────────
+
+/// Anthropic messages endpoint for a given base host.
+pub fn anthropic_url(base_url: &str) -> String {
+    format!("{}/v1/messages", base_url.trim_end_matches('/'))
+}
+
+/// OpenAI chat-completions endpoint for a given base host.
+pub fn openai_url(base_url: &str) -> String {
+    format!("{}/v1/chat/completions", base_url.trim_end_matches('/'))
+}
+
+// ─── ENG-005: valve gating (PURE) ───────────────────────────────────────────
+
+/// True if this engine is selectable right now. `EngineLocation::Local` is NEVER
+/// valve-gated (ENG-005); Cloud/Gateway are hidden when the provider valve is
+/// closed. Valve key is `engine.provider`.
+pub fn engine_selectable(engine: &ModelEntry, valves: &ValveStore) -> bool {
+    if engine.location == EngineLocation::Local {
+        return true;
+    }
+    !valves.is_blocked(&engine.provider)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orrch_library::{ModelTier, PricingModel};
+    use std::path::PathBuf;
+
+    fn mk_engine(
+        name: &str,
+        provider: &str,
+        model_id: &str,
+        base_url: Option<&str>,
+        api_key_env: Option<&str>,
+        api_format: Vec<ApiFormat>,
+        location: EngineLocation,
+    ) -> ModelEntry {
+        ModelEntry {
+            name: name.into(),
+            provider: provider.into(),
+            model_id: model_id.into(),
+            tier: ModelTier::MidTier,
+            pricing: PricingModel::Local,
+            capabilities: vec![],
+            limitations: vec![],
+            max_context: None,
+            api_key_env: api_key_env.map(|s| s.into()),
+            notes: String::new(),
+            last_checked: None,
+            base_url: base_url.map(|s| s.into()),
+            api_format,
+            location,
+            path: PathBuf::new(),
+        }
+    }
+
+    // ── resolver precedence ──────────────────────────────────────────────
+
+    #[test]
+    fn test_resolver_agent_beats_project_and_global() {
+        let layers = EngineLayers {
+            session_pick: None,
+            agent_role: Some("deepseek-v4-flash".into()),
+            project_default: Some("gpt-4o".into()),
+            global_default: Some("claude".into()),
+        };
+        let r = resolve_engine_id(&layers, "builtin-fallback");
+        assert_eq!(r.engine_id, "deepseek-v4-flash");
+        assert_eq!(r.source, EngineSource::AgentRole);
+    }
+
+    #[test]
+    fn test_resolver_session_wins_over_everything() {
+        let layers = EngineLayers {
+            session_pick: Some("session-engine".into()),
+            agent_role: Some("a".into()),
+            project_default: Some("p".into()),
+            global_default: Some("g".into()),
+        };
+        let r = resolve_engine_id(&layers, "fb");
+        assert_eq!(r.engine_id, "session-engine");
+        assert_eq!(r.source, EngineSource::Session);
+    }
+
+    #[test]
+    fn test_resolver_all_none_yields_builtin() {
+        let layers = EngineLayers::default();
+        let r = resolve_engine_id(&layers, "claude-sonnet");
+        assert_eq!(r.engine_id, "claude-sonnet");
+        assert_eq!(r.source, EngineSource::Builtin);
+    }
+
+    #[test]
+    fn test_resolver_project_then_global() {
+        let layers = EngineLayers {
+            project_default: Some("proj".into()),
+            global_default: Some("glob".into()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_engine_id(&layers, "fb").source, EngineSource::ProjectDefault);
+        let layers2 = EngineLayers { global_default: Some("glob".into()), ..Default::default() };
+        assert_eq!(resolve_engine_id(&layers2, "fb").source, EngineSource::GlobalDefault);
+    }
+
+    #[test]
+    fn test_resolve_engine_finds_entry() {
+        let models = vec![
+            mk_engine("a", "Anthropic", "claude-x", None, None, vec![ApiFormat::Cli], EngineLocation::Cloud),
+            mk_engine("deepseek-v4-flash", "DeepSeek", "deepseek-v4-flash", Some("https://api.deepseek.com"), Some("DEEPSEEK_API_KEY"), vec![ApiFormat::Anthropic, ApiFormat::OpenAI], EngineLocation::Cloud),
+        ];
+        let layers = EngineLayers { session_pick: Some("deepseek-v4-flash".into()), ..Default::default() };
+        let (resolved, entry) = resolve_engine(&layers, &models, "a");
+        assert_eq!(resolved.engine_id, "deepseek-v4-flash");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().model_id, "deepseek-v4-flash");
+
+        // unknown id → None entry but resolved id preserved
+        let layers2 = EngineLayers { session_pick: Some("nope".into()), ..Default::default() };
+        let (_r, e) = resolve_engine(&layers2, &models, "a");
+        assert!(e.is_none());
+    }
+
+    // ── engine_env binding ───────────────────────────────────────────────
+
+    #[test]
+    fn test_engine_env_claude_anthropic_engine() {
+        let engine = mk_engine(
+            "deepseek-v4-flash",
+            "DeepSeek",
+            "deepseek-v4-flash",
+            Some("https://api.deepseek.com"),
+            Some("DEEPSEEK_API_KEY"),
+            vec![ApiFormat::Anthropic, ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
+        let stub = |var: &str| {
+            if var == "DEEPSEEK_API_KEY" { Some("sk-test".to_string()) } else { None }
+        };
+        let env = engine_env(BackendKind::Claude, &engine, stub).expect("compatible");
+        let map: std::collections::HashMap<_, _> = env.into_iter().collect();
+        assert_eq!(map.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://api.deepseek.com"));
+        assert_eq!(map.get("ANTHROPIC_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
+        assert_eq!(map.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("sk-test"));
+    }
+
+    #[test]
+    fn test_engine_env_opencode_openai_engine() {
+        let engine = mk_engine(
+            "deepseek-v4-flash",
+            "DeepSeek",
+            "deepseek-v4-flash",
+            Some("https://api.deepseek.com"),
+            Some("DEEPSEEK_API_KEY"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
+        let stub = |_: &str| Some("sk-test".to_string());
+        let env = engine_env(BackendKind::OpenCode, &engine, stub).expect("compatible");
+        let map: std::collections::HashMap<_, _> = env.into_iter().collect();
+        assert_eq!(map.get("OPENAI_BASE_URL").map(String::as_str), Some("https://api.deepseek.com"));
+        assert_eq!(map.get("OPENAI_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
+        assert_eq!(map.get("OPENAI_API_KEY").map(String::as_str), Some("sk-test"));
+    }
+
+    #[test]
+    fn test_engine_env_claude_rejects_openai_only_engine() {
+        let engine = mk_engine(
+            "gpt-only",
+            "OpenAI",
+            "gpt-4o",
+            Some("https://api.openai.com"),
+            Some("OPENAI_API_KEY"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
+        let stub = |_: &str| Some("x".to_string());
+        let err = engine_env(BackendKind::Claude, &engine, stub);
+        assert!(err.is_err(), "claude + OpenAI-only engine must be incompatible");
+    }
+
+    #[test]
+    fn test_engine_env_local_no_key_no_auth_token() {
+        // Local ollama engine speaking Anthropic format with NO api_key_env.
+        let engine = mk_engine(
+            "ollama-deepseek",
+            "Ollama",
+            "deepseek-v4-flash",
+            Some("http://localhost:11434"),
+            None, // no key
+            vec![ApiFormat::Anthropic],
+            EngineLocation::Local,
+        );
+        let stub = |_: &str| None;
+        let env = engine_env(BackendKind::Claude, &engine, stub).expect("local engine, no key, no err");
+        let map: std::collections::HashMap<_, _> = env.into_iter().collect();
+        assert!(map.get("ANTHROPIC_AUTH_TOKEN").is_none(), "no key → no AUTH_TOKEN pair");
+        assert_eq!(map.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("http://localhost:11434"));
+        assert_eq!(map.get("ANTHROPIC_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn test_engine_env_pi_is_noop() {
+        let engine = mk_engine("any", "Multi", "x", Some("https://h"), Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
+        let env = engine_env(BackendKind::Pi, &engine, |_| Some("k".into())).unwrap();
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn test_engine_env_codex_rejects_non_cli_engine() {
+        let engine = mk_engine("gpt", "OpenAI", "gpt-4o", Some("https://h"), Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
+        assert!(engine_env(BackendKind::Codex, &engine, |_| Some("k".into())).is_err());
+        // native cli-default engine is accepted as no-op
+        let cli_engine = mk_engine("codex-native", "OpenAI", "gpt-5-codex", None, None, vec![ApiFormat::Cli], EngineLocation::Cloud);
+        assert!(engine_env(BackendKind::Codex, &cli_engine, |_| None).unwrap().is_empty());
+    }
+
+    // ── URL composition ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_url_composition() {
+        assert_eq!(anthropic_url("https://api.deepseek.com"), "https://api.deepseek.com/v1/messages");
+        assert_eq!(anthropic_url("https://api.anthropic.com/"), "https://api.anthropic.com/v1/messages");
+        assert_eq!(openai_url("https://api.openai.com"), "https://api.openai.com/v1/chat/completions");
+    }
+
+    // ── valve gating ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_engine_selectable_local_never_gated() {
+        let mut valves = ValveStore::default();
+        valves.valves.insert(
+            "Ollama".into(),
+            orrch_library::Valve { closed: true, reopen_at: None, reason: "off".into() },
+        );
+        let local = mk_engine("o", "Ollama", "x", None, None, vec![ApiFormat::Cli], EngineLocation::Local);
+        assert!(engine_selectable(&local, &valves), "local engine never gated even with closed valve");
+    }
+
+    #[test]
+    fn test_engine_selectable_cloud_gated_by_valve() {
+        let mut valves = ValveStore::default();
+        valves.valves.insert(
+            "DeepSeek".into(),
+            orrch_library::Valve { closed: true, reopen_at: None, reason: "off".into() },
+        );
+        let cloud = mk_engine("d", "DeepSeek", "x", None, Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
+        assert!(!engine_selectable(&cloud, &valves), "closed valve hides cloud engine");
+        // open valve → selectable (mutate map directly, avoid disk save())
+        valves.valves.remove("DeepSeek");
+        assert!(engine_selectable(&cloud, &valves));
+    }
+}

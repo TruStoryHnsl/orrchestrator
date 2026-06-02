@@ -66,8 +66,27 @@ impl ProcessManager {
         rows: u16,
         cols: u16,
     ) -> anyhow::Result<String> {
-        // Route through provider abstraction
-        let provider = backend.to_provider(&self.backends);
+        self.spawn_with_engine(project_dir, backend, None, prompt, rows, cols)
+    }
+
+    /// ENG-004 engine-aware spawn. When `engine` is `Some`, the provider is built
+    /// via `ProviderConfig::provider_for_engine` so `provider.env_overrides` is
+    /// populated and injected into the forked child before `execvp`. When `None`,
+    /// behaves identically to the legacy `to_provider` path.
+    pub fn spawn_with_engine(
+        &mut self,
+        project_dir: &Path,
+        backend: BackendKind,
+        engine: Option<&orrch_library::ModelEntry>,
+        prompt: Option<&str>,
+        rows: u16,
+        cols: u16,
+    ) -> anyhow::Result<String> {
+        // Route through provider abstraction (engine-derived when present).
+        let provider = match engine {
+            Some(e) => BackendKind::provider_for_engine(backend, e, &self.backends)?,
+            None => backend.to_provider(&self.backends),
+        };
 
         if provider.is_api() {
             return self.spawn_api_oneshot(backend, &provider, prompt);
@@ -98,6 +117,21 @@ impl ProcessManager {
 
         let project_dir_owned = project_dir.to_path_buf();
 
+        // ENG-004: pre-build engine env-var CStrings BEFORE fork() so the child
+        // only has to call setenv() (no fallible allocation in the child path
+        // beyond what argv already does). setenv mutates the child's `environ`,
+        // which execvp then inherits — no execvpe needed.
+        let env_overrides: Vec<(std::ffi::CString, std::ffi::CString)> = provider
+            .env_overrides
+            .iter()
+            .filter_map(|(k, v)| {
+                Some((
+                    std::ffi::CString::new(k.as_str()).ok()?,
+                    std::ffi::CString::new(v.as_str()).ok()?,
+                ))
+            })
+            .collect();
+
         let pid = unsafe { libc::fork() };
         if pid < 0 {
             anyhow::bail!("fork failed");
@@ -122,6 +156,13 @@ impl ProcessManager {
                     project_dir_owned.to_string_lossy().as_bytes(),
                 ).unwrap();
                 libc::chdir(dir_cstr.as_ptr());
+
+                // ENG-004: inject engine env vars into the child's environment
+                // AFTER chdir, BEFORE execvp. Overwrite (1) so engine binding
+                // wins over any inherited value.
+                for (ck, cv) in &env_overrides {
+                    libc::setenv(ck.as_ptr(), cv.as_ptr(), 1);
+                }
 
                 let c_args: Vec<std::ffi::CString> = cmd_args
                     .iter()
@@ -174,8 +215,8 @@ impl ProcessManager {
         if !provider.available {
             anyhow::bail!("{} backend not available — api key env var not set", backend.label());
         }
-        let model_id = match &provider.kind {
-            ProviderKind::ApiHttp { model_id, .. } => model_id.clone(),
+        let (base_url, model_id) = match &provider.kind {
+            ProviderKind::ApiHttp { base_url, model_id, .. } => (base_url.clone(), model_id.clone()),
             _ => anyhow::bail!("{} is not an http api provider", backend.label()),
         };
         let prompt = prompt.unwrap_or("").to_string();
@@ -186,7 +227,7 @@ impl ProcessManager {
         let tx = self.event_tx.clone();
         let sid_clone = sid.clone();
         tokio::task::spawn_blocking(move || {
-            let result = send_api_message(backend, &model_id, &prompt);
+            let result = send_api_message(backend, &base_url, &model_id, &prompt);
             let payload = match result {
                 Ok(text) => text.into_bytes(),
                 Err(e) => format!("[error] {e}").into_bytes(),

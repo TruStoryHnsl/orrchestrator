@@ -32,6 +32,89 @@ impl ModelTier {
     }
 }
 
+/// Wire protocol an engine speaks. `Cli` = no HTTP, the engine is driven by a
+/// CLI harness in its native mode (legacy default). Anthropic/OpenAI = direct
+/// HTTP message shapes. An engine may speak MORE THAN ONE (e.g. DeepSeek serves
+/// both an Anthropic-compatible and an OpenAI-compatible endpoint), hence
+/// `api_format` on ModelEntry is a Vec<ApiFormat>, not a single value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiFormat {
+    Anthropic,
+    #[serde(rename = "openai")]
+    OpenAI,
+    Cli,
+}
+
+impl ApiFormat {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Anthropic => "Anthropic",
+            Self::OpenAI => "OpenAI",
+            Self::Cli => "CLI",
+        }
+    }
+
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::Anthropic => "AN",
+            Self::OpenAI => "OA",
+            Self::Cli => "CLI",
+        }
+    }
+
+    /// Parse a frontmatter token into an ApiFormat. Case-insensitive.
+    /// Accepts "anthropic", "openai", "cli".
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "anthropic" => Some(Self::Anthropic),
+            "openai" => Some(Self::OpenAI),
+            "cli" => Some(Self::Cli),
+            _ => None,
+        }
+    }
+}
+
+/// Where the engine physically runs. Drives valve-gating (Local is NEVER
+/// valve-gated — ENG-005) and HWF fit-filtering (Local/Gateway require a fit
+/// check for the target machine; Cloud is always offered).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EngineLocation {
+    Cloud,
+    Gateway,
+    Local,
+}
+
+impl EngineLocation {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Cloud => "Cloud",
+            Self::Gateway => "Gateway",
+            Self::Local => "Local",
+        }
+    }
+
+    pub fn badge(&self) -> &'static str {
+        match self {
+            Self::Cloud => "☁",
+            Self::Gateway => "⇄",
+            Self::Local => "⌂",
+        }
+    }
+
+    /// Parse a frontmatter token into an EngineLocation. Case-insensitive.
+    /// Accepts "cloud", "gateway", "local".
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "cloud" => Some(Self::Cloud),
+            "gateway" => Some(Self::Gateway),
+            "local" => Some(Self::Local),
+            _ => None,
+        }
+    }
+}
+
 /// Pricing model for a model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -161,9 +244,25 @@ pub struct ModelEntry {
     /// Update loop — PLAN item 58 — uses this to decide freshness).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_checked: Option<String>,
+    /// Override endpoint host for HTTP engines. None for `Cli`-only engines and
+    /// for cloud engines whose host is the provider default. ENG-001: when Some,
+    /// this is the host an outbound request targets — NOT a hardcoded const.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Wire protocol(s) this engine speaks. Legacy `.md` files lack this key, so
+    /// serde defaults it to `[ApiFormat::Cli]` (see default_api_format) — a
+    /// legacy model is a CLI-driven engine, preserving today's behavior.
+    #[serde(default = "default_api_format")]
+    pub api_format: Vec<ApiFormat>,
+    /// Where the engine runs. Legacy files default to Cloud.
+    #[serde(default = "default_location")]
+    pub location: EngineLocation,
     #[serde(skip)]
     pub path: PathBuf,
 }
+
+fn default_api_format() -> Vec<ApiFormat> { vec![ApiFormat::Cli] }
+fn default_location() -> EngineLocation { EngineLocation::Cloud }
 
 impl ModelEntry {
     pub fn summary_line(&self) -> String {
@@ -506,6 +605,93 @@ mod tests {
         assert!(p.display().contains("$3.00"));
         assert!(PricingModel::Local.display().contains("no cost"));
     }
+
+    #[test]
+    fn test_api_format_and_location_parse() {
+        assert_eq!(ApiFormat::parse("Anthropic"), Some(ApiFormat::Anthropic));
+        assert_eq!(ApiFormat::parse("OPENAI"), Some(ApiFormat::OpenAI));
+        assert_eq!(ApiFormat::parse("cli"), Some(ApiFormat::Cli));
+        assert_eq!(ApiFormat::parse("nope"), None);
+        assert_eq!(EngineLocation::parse("Cloud"), Some(EngineLocation::Cloud));
+        assert_eq!(EngineLocation::parse("gateway"), Some(EngineLocation::Gateway));
+        assert_eq!(EngineLocation::parse("LOCAL"), Some(EngineLocation::Local));
+        assert_eq!(EngineLocation::parse("orbit"), None);
+    }
+
+    /// Write `content` to a temp .md and parse it.
+    fn parse_md(content: &str) -> ModelEntry {
+        let dir = std::env::temp_dir().join(format!(
+            "orrch-model-test-{}-{}",
+            std::process::id(),
+            now_epoch()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("m-{}.md", content.len()));
+        std::fs::write(&path, content).unwrap();
+        let m = parse_model_file(&path).expect("parse should succeed");
+        let _ = std::fs::remove_file(&path);
+        m
+    }
+
+    #[test]
+    fn test_legacy_md_defaults() {
+        // No base_url / api_format / location keys → defaults apply.
+        let md = "---\nname: Legacy Model\nprovider: Anthropic\nmodel_id: claude-x\ntier: enterprise\npricing: per_token\n---\nLegacy notes.";
+        let m = parse_md(md);
+        assert_eq!(m.api_format, vec![ApiFormat::Cli], "legacy → [Cli]");
+        assert_eq!(m.location, EngineLocation::Cloud, "legacy → Cloud");
+        assert_eq!(m.base_url, None, "legacy → no base_url");
+    }
+
+    #[test]
+    fn test_deepseek_md_block_list() {
+        // Block-list api_format with both formats in order + base_url + location.
+        let md = "---\nname: DeepSeek V4 Flash\nprovider: DeepSeek\nmodel_id: deepseek-v4-flash\ntier: mid-tier\npricing: per_token\nbase_url: https://api.deepseek.com\napi_key_env: DEEPSEEK_API_KEY\nmax_context: 1000000\nlocation: cloud\napi_format:\n- anthropic\n- openai\n---\nFast DeepSeek engine.";
+        let m = parse_md(md);
+        assert_eq!(m.base_url.as_deref(), Some("https://api.deepseek.com"));
+        assert_eq!(m.api_format, vec![ApiFormat::Anthropic, ApiFormat::OpenAI], "both, in order");
+        assert_eq!(m.location, EngineLocation::Cloud);
+        assert_eq!(m.max_context, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_inline_list_api_format() {
+        // Inline `[anthropic, openai]` form also yields both in order.
+        let md = "---\nname: Inline Engine\nprovider: X\nmodel_id: x\ntier: mid-tier\npricing: per_token\napi_format: [anthropic, openai]\nlocation: gateway\n---\nbody";
+        let m = parse_md(md);
+        assert_eq!(m.api_format, vec![ApiFormat::Anthropic, ApiFormat::OpenAI]);
+        assert_eq!(m.location, EngineLocation::Gateway);
+    }
+
+    #[test]
+    fn test_scalar_api_format() {
+        let md = "---\nname: Scalar\nprovider: X\nmodel_id: x\ntier: local\npricing: local\napi_format: openai\nlocation: local\n---\nbody";
+        let m = parse_md(md);
+        assert_eq!(m.api_format, vec![ApiFormat::OpenAI]);
+        assert_eq!(m.location, EngineLocation::Local);
+    }
+
+    #[test]
+    fn test_serde_roundtrip_omits_new_keys() {
+        // A serialized ModelEntry omitting the three new keys deserializes
+        // (serde defaults apply).
+        let json = r#"{
+            "name": "Round Trip",
+            "provider": "Anthropic",
+            "model_id": "claude-y",
+            "tier": "enterprise",
+            "pricing": "local",
+            "capabilities": [],
+            "limitations": [],
+            "max_context": null,
+            "api_key_env": null,
+            "notes": ""
+        }"#;
+        let m: ModelEntry = serde_json::from_str(json).expect("deserialize with defaults");
+        assert_eq!(m.api_format, vec![ApiFormat::Cli]);
+        assert_eq!(m.location, EngineLocation::Cloud);
+        assert_eq!(m.base_url, None);
+    }
 }
 
 /// Load model entries from .md files in a directory.
@@ -548,6 +734,31 @@ fn parse_model_file(path: &Path) -> Option<ModelEntry> {
         PricingModel::PerToken { input_per_million: 0.0, output_per_million: 0.0 }
     };
 
+    let base_url = extract(&fm, "base_url");
+
+    // api_format: frontmatter list like `[anthropic, openai]` OR scalar
+    // `openai`. Empty/absent → default [Cli] (legacy behavior).
+    let mut api_format: Vec<ApiFormat> = extract_list(&fm, "api_format")
+        .iter()
+        .filter_map(|s| ApiFormat::parse(s))
+        .collect();
+    if api_format.is_empty() {
+        // tolerate a scalar `api_format: openai` or inline `[anthropic, openai]`
+        if let Some(raw) = extract(&fm, "api_format") {
+            let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
+            for tok in trimmed.split(',') {
+                if let Some(f) = ApiFormat::parse(tok) {
+                    api_format.push(f);
+                }
+            }
+        }
+    }
+    if api_format.is_empty() { api_format = default_api_format(); }
+
+    let location = extract(&fm, "location")
+        .and_then(|s| EngineLocation::parse(&s))
+        .unwrap_or_else(default_location);
+
     Some(ModelEntry {
         name: extract(&fm, "name")?,
         provider: extract(&fm, "provider").unwrap_or_default(),
@@ -560,6 +771,9 @@ fn parse_model_file(path: &Path) -> Option<ModelEntry> {
         api_key_env: extract(&fm, "api_key_env"),
         notes: body.trim().to_string(),
         last_checked: extract(&fm, "last_checked"),
+        base_url,
+        api_format,
+        location,
         path: path.to_path_buf(),
     })
 }

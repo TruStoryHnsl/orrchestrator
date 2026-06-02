@@ -262,6 +262,8 @@ pub enum SubView {
     SpawnWorkforce,
     SpawnAgent,
     SpawnBackend,
+    /// ENG-006: engine (LLM endpoint) picker, between Backend and Host.
+    SpawnEngine,
     SpawnHost,
     /// Confirm feedback delete.
     ConfirmDeleteFeedback(usize),
@@ -690,6 +692,7 @@ pub enum ActionKind {
     ReloadProjects,
     GitCommit,     // commit+push selected project via Claude
     GitCommitAll,  // commit+push all dirty projects via Claude
+    CycleDefaultEngine, // ENG-006: cycle the global default engine (Config.default_engine)
     IntegrateInbox(usize), // integrate instructions_inbox.md into PLAN.md
     KillSession(String),
     SubmitFeedback(String),  // filename
@@ -751,6 +754,9 @@ pub struct App {
     pub spawn_goal_from_roadmap: Option<usize>,
     pub spawn_agent_idx: usize, // 0 = no agent, 1+ = index into agent_profiles
     pub spawn_backend: BackendKind,
+    /// ENG-006: engine picker index. 0 = "(default — resolver)", 1+ = index into
+    /// the valve-filtered engine list (see `selectable_engines`).
+    pub spawn_engine_idx: usize,
     pub spawn_host_idx: usize, // 0 = local, 1+ = remote_hosts index
     pub spawn_workforce_idx: usize,  // 0 = no workforce (solo), 1+ = index into loaded_workforces
     pub loaded_workforces: Vec<orrch_workforce::Workforce>,
@@ -1201,6 +1207,7 @@ impl App {
             spawn_goal_from_roadmap: None,
             spawn_agent_idx: 0,
             spawn_backend: BackendKind::Claude,
+            spawn_engine_idx: 0,
             spawn_host_idx: 0,
             spawn_workforce_idx: 0,
             loaded_workforces,
@@ -1711,6 +1718,108 @@ impl App {
 
     /// Spawn a Claude session as a tmux window in the orrch session.
     pub fn spawn_session(&mut self, project_dir: &Path, backend: BackendKind, goal: Option<&str>) -> Result<String> {
+        self.spawn_session_named(project_dir, backend, goal, None)
+    }
+
+    /// ENG-006: resolve the engine for an in-flight spawn via the four
+    /// precedence layers and return an OWNED `ModelEntry` (cloned to avoid
+    /// borrowing `self.library_models` across the later `&mut self` spawn).
+    /// Returns `None` when the resolver falls through to a builtin/unknown id —
+    /// i.e. today's behavior (the harness uses its own default endpoint).
+    ///
+    /// The builtin fallback id is left empty so an all-`None` resolution
+    /// produces a `Builtin` source with no matching `ModelEntry` → `None`,
+    /// preserving the no-engine path unless a layer explicitly names an engine.
+    fn resolve_spawn_engine(&self, project_dir: &Path) -> Option<orrch_library::ModelEntry> {
+        // Map the session picker index → engine id (None for index 0).
+        let session_pick = self.picked_engine_id();
+
+        // agents/<role>.md `engine:` frontmatter for the chosen agent (if any).
+        let agent_role = self
+            .spawn_agent_idx
+            .checked_sub(1)
+            .and_then(|i| self.agent_profiles.get(i))
+            .and_then(|p| orrch_core::agent_role_engine(&p.path));
+
+        let project_default = orrch_core::project_default_engine(project_dir);
+        let global_default = orrch_core::Config::load().default_engine;
+
+        let layers = orrch_core::EngineLayers {
+            session_pick,
+            agent_role,
+            project_default,
+            global_default,
+        };
+        // Empty fallback → all-None resolves to a Builtin id that won't match a
+        // model, yielding `None` and the legacy no-engine spawn path.
+        let (_resolved, entry) = orrch_core::resolve_engine(&layers, &self.library_models, "");
+        entry.cloned()
+    }
+
+    /// ENG-006 UI hint: the engine the resolver would pick for the *default*
+    /// (index-0) choice — i.e. ignoring the session picker, using agent-role /
+    /// project / global-default layers. `None` when nothing names an engine
+    /// (the harness uses its own default endpoint). Uses the currently-selected
+    /// spawn project's dir for the project-default layer.
+    pub fn resolved_default_engine_label(&self) -> Option<String> {
+        let project_dir = self.projects.get(self.spawn_project_idx).map(|p| p.path.clone());
+
+        let agent_role = self
+            .spawn_agent_idx
+            .checked_sub(1)
+            .and_then(|i| self.agent_profiles.get(i))
+            .and_then(|p| orrch_core::agent_role_engine(&p.path));
+        let project_default = project_dir
+            .as_deref()
+            .and_then(orrch_core::project_default_engine);
+        let global_default = orrch_core::Config::load().default_engine;
+
+        let layers = orrch_core::EngineLayers {
+            session_pick: None,
+            agent_role,
+            project_default,
+            global_default,
+        };
+        let (resolved, _entry) = orrch_core::resolve_engine(&layers, &self.library_models, "");
+        // Builtin fallback id was empty → "no preference"; report None.
+        if resolved.engine_id.is_empty() { None } else { Some(resolved.engine_id) }
+    }
+
+    /// ENG-006: engine-aware spawn delegator. Validates the (harness, engine)
+    /// pair via `engine_env` (surfacing incompatible-pair errors to the user),
+    /// injects the engine's env vars into THIS process so the tmux child
+    /// inherits them, then forwards to the legacy `spawn_session`. When `engine`
+    /// is `None`, behaves identically to `spawn_session` (no env mutation).
+    pub fn spawn_session_with_engine(
+        &mut self,
+        project_dir: &Path,
+        backend: BackendKind,
+        engine: Option<&orrch_library::ModelEntry>,
+        goal: Option<&str>,
+    ) -> Result<String> {
+        if let Some(eng) = engine {
+            // Validate compatibility and compute env-var injection. `engine_env`
+            // rejects incompatible (harness, engine) pairs (e.g. Claude + an
+            // OpenAI-only engine, Codex/Gemini + any non-CLI engine) — surface
+            // that to the user instead of spawning a misconfigured session.
+            match orrch_core::engine_env(backend, eng, |var| std::env::var(var).ok()) {
+                Ok(pairs) => {
+                    for (k, v) in pairs {
+                        // SAFETY: single-threaded TUI event loop; no other thread
+                        // is reading/writing the environment concurrently. Set
+                        // before the tmux child forks so it inherits the engine
+                        // endpoint env vars.
+                        unsafe { std::env::set_var(&k, &v); }
+                    }
+                    self.notify(format!("Engine: {} ({})", eng.name, backend.label()));
+                }
+                Err(e) => {
+                    let msg = format!("Engine '{}' incompatible with {}: {e}", eng.name, backend.label());
+                    self.notify(msg.clone());
+                    return Err(anyhow::anyhow!(msg));
+                }
+            }
+        }
         self.spawn_session_named(project_dir, backend, goal, None)
     }
 
@@ -2384,6 +2493,7 @@ impl App {
             SubView::SpawnWorkforce => self.key_spawn_workforce(key),
             SubView::SpawnAgent => self.key_spawn_agent(key),
             SubView::SpawnBackend => self.key_spawn_backend(key),
+            SubView::SpawnEngine => self.key_spawn_engine(key),
             SubView::SpawnHost => self.key_spawn_host(key),
             SubView::RoutingSummary => self.key_routing_summary(key),
             SubView::ConfirmDeprecate(idx) => {
@@ -5788,6 +5898,61 @@ KeyCode::Char('i') => {
                 self.spawn_backend = cli[(cur_idx + 1) % cli.len()];
             }
             KeyCode::Enter => {
+                self.spawn_engine_idx = 0;
+                self.sub = SubView::SpawnEngine;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// ENG-005/006: the engines the user may pick right now, in picker order.
+    /// Filtered by `engine_selectable` (closed provider valve hides Cloud/Gateway
+    /// engines; `location: local` engines are never gated). Cloud engines come
+    /// first (the always-available case), then Gateway/Local.
+    ///
+    /// HWF fit gating for local engines is a TODO (ENG-004/LHS-002): the target
+    /// machine isn't known until SpawnHost, so for now all valve-passing local
+    /// engines are shown. This does not block the picker.
+    pub fn selectable_engines(&self) -> Vec<&orrch_library::ModelEntry> {
+        let mut cloud = Vec::new();
+        let mut other = Vec::new();
+        for m in &self.library_models {
+            if !orrch_core::engine_selectable(m, &self.valve_store) {
+                continue;
+            }
+            if m.location == orrch_library::EngineLocation::Cloud {
+                cloud.push(m);
+            } else {
+                other.push(m);
+            }
+        }
+        cloud.extend(other);
+        cloud
+    }
+
+    /// ENG-006: id of the currently-picked engine, or `None` for index 0
+    /// ("(default — resolver)"). Index 1+ maps into `selectable_engines()`.
+    fn picked_engine_id(&self) -> Option<String> {
+        if self.spawn_engine_idx == 0 {
+            return None;
+        }
+        self.selectable_engines()
+            .get(self.spawn_engine_idx - 1)
+            .map(|m| m.name.clone())
+    }
+
+    fn key_spawn_engine(&mut self, key: KeyCode) -> Result<()> {
+        let count = 1 + self.selectable_engines().len(); // index 0 = resolver default
+        match key {
+            KeyCode::Esc => self.sub = SubView::List,
+            KeyCode::Tab | KeyCode::Down => {
+                self.spawn_engine_idx = (self.spawn_engine_idx + 1) % count;
+            }
+            KeyCode::Up => {
+                self.spawn_engine_idx = (self.spawn_engine_idx + count - 1) % count;
+            }
+            KeyCode::Enter => {
                 self.spawn_host_idx = 0;
                 self.sub = SubView::SpawnHost;
             }
@@ -5812,9 +5977,12 @@ KeyCode::Char('i') => {
                 self.spawn_host_idx = (self.spawn_host_idx + host_count - 1) % host_count;
             }
             KeyCode::Enter => {
-                if let Some(proj) = self.projects.get(self.spawn_project_idx) {
-                    let path = proj.path.clone();
-                    let proj_name = proj.name.clone();
+                let proj = match self.projects.get(self.spawn_project_idx) {
+                    Some(p) => (p.path.clone(), p.name.clone()),
+                    None => { self.sub = SubView::List; return Ok(()); }
+                };
+                {
+                    let (path, proj_name) = proj;
                     let backend = self.spawn_backend;
                     let raw_goal = if self.spawn_goal_text.is_empty() {
                         CONTINUE_DEV_PROMPT.to_string()
@@ -5832,9 +6000,15 @@ KeyCode::Char('i') => {
                         raw_goal
                     };
 
+                    // ENG-006: resolve the engine through the four precedence
+                    // layers (session pick > agent role > project default >
+                    // global default > builtin fallback). `None` resolved entry
+                    // → today's behavior (harness default endpoint).
+                    let resolved = self.resolve_spawn_engine(&path);
+
                     if self.spawn_host_idx == 0 {
                         // Local spawn
-                        let _ = self.spawn_session(&path, backend, Some(&goal));
+                        let _ = self.spawn_session_with_engine(&path, backend, resolved.as_ref(), Some(&goal));
                     } else {
                         // Remote spawn
                         if let Some(host) = remote_hosts.get(self.spawn_host_idx - 1) {
@@ -5857,7 +6031,14 @@ KeyCode::Char('i') => {
                                     &host, &proj_name2, &backend_label, &goal2, &flags,
                                 ).await;
                             });
-                            self.notify(format!("Spawning on {host_name}..."));
+                            // ENG-006: remote env injection happens on the
+                            // remote spawn side later; for now we surface the
+                            // resolved engine so the pick isn't silently dropped.
+                            let eng_note = resolved
+                                .as_ref()
+                                .map(|m| format!(" [engine: {}]", m.name))
+                                .unwrap_or_default();
+                            self.notify(format!("Spawning on {host_name}...{eng_note}"));
                         }
                     }
                 }
@@ -5901,6 +6082,16 @@ KeyCode::Char('i') => {
                 items.push(ActionItem { key: 'f', label: "Write feedback".into(), action: ActionKind::WriteFeedback });
                 items.push(ActionItem { key: 'r', label: "Reload project list".into(), action: ActionKind::ReloadProjects });
                 items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
+                // ENG-006: global default engine — the `global_default` layer
+                // the resolver reads. Cycles library engines + "(none)".
+                let cur_engine = orrch_core::Config::load()
+                    .default_engine
+                    .unwrap_or_else(|| "(none)".to_string());
+                items.push(ActionItem {
+                    key: 'E',
+                    label: format!("Default engine: {cur_engine}"),
+                    action: ActionKind::CycleDefaultEngine,
+                });
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
@@ -6132,6 +6323,30 @@ KeyCode::Char('i') => {
                 } else {
                     let names: Vec<_> = spawned.iter().map(|(n, _)| n.as_str()).collect();
                     self.notify(format!("Committing {} projects: {}", spawned.len(), names.join(", ")));
+                }
+            }
+            ActionKind::CycleDefaultEngine => {
+                // ENG-006: cycle Config.default_engine through library engine ids
+                // + "(none)", persisting via Config::save(). Reload-then-save so
+                // we don't clobber other config fields.
+                let ids: Vec<String> = self.library_models.iter().map(|m| m.name.clone()).collect();
+                let mut cfg = orrch_core::Config::load();
+                let next = match &cfg.default_engine {
+                    None => ids.first().cloned(),
+                    Some(cur) => match ids.iter().position(|n| n == cur) {
+                        // advance; wrap past the last id back to None ("(none)")
+                        Some(i) if i + 1 < ids.len() => Some(ids[i + 1].clone()),
+                        Some(_) => None,
+                        None => ids.first().cloned(),
+                    },
+                };
+                cfg.default_engine = next.clone();
+                match cfg.save() {
+                    Ok(()) => self.notify(format!(
+                        "Default engine → {}",
+                        next.unwrap_or_else(|| "(none)".to_string())
+                    )),
+                    Err(e) => self.notify(format!("Failed to save default engine: {e}")),
                 }
             }
             ActionKind::IntegrateInbox(idx) => {

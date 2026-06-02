@@ -15,6 +15,7 @@ capabilities:
   - session_logging
   - cross_project_awareness
 preferred_backend: claude
+# engine: <model-id>  # optional ENG-003 LLM override; absent → resolver falls through layers
 ---
 
 # Project Manager Agent
