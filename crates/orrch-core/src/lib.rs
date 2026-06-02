@@ -51,7 +51,7 @@ pub use feedback::{save_and_route_feedback, CONTINUE_DEV_PROMPT, FeedbackItem, F
 pub use output_parser::{analyze_output, infer_state, OutputSignal};
 pub use pi_rpc::{PiRpcSession, PiEvent};
 pub use process_manager::ProcessManager;
-pub use plan_parser::{parse_plan, parse_status_marker, PlanPhase, PlanFeature, FeatureStatus, RemovalContext, MoveDirection, move_feature_in_plan, append_feature_to_plan, mark_verified_in_plan, rename_feature_in_plan};
+pub use plan_parser::{parse_plan, lint_plan, parse_status_marker, PlanPhase, PlanFeature, FeatureStatus, RemovalContext, MoveDirection, move_feature_in_plan, append_feature_to_plan, mark_verified_in_plan, rename_feature_in_plan};
 pub use diff_log::{DiffEntry, diff_log_path, append_diff, load_diffs, load_all_diffs};
 pub use project::{create_project_scaffold, list_directory, load_deprecated, load_projects, package_as_v1, slugify_project_name, update_feature_status_in_plan, ColorTag, DirEntry, LifecycleStage, Project, ProjectMeta, ProjectScaffold, RoadmapItem, Scope, Temperature};
 pub use session::{DeviceClass, ExternalSession, Session, SessionState, device_class};

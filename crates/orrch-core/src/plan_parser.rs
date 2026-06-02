@@ -16,16 +16,16 @@ pub enum RemovalContext {
 /// strikethrough=Deprecated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureStatus {
-    Planned,         // [ ] — not started
-    Implementing,    // [~] — work in progress
-    Implemented,     // [=] — code done, not tested
-    Testing,         // [t] — tests running
-    Verified,        // [v] — tests passed
-    UserConfirmed,   // [✓] — user manually confirmed
-    Done,            // [x] — shipped
-    Deprecated,      // strikethrough text
-    Pending,         // alias for Planned (backward compat)
-    InProgress,      // alias for Implementing (backward compat)
+    Planned,       // [ ] — not started
+    Implementing,  // [~] — work in progress
+    Implemented,   // [=] — code done, not tested
+    Testing,       // [t] — tests running
+    Verified,      // [v] — tests passed
+    UserConfirmed, // [✓] — user manually confirmed
+    Done,          // [x] — shipped
+    Deprecated,    // strikethrough text
+    Pending,       // alias for Planned (backward compat)
+    InProgress,    // alias for Implementing (backward compat)
     Removed(RemovalContext),
 }
 
@@ -66,7 +66,15 @@ impl FeatureStatus {
 
     /// Whether this status counts as "open" (still needs work).
     pub fn is_open(&self) -> bool {
-        matches!(self, Self::Planned | Self::Pending | Self::Implementing | Self::InProgress | Self::Implemented | Self::Testing)
+        matches!(
+            self,
+            Self::Planned
+                | Self::Pending
+                | Self::Implementing
+                | Self::InProgress
+                | Self::Implemented
+                | Self::Testing
+        )
     }
 
     /// The markdown checkbox marker for write-back.
@@ -79,7 +87,7 @@ impl FeatureStatus {
             Self::Verified => "[v]",
             Self::UserConfirmed => "[✓]",
             Self::Done => "[x]",
-            Self::Deprecated => "[ ]",   // deprecated indicated by strikethrough, not marker
+            Self::Deprecated => "[ ]", // deprecated indicated by strikethrough, not marker
             Self::Removed(_) => "[ ]",
         }
     }
@@ -190,26 +198,65 @@ pub fn parse_plan(content: &str) -> Vec<PlanPhase> {
     let mut phases: Vec<PlanPhase> = Vec::new();
     let mut current_phase: Option<PlanPhase> = None;
     let mut last_feature: Option<usize> = None; // index into current_phase.features for continuation lines
+    let mut region = RoadmapRegion::Outside;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Detect phase headers: ## Phase N: Name, ### Phase N: Name,
-        // or section headers like "### CRITICAL PATH ...", "### Cross-Cutting: ..."
-        if let Some(phase) = try_parse_phase_header(trimmed) {
-            // Save previous phase
-            if let Some(p) = current_phase.take() {
-                if !p.features.is_empty() {
-                    phases.push(p);
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            if level == 2 && is_roadmap_region_heading(heading) {
+                flush_phase(&mut phases, &mut current_phase);
+                region = RoadmapRegion::Explicit;
+                last_feature = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Outside && is_implicit_roadmap_phase(level, heading) {
+                flush_phase(&mut phases, &mut current_phase);
+                region = RoadmapRegion::Implicit;
+                current_phase = Some(parse_phase_heading(heading));
+                last_feature = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Explicit {
+                if level == 3 || (level == 2 && is_phase_like_heading(heading)) {
+                    flush_phase(&mut phases, &mut current_phase);
+                    current_phase = Some(parse_phase_heading(heading));
+                    last_feature = None;
+                    continue;
+                }
+
+                if level == 2 {
+                    flush_phase(&mut phases, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    last_feature = None;
+                    continue;
                 }
             }
-            current_phase = Some(phase);
+
+            if region == RoadmapRegion::Implicit {
+                if is_implicit_roadmap_phase(level, heading) {
+                    flush_phase(&mut phases, &mut current_phase);
+                    current_phase = Some(parse_phase_heading(heading));
+                    last_feature = None;
+                    continue;
+                }
+
+                if level <= 2 {
+                    flush_phase(&mut phases, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    last_feature = None;
+                    continue;
+                }
+            }
+
             last_feature = None;
             continue;
         }
 
         // Detect feature lines within a phase
-        if current_phase.is_some() {
+        if region != RoadmapRegion::Outside && current_phase.is_some() {
             if let Some(feature) = try_parse_feature_line(trimmed) {
                 let phase = current_phase.as_mut().unwrap();
                 phase.features.push(feature);
@@ -245,99 +292,249 @@ pub fn parse_plan(content: &str) -> Vec<PlanPhase> {
         }
     }
 
-    // Don't forget the last phase
-    if let Some(p) = current_phase {
-        if !p.features.is_empty() {
-            phases.push(p);
-        }
-    }
+    flush_phase(&mut phases, &mut current_phase);
 
     phases
 }
 
-/// Try to parse a line as a phase/section header.
-fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
-    // Must start with ## or ###
-    let rest = if let Some(r) = line.strip_prefix("### ") {
-        r
-    } else if let Some(r) = line.strip_prefix("## ") {
-        r
-    } else {
-        return None;
-    };
+/// Return read-only warnings for PLAN.md content that will not parse cleanly.
+pub fn lint_plan(content: &str) -> Vec<String> {
+    use std::collections::BTreeSet;
 
-    // Skip non-phase headings we don't want as phases
-    let lower = rest.to_lowercase();
-    if lower.starts_with("design decisions")
-        || lower.starts_with("architecture")
-        || lower.starts_with("key workflows")
-        || lower.starts_with("technical stack")
-        || lower.starts_with("keybindings")
-        || lower.starts_with("q1 ")
-        || lower.starts_with("q2 ")
-        || lower.starts_with("q3 ")
-        || lower.starts_with("q4 ")
-        || lower.starts_with("q5 ")
-        || lower.starts_with("q6 ")
-        || lower.starts_with("q7 ")
-        || lower.starts_with("q8 ")
-        || lower.starts_with("core concept")
-        || lower.starts_with("hard requirements")
-        || lower.starts_with("panel layout")
-        || lower.starts_with("crate structure")
-        || lower.starts_with("agent department")
-        || lower.starts_with("operation module")
-        || lower.starts_with("multi-backend")
-        || lower.starts_with("order of operations")
-    {
+    let mut warnings = Vec::new();
+    let mut region = RoadmapRegion::Outside;
+    let mut found_region = false;
+    let mut current_phase: Option<(String, usize)> = None;
+    let mut non_roadmap_heading: Option<String> = None;
+    let mut ignored_numbered_headings = BTreeSet::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            if level == 2 && is_roadmap_region_heading(heading) {
+                flush_lint_phase(&mut warnings, &mut current_phase);
+                found_region = true;
+                region = RoadmapRegion::Explicit;
+                non_roadmap_heading = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Outside && is_implicit_roadmap_phase(level, heading) {
+                flush_lint_phase(&mut warnings, &mut current_phase);
+                found_region = true;
+                region = RoadmapRegion::Implicit;
+                current_phase = Some((parse_phase_heading(heading).name, 0));
+                non_roadmap_heading = None;
+                continue;
+            }
+
+            if region == RoadmapRegion::Explicit {
+                if level == 3 || (level == 2 && is_phase_like_heading(heading)) {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    current_phase = Some((parse_phase_heading(heading).name, 0));
+                    continue;
+                }
+
+                if level == 2 {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    non_roadmap_heading = Some(heading.to_string());
+                    continue;
+                }
+            }
+
+            if region == RoadmapRegion::Implicit {
+                if is_implicit_roadmap_phase(level, heading) {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    current_phase = Some((parse_phase_heading(heading).name, 0));
+                    continue;
+                }
+
+                if level <= 2 {
+                    flush_lint_phase(&mut warnings, &mut current_phase);
+                    region = RoadmapRegion::Outside;
+                    non_roadmap_heading = Some(heading.to_string());
+                    continue;
+                }
+            }
+
+            if region == RoadmapRegion::Outside {
+                non_roadmap_heading = Some(heading.to_string());
+            }
+            continue;
+        }
+
+        if region != RoadmapRegion::Outside {
+            if current_phase.is_some() && try_parse_feature_line(trimmed).is_some() {
+                if let Some((_, count)) = current_phase.as_mut() {
+                    *count += 1;
+                }
+            }
+        } else if is_numbered_list_line(trimmed) {
+            let heading = non_roadmap_heading.as_deref().unwrap_or("document");
+            if ignored_numbered_headings.insert(heading.to_string()) {
+                warnings.push(format!(
+                    "numbered list under non-roadmap heading '{heading}' ignored — move under a roadmap phase to track it"
+                ));
+            }
+        }
+    }
+
+    flush_lint_phase(&mut warnings, &mut current_phase);
+
+    if !found_region {
+        warnings.insert(0, "no roadmap region found".to_string());
+    }
+
+    warnings
+}
+
+fn flush_lint_phase(warnings: &mut Vec<String>, current_phase: &mut Option<(String, usize)>) {
+    if let Some((phase_name, feature_count)) = current_phase.take() {
+        if feature_count == 0 {
+            warnings.push(format!("phase '{phase_name}' has 0 features"));
+        }
+    }
+}
+
+fn is_numbered_list_line(line: &str) -> bool {
+    let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0
+        && line
+            .get(digits..)
+            .is_some_and(|rest| rest.starts_with(". "))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoadmapRegion {
+    Outside,
+    Explicit,
+    Implicit,
+}
+
+fn flush_phase(phases: &mut Vec<PlanPhase>, current_phase: &mut Option<PlanPhase>) {
+    if let Some(p) = current_phase.take() {
+        if !p.features.is_empty() {
+            phases.push(p);
+        }
+    }
+}
+
+fn markdown_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.chars().take_while(|c| *c == '#').count();
+    if !(2..=6).contains(&level) {
         return None;
     }
 
-    // Try to extract "Phase N: Name" pattern
+    let rest = line.get(level..)?;
+    if !rest.starts_with(' ') {
+        return None;
+    }
+
+    Some((level, rest.trim()))
+}
+
+fn normalized_heading(heading: &str) -> String {
+    heading
+        .replace("~~", "")
+        .trim()
+        .trim_end_matches('#')
+        .trim()
+        .to_lowercase()
+}
+
+fn is_roadmap_region_heading(heading: &str) -> bool {
+    const ROADMAP_HEADINGS: &[&str] = &[
+        "feature roadmap",
+        "roadmap",
+        "development phases",
+        "phases",
+        "plan",
+        "milestones",
+        "critical path",
+    ];
+
+    let normalized = normalized_heading(heading);
+    if let Some(pos) = normalized.find("feature roadmap") {
+        let prefix = normalized[..pos].trim();
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit() || ch == '.') {
+            return true;
+        }
+    }
+
+    ROADMAP_HEADINGS.iter().any(|candidate| {
+        normalized == *candidate
+            || normalized.strip_prefix(candidate).is_some_and(|rest| {
+                let rest = rest.trim_start();
+                rest.starts_with(':')
+                    || rest.starts_with('-')
+                    || rest.starts_with('—')
+                    || rest.starts_with('–')
+                    || rest.starts_with('(')
+            })
+    })
+}
+
+fn is_phase_like_heading(heading: &str) -> bool {
+    let lower = normalized_heading(heading);
+    lower.starts_with("phase ")
+        || lower.contains("critical path")
+        || lower.contains("cross-cutting")
+        || lower.contains("cross cutting")
+}
+
+fn is_implicit_roadmap_phase(level: usize, heading: &str) -> bool {
+    (level == 2 || level == 3) && is_phase_like_heading(heading)
+}
+
+/// Try to parse a line as a phase/section header.
+#[cfg(test)]
+fn try_parse_phase_header(line: &str) -> Option<PlanPhase> {
+    let (level, rest) = markdown_heading(line)?;
+    if level == 2 || level == 3 {
+        Some(parse_phase_heading(rest))
+    } else {
+        None
+    }
+}
+
+fn parse_phase_heading(heading: &str) -> PlanPhase {
+    let clean = heading.replace("~~", "").trim().to_string();
+    let lower = clean.to_lowercase();
+
     if let Some(after_phase) = lower.strip_prefix("phase ") {
-        // Find the number
-        let num_str: String = after_phase.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = after_phase
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         let number = num_str.parse::<u8>().ok();
 
-        // Name is everything after "Phase N: " or "Phase N — "
-        let name_start = rest.find(':').or_else(|| rest.find('—')).map(|i| i + rest[i..].chars().next().unwrap().len_utf8());
-        let name = if let Some(start) = name_start {
-            rest[start..].trim().to_string()
+        let paren_pos = clean.find('(').unwrap_or(clean.len());
+        let name_start = clean
+            .find('—')
+            .or_else(|| clean.find('–'))
+            .or_else(|| clean.find(':').filter(|&p| p < paren_pos));
+        let name = if let Some(pos) = name_start {
+            clean[pos + clean[pos..].chars().next().unwrap().len_utf8()..]
+                .trim()
+                .to_string()
         } else {
-            rest.to_string()
+            clean.clone()
         };
 
-        return Some(PlanPhase {
+        return PlanPhase {
             name,
             number,
             features: Vec::new(),
-        });
+        };
     }
 
-    // Section headers like "CRITICAL PATH ...", "Cross-Cutting: ...", "Roadmap ...", etc.
-    // Accept them as phases if they contain feature-like content
-    if lower.contains("critical path")
-        || lower.contains("cross-cutting")
-        || lower.contains("roadmap")
-        || lower.contains("ui polish")
-        || lower.contains("carried forward")
-        || lower.starts_with("1.0.0")
-    {
-        // Clean up the name: strip markdown formatting
-        let name = rest
-            .replace("~~", "")
-            .trim()
-            .to_string();
-
-        // Try to extract a version number from names like "1.0.0 Feature Roadmap"
-        return Some(PlanPhase {
-            name,
-            number: None,
-            features: Vec::new(),
-        });
+    PlanPhase {
+        name: clean,
+        number: None,
+        features: Vec::new(),
     }
-
-    None
 }
 
 /// Try to parse a feature line.
@@ -360,6 +557,10 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     // bullets in other contexts are not mistaken for features.
 
     let trimmed = line.trim();
+
+    if let Some(feature) = try_parse_table_feature_line(trimmed) {
+        return Some(feature);
+    }
 
     // Strip the leading prefix to get to the checkbox
     let (id, rest) = strip_feature_prefix(trimmed)?;
@@ -414,13 +615,86 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     })
 }
 
+fn try_parse_table_feature_line(line: &str) -> Option<PlanFeature> {
+    if !line.starts_with('|') || !line.ends_with('|') {
+        return None;
+    }
+
+    let cells: Vec<&str> = line
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim())
+        .collect();
+
+    if cells.len() < 3
+        || cells
+            .iter()
+            .all(|cell| !cell.is_empty() && cell.chars().all(|c| c == '-' || c == ':' || c == ' '))
+    {
+        return None;
+    }
+
+    let status_cell = cells
+        .iter()
+        .position(|cell| parse_status_cell(cell).is_some())?;
+    let (status, _) = parse_status_cell(cells[status_cell])?;
+
+    let title_cell = if cells.len() >= 2 && cells[0].eq_ignore_ascii_case("id") {
+        return None;
+    } else if status_cell >= 1 {
+        cells.get(1).copied().unwrap_or("")
+    } else {
+        cells
+            .iter()
+            .enumerate()
+            .find(|(idx, cell)| *idx != status_cell && !cell.is_empty())
+            .map(|(_, cell)| *cell)
+            .unwrap_or("")
+    };
+
+    let (title, parsed_description) = parse_title_description(title_cell);
+    if title.is_empty() {
+        return None;
+    }
+
+    let id = cells.first().and_then(|cell| cell.parse::<u32>().ok());
+    let description = if parsed_description.is_empty() {
+        cells
+            .iter()
+            .enumerate()
+            .filter(|(idx, cell)| *idx != status_cell && *idx != 0 && *idx != 1 && !cell.is_empty())
+            .map(|(_, cell)| *cell)
+            .collect::<Vec<_>>()
+            .join(" | ")
+    } else {
+        parsed_description
+    };
+    let user_verified = status == FeatureStatus::Verified;
+
+    Some(PlanFeature {
+        id,
+        title,
+        description,
+        status,
+        user_verified,
+    })
+}
+
+fn parse_status_cell(cell: &str) -> Option<(FeatureStatus, usize)> {
+    let trimmed = cell.trim().trim_matches('`').trim();
+    parse_status_marker(trimmed)
+}
+
 /// Strip the leading numbering prefix and return (optional id, remaining text).
 fn strip_feature_prefix(line: &str) -> Option<(Option<u32>, &str)> {
     let trimmed = line.trim_start();
 
     // "CP-N." prefix
     if let Some(after_cp) = trimmed.strip_prefix("CP-") {
-        let num_str: String = after_cp.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = after_cp
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if !num_str.is_empty() {
             let after_num = &after_cp[num_str.len()..];
             let rest = after_num.trim_start_matches('.').trim_start();
@@ -535,7 +809,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 } else {
                     let last_feat = prev_phase.features.last().unwrap();
@@ -544,7 +822,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target } else { target + 1 };
+                    let insert_at = if source_line < target {
+                        target
+                    } else {
+                        target + 1
+                    };
                     new_lines.insert(insert_at, removed);
                 }
             } else {
@@ -569,7 +851,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 } else {
                     let first_feat = &next_phase.features[0];
@@ -578,7 +864,11 @@ pub fn move_feature_in_plan(
                         None => return Ok(false),
                     };
                     let removed = new_lines.remove(source_line);
-                    let insert_at = if source_line < target { target - 1 } else { target };
+                    let insert_at = if source_line < target {
+                        target - 1
+                    } else {
+                        target
+                    };
                     new_lines.insert(insert_at, removed);
                 }
             } else {
@@ -616,7 +906,8 @@ pub fn append_feature_to_plan(
     let lines: Vec<&str> = contents.lines().collect();
 
     // Compute next feature number: max across ALL phases + 1
-    let max_id = phases.iter()
+    let max_id = phases
+        .iter()
         .flat_map(|p| p.features.iter())
         .filter_map(|f| f.id)
         .max()
@@ -767,7 +1058,9 @@ fn find_feature_line(lines: &[&str], title: &str) -> Option<usize> {
 fn find_phase_header_line(lines: &[&str], phase_name: &str) -> Option<usize> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if (trimmed.starts_with("## ") || trimmed.starts_with("### ")) && trimmed.contains(phase_name) {
+        if (trimmed.starts_with("## ") || trimmed.starts_with("### "))
+            && trimmed.contains(phase_name)
+        {
             return Some(i);
         }
     }
@@ -780,7 +1073,8 @@ mod tests {
 
     #[test]
     fn test_parse_done_feature() {
-        let f = try_parse_feature_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
+        let f =
+            try_parse_feature_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
         assert_eq!(f.id, Some(1));
         assert_eq!(f.title, "Core process manager");
         assert_eq!(f.status, FeatureStatus::Done);
@@ -788,7 +1082,8 @@ mod tests {
 
     #[test]
     fn test_parse_pending_feature() {
-        let f = try_parse_feature_line("44. [ ] **Plan.md syntax parser** — parse into tree").unwrap();
+        let f =
+            try_parse_feature_line("44. [ ] **Plan.md syntax parser** — parse into tree").unwrap();
         assert_eq!(f.id, Some(44));
         assert_eq!(f.title, "Plan.md syntax parser");
         assert_eq!(f.status, FeatureStatus::Planned);
@@ -796,13 +1091,18 @@ mod tests {
 
     #[test]
     fn test_parse_deprecated() {
-        let f = try_parse_feature_line("15. [ ] **Template selector** — *DEPRECATED. Replaced by CP-4.*").unwrap();
+        let f = try_parse_feature_line(
+            "15. [ ] **Template selector** — *DEPRECATED. Replaced by CP-4.*",
+        )
+        .unwrap();
         assert_eq!(f.status, FeatureStatus::Deprecated);
     }
 
     #[test]
     fn test_parse_cp_feature() {
-        let f = try_parse_feature_line("CP-1. [x] **Workflow skills** — Convert workflow definitions").unwrap();
+        let f =
+            try_parse_feature_line("CP-1. [x] **Workflow skills** — Convert workflow definitions")
+                .unwrap();
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Workflow skills");
         assert_eq!(f.status, FeatureStatus::Done);
@@ -810,7 +1110,8 @@ mod tests {
 
     #[test]
     fn test_parse_unnumbered() {
-        let f = try_parse_feature_line("- [ ] **Agent profile management** — swappable profiles").unwrap();
+        let f = try_parse_feature_line("- [ ] **Agent profile management** — swappable profiles")
+            .unwrap();
         assert_eq!(f.id, None);
         assert_eq!(f.title, "Agent profile management");
         assert_eq!(f.status, FeatureStatus::Planned);
@@ -878,14 +1179,18 @@ mod tests {
 
     #[test]
     fn test_phase_header() {
-        let p = try_parse_phase_header("## Phase 4: Multi-Provider & Resource Management (1.5.0)").unwrap();
+        let p = try_parse_phase_header("## Phase 4: Multi-Provider & Resource Management (1.5.0)")
+            .unwrap();
         assert_eq!(p.number, Some(4));
         assert!(p.name.contains("Multi-Provider"));
     }
 
     #[test]
     fn test_critical_path_header() {
-        let p = try_parse_phase_header("### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)").unwrap();
+        let p = try_parse_phase_header(
+            "### CRITICAL PATH — Skill-Based Workflow Execution (blocks all orchestration)",
+        )
+        .unwrap();
         assert!(p.name.contains("CRITICAL PATH"));
         assert_eq!(p.number, None);
     }
@@ -904,9 +1209,15 @@ mod tests {
         let feats = &phases[0].features;
         assert_eq!(feats.len(), 2);
         assert_eq!(feats[0].status, FeatureStatus::Verified);
-        assert!(feats[0].user_verified, "[v] feature should be user_verified");
+        assert!(
+            feats[0].user_verified,
+            "[v] feature should be user_verified"
+        );
         assert_eq!(feats[1].status, FeatureStatus::Done);
-        assert!(!feats[1].user_verified, "[x] feature must not be user_verified");
+        assert!(
+            !feats[1].user_verified,
+            "[x] feature must not be user_verified"
+        );
     }
 
     #[test]
@@ -930,7 +1241,10 @@ mod tests {
 
         let after = std::fs::read_to_string(&plan_path).unwrap();
         let expected = "# Plan\n\n## Phase 0: Test\n\n1. [v] **My Feature** — did a thing\n2. [x] **Other Feature** — untouched\n";
-        assert_eq!(after, expected, "only the matched line's [x] should become [v]");
+        assert_eq!(
+            after, expected,
+            "only the matched line's [x] should become [v]"
+        );
 
         // Idempotency: second call should find no `[x]` matching the title and return false.
         let changed2 = mark_verified_in_plan(&plan_path, "My Feature").unwrap();
@@ -975,7 +1289,259 @@ mod tests {
         // previously panicked at `&s[..3]` because byte 3 lands inside the
         // codepoint. Observed crash on 2026-04-27 against the line
         // "🟢 WebUI port: PM proposes 8492. ..." in PLAN.md.
-        assert_eq!(parse_status_marker("🟢 WebUI port: PM proposes 8492."), None);
+        assert_eq!(
+            parse_status_marker("🟢 WebUI port: PM proposes 8492."),
+            None
+        );
         assert_eq!(parse_status_marker("é foo"), None);
+    }
+
+    fn feature_count(phases: &[PlanPhase]) -> usize {
+        phases.iter().map(|phase| phase.features.len()).sum()
+    }
+
+    #[test]
+    fn test_lint_plan_warns_for_missing_roadmap_and_ignored_numbered_list() {
+        let warnings = lint_plan(
+            r#"## Open Conflicts
+
+### Native UI Rebuild Decisions
+1. **Toolkit selection is reopened.**
+2. **Native voice path is unresolved.**
+"#,
+        );
+
+        assert!(warnings
+            .iter()
+            .any(|warning| warning == "no roadmap region found"));
+        assert!(warnings.iter().any(|warning| warning.contains(
+            "numbered list under non-roadmap heading 'Native UI Rebuild Decisions' ignored"
+        )));
+    }
+
+    #[test]
+    fn test_lint_plan_warns_for_empty_phase() {
+        let warnings = lint_plan(
+            r#"## Feature Roadmap
+
+### Phase 1: Empty
+
+### Phase 2: Work
+- [ ] Ship it
+"#,
+        );
+
+        assert!(warnings
+            .iter()
+            .any(|warning| warning == "phase 'Empty' has 0 features"));
+        assert!(!warnings
+            .iter()
+            .any(|warning| warning == "phase 'Work' has 0 features"));
+    }
+
+    #[test]
+    fn fixture_concord_open_conflicts_not_scooped() {
+        let open_conflicts = r#"# Concord — Master Development Plan
+
+## Open Conflicts
+
+### Native UI Rebuild Decisions — Open (2026-06-01)
+1. **Toolkit selection is reopened for the native-shell track.** The older "default to Tauri v2" decision still covers the transitional webview builds and packaging pipeline, but it does not settle the new native app shell plus managed-webview surface strategy. PM must drive evidence-based spikes for the top candidates from `docs/architecture/native-ui-rebuild-scope.md` (Slint / gpui / iced / Flutter + flutter_rust_bridge) before implementation.
+2. **Native voice path is unresolved.** Decide between LiveKit Rust SDK (libwebrtc-backed, heavier but highest parity) and finishing the existing `webrtc-rs` path (pure Rust, parity risk) through a live audio spike against a docker deployment.
+3. **Platform scope of native-UI v1 is unresolved.** Decide whether v1 is desktop-only first or desktop + mobile from the start; this choice affects toolkit selection, release schedule, and tvOS/mobile reuse.
+4. **Parity bar for retiring the webview-only shell is unresolved.** Do not remove the existing webview build for any platform until the required native surfaces are defined, implemented, and observed working surface-by-surface.
+5. **Managed webview boundary is unresolved.** Native clients must support interactive webview surfaces for channel apps/extensions. PM must decide which surfaces are native-rendered, which are managed-webview-rendered, and whether the chat display remains a web-rendered extensibility surface.
+"#;
+        assert_eq!(feature_count(&parse_plan(open_conflicts)), 0);
+
+        let roadmap = r#"## Feature Roadmap
+
+### TOP PRIORITY: P2P-first native architecture (routed 2026-05-27)
+
+**Source of truth: [`docs/architecture/p2p-design.md`](docs/architecture/p2p-design.md).** This is the largest single architectural shift on the roadmap; orrchestrator sequences these phases one at a time, each ending in a shippable state. Earlier roadmap items below remain relevant — voice subsystem health, mobile UI polish, settings, extensions, etc. — but the P2P phases below are the dominant track until they land. Phase 0 already shipped in this branch (2026-05-27); Phases 2–9 are the orrchestrator's queue.
+
+- [x] **Phase 0 — Web-compat hardening (shipped 2026-05-27, branch `chore/architecture-cleanup-7f3a`):** `INSTANCE_DOMAIN` auto-derived from `PUBLIC_BASE_URL`; `TURN_HOST` derives to `turn.<INSTANCE_DOMAIN>` and refuses RFC1918 values with logged warning; `services/voice_health.py` runs a non-blocking background STUN probe every 10 min and caches the snapshot.
+- [ ] **Phase 1 — P2P architecture design doc** (shipped 2026-05-27 as `docs/architecture/p2p-design.md`; captured here as a phase rather than separately marked completed for orrchestrator's accounting purposes).
+- [x] **Phase 2 — Peer identity scaffolding.** Ed25519 keypair on first launch, persisted in `tauri-plugin-stronghold`. Public-key fingerprint exposed via Tauri command + Settings UI.
+"#;
+        let phases = parse_plan(&format!("{open_conflicts}\n{roadmap}"));
+        assert_eq!(phases.len(), 1);
+        assert_eq!(feature_count(&phases), 3);
+        assert!(!phases[0]
+            .features
+            .iter()
+            .any(|feature| feature.title.contains("Toolkit selection")));
+    }
+
+    #[test]
+    fn fixture_orrapus_done_and_planned_are_phases() {
+        let content = r#"## Feature Roadmap
+
+### Done
+- **Headless Image Generation API** — `POST /orragen/api/generate`, auth-locked with dual-key (`X-Dashboard-Key` + `X-Orragen-Key`). Profiles in `orragen/data/image_profiles.yaml`. (2026-03-27)
+- **Model filename display layer** — cleaned descriptive titles, compatibility/expertise info at a glance (2026-03-28)
+- **Parameter sweep from main menu** — exploration tab removed, sweeps integrated into image gen with per-LoRA weight control (2026-03-28)
+
+### Planned
+
+#### INS-001: Create omnipus repo for parallel development
+- [x] Create a separate private GitHub repo for omnipus (`TruStoryHnsl/omnipus`)
+- [x] No changes land on orrapus main until GLSR is proven stable and cbsr is fully replaceable
+- [x] omnipus is its own independent application (Rust successor), not a fork — integration points wired in omnipus repo directly
+- [x] GLSR code and cbsr replacement live in omnipus repo
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert_eq!(phases[0].name, "Done");
+        assert_eq!(phases[0].features.len(), 3);
+        assert_eq!(phases[1].name, "Planned");
+        assert_eq!(phases[1].features.len(), 4);
+    }
+
+    #[test]
+    fn fixture_porrtfolio_fr_headings_are_phases() {
+        let content = r#"## Feature Roadmap
+
+Build order is: bug fix first → schema refactor (foundation for everything
+else) → individual entry types in dependency order → project workflow
+(consumes the typed entries) → promotion + resume-ingest rules.
+
+### FR-001 — Fix de-dup merge 500
+- Status: `[x] done` (commit `9768ba1`, 2026-05-05)
+- Diagnose root cause via server logs, fix the merge handler in
+  `porrtfolio/web/routes.py` (and helpers), add a regression test that
+  exercises the merge endpoint end-to-end and asserts non-500.
+- Source: INS-001.
+
+### FR-002 — Typed-entry schema refactor with shared location/time fields
+- Status: `[x] done` (commit `85a42b6`, 2026-05-05) — chose option (a) per-type tables; six typed-entry tables added with shared `city/state/date/time`. Polymorphic `project_entry_link` join added (additive — legacy `project_item_display` unchanged). No row migration; all new tables empty.
+- Foundation work for FR-003..FR-008. Decide table layout (per-type vs
+  parent+child) during design. Add `city`, `state`, `date`, `time` columns to
+  every entry type. Migration must preserve existing `portfolio_item`,
+  `employment`, and `project` rows.
+- Source: INS-002.
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert!(phases[0].name.starts_with("FR-001"));
+        assert!(phases[1].name.starts_with("FR-002"));
+        assert_eq!(feature_count(&phases), 6);
+    }
+
+    #[test]
+    fn fixture_orracle_development_phases_only() {
+        let content = r#"## Queued Features
+
+### Headless Image Generation API (for orradash integration)
+**Source**: orradash feedback pipeline 2026-03-27 | **Status**: DONE | **PLAN.md**: entry #1
+
+New authenticated API at `/api/image/` for headless image generation:
+- [x] `POST /api/image/generate` — batch_size, batch_count, profile, prompt
+- [x] `GET /api/image/status/<id>` — job progress
+- [x] `GET /api/image/result/<id>` — retrieve images
+- [x] `GET /api/image/profiles` — list profiles
+- [x] `X-Orracle-Key` header auth (API key in `.env`). Initially only orradash is authorized.
+
+## Development Phases
+
+### Phase A: Job Scheduler + Compute Load Watcher [DONE]
+**Source: feedback item 1.5**
+
+1. [x] **Pre-planned job configs** — `plan_job()` in job_queue.py, persists in queue.yaml, visible on dashboard as "waiting"
+2. [x] **Suspend/resume** — `suspend()`/`resume()` with SIGSTOP/SIGCONT via SSH
+3. [x] **Compute load watcher** — `ComputeWatcher` class in services.py, polls nvidia-smi + CPU load every 15s, auto-throttles jobs with `throttle=True`
+4. [x] **Dashboard quick-start** — Start button on waiting-job cards (`templates/dashboard_new.html:231`), `startWaitingJob()` in `static/js/dashboard.js:153`, `/api/queue/<id>/start` endpoint, `job_queue.start_waiting()` handles WAITING→PENDING transition with SSE broadcast
+5. [x] **Throttle toggle API** — `POST /api/queue/<id>/throttle`, SSE broadcasts load events
+
+### Phase B: Content Safety Layer [DONE]
+**Source: feedback items 3, 4, 6**
+
+1. [x] **Blurred output** — Blur toggle on both `/studio/image` and `/studio/forge`, shared localStorage key
+2. [x] **Guardrail training type** — "Safety Guardrail Fine-Tune" option in training type dropdown
+3. [x] **Model quarantine** — `visibility: private` on all model_registry.yaml profiles, export page warns before deploying private models
+4. [x] **ComfyUI output isolation** — See Phase E
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 2);
+        assert_eq!(feature_count(&phases), 9);
+        assert!(!phases
+            .iter()
+            .flat_map(|phase| phase.features.iter())
+            .any(|feature| feature.title.contains("POST /api/image/generate")));
+    }
+
+    #[test]
+    fn fixture_omnipus_tables_parse_without_architecture_leak() {
+        let content = r#"## Architecture
+
+### Key Design Decisions
+
+- **One library crate (`glsr`) + one binary crate (`glsr-cli`)** — clean separation of logic and interface
+- **Platform trait abstraction** — all backends implement the same interface; new platforms are a single module file
+- **URL-first input model** — user submits URLs, platform auto-detected from domain, fallback to generic yt-dlp
+
+## Feature Roadmap
+
+### Phase 1: Workspace Init + Core Abstractions
+> Foundation — project scaffolding and the trait that everything builds on.
+
+| ID | Task | Status | Source |
+|----|------|--------|--------|
+| P1-01 | Initialize Cargo workspace with `glsr` (lib) + `glsr-cli` (bin) members | `[ ]` | INS-001 |
+| P1-02 | Create `.scope` (commercial), `.gitignore`, `CLAUDE.md` | `[ ]` | INS-001 |
+| P1-03 | Define `Platform` trait in `glsr/src/platform.rs` — `name()`, `check_status()`, `fetch_stream_url()`, `normalize_input()` | `[ ]` | INS-002 |
+
+## Open Conflicts
+
+### 1. Scope mismatch: `.scope` says `public`, INS-001 says `commercial`
+
+The existing `.scope` file contains `public`. INS-001 explicitly requests `commercial`.
+"#;
+        let phases = parse_plan(content);
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0].number, Some(1));
+        assert_eq!(phases[0].features.len(), 3);
+        assert!(!phases[0]
+            .features
+            .iter()
+            .any(|feature| feature.title.contains("One library crate")));
+    }
+
+    #[test]
+    fn fixture_orrgent_numbered_architecture_not_scooped() {
+        let content = r#"# orrgent — Design Plan
+
+## 1. Vision recap
+
+orrgent is two things at once. First, a personal career-guidance program that scrapes listings, parses them, filters them against the user's profile, and dispatches submissions — with the casting-call submitter for Casting Networks / Actors Access as the canonical first capability.
+
+## 2. Architecture overview
+
+### Module boundaries
+
+```
+orrgent/
+  daemon/                  # long-running scheduler + dispatch engine (Rust eventually; Python for Phase 0/1)
+    scheduler.{py,rs}      # twice-daily run loop, retry policy, jitter
+    dispatch.{py,rs}       # submission state machine, idempotency
+  adapters/                # one subdir per source — fully self-contained
+    casting_networks/      # the blueprint
+```
+"#;
+        let phases = parse_plan(content);
+        assert!(phases.is_empty());
+    }
+
+    #[test]
+    fn test_phase_name_ignores_colon_inside_parenthetical() {
+        // Em-dash is the title separator; a colon inside "(target: ...)" must not
+        // be mistaken for it. Regression for orrgent phases like
+        // "Phase 6 — Orrchestrator absorption (target: ongoing)".
+        let p = try_parse_phase_header("### Phase 6 — Orrchestrator absorption (target: ongoing)").unwrap();
+        assert_eq!(p.name, "Orrchestrator absorption (target: ongoing)");
+        assert_eq!(p.number, Some(6));
+        // And a colon-style heading still works:
+        let q = try_parse_phase_header("## Phase 4: Multi-Provider (1.5.0)").unwrap();
+        assert!(q.name.starts_with("Multi-Provider"));
     }
 }
