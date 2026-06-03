@@ -389,12 +389,18 @@ pub fn voice_panel_lines(
         return lines;
     }
 
+    lines.push("[Space/t] toggle listening".to_string());
+
+    if max_rows == 2 {
+        return lines;
+    }
+
     if activities.is_empty() {
         lines.push("(no voice activity yet)".to_string());
         return lines;
     }
 
-    lines.extend(activities.iter().rev().take(max_rows - 1).map(|activity| {
+    lines.extend(activities.iter().rev().take(max_rows - 2).map(|activity| {
         format!(
             "{}  \"{}\"  → {}  [{}]",
             hh_mm_ss(activity.ts_ms),
@@ -5681,6 +5687,7 @@ mod ui_tests {
         println!("SEEDED voice_panel_lines OUTPUT:\n{}", lines.join("\n"));
         let output = lines.join("\n");
         assert!(output.contains("🎙 LISTENING"));
+        assert!(output.contains("[Space/t] toggle listening"));
         assert!(output.contains("model: whisper-tiny (cpu)"));
         assert!(output.contains("⏳ pending: Dispatch → orrchestrator"));
         assert!(output.contains("\"route the responsive tabs fix\""));

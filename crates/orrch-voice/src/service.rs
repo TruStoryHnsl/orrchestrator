@@ -14,7 +14,7 @@ use crate::engine::{DEFAULT_MODEL_ID, VoiceEngine};
 use crate::protocol::{Utterance, VoiceRequest, VoiceResponse, default_socket_path};
 use crate::toggle::ToggleState;
 use crate::vocab::VocabStore;
-use crate::{VoiceStatusSnapshot, publish_voice_status, update_voice_status};
+use crate::{VoiceStatusSnapshot, publish_voice_status, publish_voice_toggle, update_voice_status};
 
 #[derive(Debug, Clone)]
 pub struct VoiceConfig {
@@ -68,6 +68,7 @@ impl VoiceService {
             model_ready: Arc::new(AtomicBool::new(false)),
             engine: Arc::new(Mutex::new(None)),
         };
+        publish_voice_toggle(service.toggle.clone());
         publish_voice_status(service.status_snapshot());
         service
     }
