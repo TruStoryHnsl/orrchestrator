@@ -26,6 +26,7 @@ pub struct VoiceStatusSnapshot {
     pub model: String,
     pub device: String,
     pub pending: Option<String>,
+    pub partial_transcript: String,
     pub queued: usize,
 }
 
@@ -65,6 +66,11 @@ pub fn set_voice_listening(on: bool) -> Option<bool> {
     } else {
         toggle.stop();
     }
-    update_voice_status(|status| status.listening = on);
+    update_voice_status(|status| {
+        status.listening = on;
+        if !on {
+            status.partial_transcript.clear();
+        }
+    });
     Some(on)
 }

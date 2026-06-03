@@ -385,13 +385,21 @@ pub fn voice_panel_lines(
         status.model, status.device, readiness, pending, status.queued
     )];
 
-    if max_rows == 1 {
+    if lines.len() >= max_rows {
+        return lines;
+    }
+
+    if status.listening && !status.partial_transcript.trim().is_empty() {
+        lines.push(format!("▶ {}", compact_inline(status.partial_transcript.trim(), 100)));
+    }
+
+    if lines.len() >= max_rows {
         return lines;
     }
 
     lines.push("[Space/t] toggle listening".to_string());
 
-    if max_rows == 2 {
+    if lines.len() >= max_rows {
         return lines;
     }
 
@@ -400,7 +408,8 @@ pub fn voice_panel_lines(
         return lines;
     }
 
-    lines.extend(activities.iter().rev().take(max_rows - 2).map(|activity| {
+    let remaining_rows = max_rows.saturating_sub(lines.len());
+    lines.extend(activities.iter().rev().take(remaining_rows).map(|activity| {
         format!(
             "{}  \"{}\"  → {}  [{}]",
             hh_mm_ss(activity.ts_ms),
@@ -423,6 +432,8 @@ fn voice_line_style(line: &str) -> Style {
         Style::default().fg(TEXT_DIM)
     } else if line.contains("[error]") {
         Style::default().fg(Color::Red)
+    } else if line.starts_with("▶ ") {
+        Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)
     } else if line.starts_with("🎙 LISTENING") {
         Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
     } else {
@@ -5637,6 +5648,7 @@ mod ui_tests {
             model: "whisper-tiny".to_string(),
             device: "cpu".to_string(),
             pending: Some("Dispatch → orrchestrator".to_string()),
+            partial_transcript: "route the responsive tabs fix".to_string(),
             queued: 2,
         };
         let activities = vec![
@@ -5690,6 +5702,7 @@ mod ui_tests {
         assert!(output.contains("[Space/t] toggle listening"));
         assert!(output.contains("model: whisper-tiny (cpu)"));
         assert!(output.contains("⏳ pending: Dispatch → orrchestrator"));
+        assert!(output.contains("▶ route the responsive tabs fix"));
         assert!(output.contains("\"route the responsive tabs fix\""));
         assert!(output.contains("Dispatch → orrchestrator: Fix responsive tabs."));
         assert!(output.contains("[proposed]"));

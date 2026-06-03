@@ -8,6 +8,7 @@ fn test_config() -> VoiceConfig {
         device_name: None,
         socket_path: default_socket_path().with_file_name("orrch-voice-toggle-api-test.sock"),
         max_utterance_secs: 1,
+        chunk_secs: 3.0,
     }
 }
 
