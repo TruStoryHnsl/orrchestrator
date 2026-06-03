@@ -137,6 +137,10 @@ impl RpcProcess {
             .arg("--model")
             .arg(&config.model)
             .arg("--no-session")
+            // SAFETY: disable pi's built-in read/bash/edit/write so a voice-driven
+            // agent cannot run shell or modify files from a (mis)heard utterance.
+            // The portal acts ONLY through the controlled MCP tools (intake/dispatch).
+            .arg("--no-tools")
             .arg("--thinking")
             .arg("off")
             .arg("--append-system-prompt")
