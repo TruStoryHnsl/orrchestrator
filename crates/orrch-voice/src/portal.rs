@@ -20,15 +20,16 @@ const PI_BIN: &str = "/home/user/.npm-global/bin/pi";
 const ORRCH_MCP_BIN: &str = "/home/user/.local/bin/orrch-mcp-server";
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"You are the conversational orrchestrator admin portal.
-You help the user create and submit feedback, ideas, and implementation instructions into orrchestrator, and you can dispatch heavier work to Codex through tools.
-Use the orrchestrator MCP tools when helpful: instruction_intake, inbox_append, incorporate_inbox, and develop_feature.
-Before submitting, appending, incorporating, or dispatching, ask for a clear confirmation.
-Replies are spoken aloud by TTS: keep them concise, conversational, no markdown, no code blocks, one to three short sentences."#;
+You help the user create and submit feedback or implementation instructions, and you can dispatch heavier work to Codex.
+Available tools are list_projects, submit_feedback, and dispatch_to_codex.
+Before calling submit_feedback or dispatch_to_codex, ask the user for clear confirmation, then act only on the next turn when the user agrees.
+Replies are spoken aloud by TTS: keep them concise, conversational, no markdown, no code, one to three short sentences."#;
 
 #[derive(Debug, Clone)]
 pub struct PortalConfig {
     pub provider: String,
     pub model: String,
+    pub ollama_url: String,
     pub system_prompt: String,
     pub mcp_config_path: PathBuf,
     pub session_path: PathBuf,
@@ -42,9 +43,11 @@ impl PortalConfig {
 
         Ok(Self {
             provider: std::env::var("ORRCH_VOICE_PORTAL_PROVIDER")
-                .unwrap_or_else(|_| "openai".to_string()),
+                .unwrap_or_else(|_| "local".to_string()),
             model: std::env::var("ORRCH_VOICE_PORTAL_MODEL")
-                .unwrap_or_else(|_| "gpt-5.1".to_string()),
+                .unwrap_or_else(|_| "llama3:8b".to_string()),
+            ollama_url: std::env::var("ORRCH_VOICE_PORTAL_OLLAMA_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".to_string()),
             system_prompt: std::env::var("ORRCH_VOICE_PORTAL_SYSTEM_PROMPT")
                 .unwrap_or_else(|_| DEFAULT_SYSTEM_PROMPT.to_string()),
             mcp_config_path: std::env::var("ORRCH_VOICE_PORTAL_MCP_CONFIG")
@@ -65,6 +68,19 @@ pub struct PortalTurn {
 
 pub trait PortalAgent: Send + Sync {
     fn send_turn(&self, user_text: &str) -> Result<PortalTurn>;
+}
+
+pub fn portal_agent_from_env() -> Result<Box<dyn PortalAgent>> {
+    portal_agent_from_config(PortalConfig::from_env()?)
+}
+
+pub fn portal_agent_from_config(config: PortalConfig) -> Result<Box<dyn PortalAgent>> {
+    match config.provider.trim().to_ascii_lowercase().as_str() {
+        "local" | "ollama" => Ok(Box::new(crate::portal_local::OllamaPortal::from_config(
+            config,
+        )?)),
+        _ => Ok(Box::new(Portal::new(config)?)),
+    }
 }
 
 pub struct Portal {
@@ -248,7 +264,7 @@ impl RpcProcess {
 pub fn start_portal_loop_from_env(
     receiver: mpsc::Receiver<Utterance>,
 ) -> Result<thread::JoinHandle<()>> {
-    let portal = Arc::new(Portal::from_env()?);
+    let portal: Arc<dyn PortalAgent> = Arc::from(portal_agent_from_env()?);
     let speaker = Arc::new(SystemTts);
     Ok(start_portal_loop(receiver, portal, speaker))
 }
