@@ -291,6 +291,58 @@ fn extract_engine_key(s: &str) -> Option<String> {
 
 // ─── ENG-004: pure env-injection binding ────────────────────────────────────
 
+// ─── ENG-009: engine↔harness routing policy (account/billing constraints) ──
+
+/// PURE. True if `engine` is an Anthropic/Claude-family model — the class that
+/// is subscription-only: it runs ONLY in the Claude Code CLI harness, never via
+/// the token-billed Anthropic API, and never in any other harness. Detected by
+/// provider name or a "claude" name match (Anthropic is the only wire format
+/// these speak).
+pub fn is_anthropic_family(engine: &ModelEntry) -> bool {
+    let provider = engine.provider.to_ascii_lowercase();
+    provider.contains("anthropic")
+        || provider.contains("claude")
+        || engine.name.to_ascii_lowercase().contains("claude")
+}
+
+/// PURE. Enforce the recorded engine↔harness routing constraints (see
+/// `.orrch/architecture.md` → "Engine routing constraints"). Returns
+/// `Err(reason)` for a forbidden pairing, `Ok(())` for an allowed one.
+///
+/// Hard rules (the user's account reality):
+///  1. **Anthropic API is token-billed and NOT covered by the subscription** —
+///     the `AnthropicApi` backend is forbidden for EVERY engine. Anything that
+///     needs Claude routes through the Claude Code harness instead.
+///  2. **Claude/Anthropic-family models are Claude-Code-harness-only** — they
+///     cannot run in any non-Claude harness (Codex, Gemini, Crush, OpenCode,
+///     Pi, or either HTTP-API backend).
+///  3. **OpenAI/GPT (codex-subscription) models MAY run in the Claude Code
+///     harness** — the intended cross-engine flexibility vector, explicitly
+///     permitted here. (The transport binding that makes Claude Code actually
+///     speak to a GPT engine is a separate build; this gate only governs what
+///     is *allowed*, and never widens the surface for Claude models.)
+pub fn engine_harness_policy(harness: BackendKind, engine: &ModelEntry) -> Result<(), String> {
+    // Rule 1 — never pay Anthropic per token.
+    if harness == BackendKind::AnthropicApi {
+        return Err(format!(
+            "Anthropic API is token-billed and not covered by the subscription; \
+             route engine '{}' through the Claude Code harness instead",
+            engine.name
+        ));
+    }
+    // Rule 2 — Claude/Anthropic models run only in the Claude Code harness.
+    if is_anthropic_family(engine) && harness != BackendKind::Claude {
+        return Err(format!(
+            "engine '{}' is an Anthropic/Claude model — it runs only in the Claude Code \
+             harness (subscription-covered); it cannot run in the {} harness",
+            engine.name,
+            harness.label()
+        ));
+    }
+    // Rule 3 — OpenAI-family in the Claude Code harness is allowed (no deny).
+    Ok(())
+}
+
 /// PURE. Given a harness (`BackendKind`) and a resolved engine (`ModelEntry`),
 /// produce the env-var pairs that must be injected into the spawned child so the
 /// harness talks to the engine's endpoint/model. The API-KEY VALUE is resolved
@@ -307,6 +359,10 @@ pub fn engine_env(
     engine: &ModelEntry,
     resolve_key: impl Fn(&str) -> Option<String>,
 ) -> anyhow::Result<Vec<(String, String)>> {
+    // ENG-009 gate FIRST: reject forbidden (engine, harness) pairings before
+    // any binding work — billing/asymmetry constraints take precedence over
+    // wire-format compatibility.
+    engine_harness_policy(harness, engine).map_err(|e| anyhow::anyhow!(e))?;
     let has = |f: ApiFormat| engine.api_format.contains(&f);
     let base = engine.base_url.clone();
     let model = engine.model_id.clone();
@@ -534,6 +590,86 @@ mod tests {
         assert_eq!(map.get("OPENAI_BASE_URL").map(String::as_str), Some("https://api.deepseek.com"));
         assert_eq!(map.get("OPENAI_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
         assert_eq!(map.get("OPENAI_API_KEY").map(String::as_str), Some("sk-test"));
+    }
+
+    // ── ENG-009 engine↔harness routing policy ───────────────────────────────
+
+    fn mk_claude_engine() -> ModelEntry {
+        mk_engine(
+            "Claude Sonnet 4.6",
+            "Anthropic",
+            "claude-sonnet-4-6",
+            None,
+            Some("ANTHROPIC_AUTH_TOKEN"),
+            vec![ApiFormat::Anthropic],
+            EngineLocation::Cloud,
+        )
+    }
+
+    fn mk_gpt_engine() -> ModelEntry {
+        mk_engine(
+            "GPT-4o",
+            "OpenAI",
+            "gpt-4o",
+            None,
+            Some("OPENAI_API_KEY"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        )
+    }
+
+    #[test]
+    fn test_policy_detects_anthropic_family() {
+        assert!(is_anthropic_family(&mk_claude_engine()));
+        assert!(!is_anthropic_family(&mk_gpt_engine()));
+    }
+
+    #[test]
+    fn test_policy_claude_model_ok_in_claude_harness() {
+        assert!(engine_harness_policy(BackendKind::Claude, &mk_claude_engine()).is_ok());
+    }
+
+    #[test]
+    fn test_policy_claude_model_denied_in_every_other_harness() {
+        for h in [
+            BackendKind::Codex,
+            BackendKind::Gemini,
+            BackendKind::Crush,
+            BackendKind::OpenCode,
+            BackendKind::Pi,
+            BackendKind::OpenAiApi,
+            BackendKind::AnthropicApi,
+        ] {
+            assert!(
+                engine_harness_policy(h, &mk_claude_engine()).is_err(),
+                "Claude model must be denied in {} harness",
+                h.label()
+            );
+        }
+    }
+
+    #[test]
+    fn test_policy_anthropic_api_backend_denied_for_all_engines() {
+        // billing guard: AnthropicApi is forbidden even for a non-Claude engine.
+        assert!(engine_harness_policy(BackendKind::AnthropicApi, &mk_gpt_engine()).is_err());
+        assert!(engine_harness_policy(BackendKind::AnthropicApi, &mk_claude_engine()).is_err());
+    }
+
+    #[test]
+    fn test_policy_gpt_allowed_in_claude_harness() {
+        // the intended cross-engine vector: OpenAI/GPT in the Claude Code harness.
+        assert!(engine_harness_policy(BackendKind::Claude, &mk_gpt_engine()).is_ok());
+        // and still allowed in its native OpenAI-format harnesses.
+        assert!(engine_harness_policy(BackendKind::OpenCode, &mk_gpt_engine()).is_ok());
+    }
+
+    #[test]
+    fn test_engine_env_blocks_claude_via_anthropic_api() {
+        // integration: the gate fires inside engine_env, closing the token-billing leak.
+        let err = engine_env(BackendKind::AnthropicApi, &mk_claude_engine(), |_| Some("k".into()));
+        assert!(err.is_err());
+        let err = engine_env(BackendKind::OpenCode, &mk_claude_engine(), |_| Some("k".into()));
+        assert!(err.is_err(), "Claude model must not bind to a non-Claude harness");
     }
 
     #[test]
