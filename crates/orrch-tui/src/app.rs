@@ -2509,7 +2509,7 @@ impl App {
                         match self.hypervise_sub {
                             HyperviseSub::Sessions => self.key_sessions_tab(key),
                             HyperviseSub::Loops => self.key_hypervise_loops(key),
-                            HyperviseSub::Voice => self.key_placeholder(key),
+                            HyperviseSub::Voice => self.key_voice_tab(key),
                             HyperviseSub::TokenUsage => self.key_placeholder(key),
                         }
                     }
@@ -3564,6 +3564,16 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+
+    fn key_voice_tab(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char(' ') | KeyCode::Char('t') => {
+                let _ = orrch_voice::request_voice_toggle();
+                Ok(())
+            }
+            _ => self.key_placeholder(key),
+        }
     }
 
     /// Key handler for the Hypervise > Loops sub-tab (overhaul point 8).

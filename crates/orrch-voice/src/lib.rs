@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::toggle::ToggleState;
+
 pub mod capture;
 pub mod control_loop;
 pub mod device;
@@ -15,6 +17,7 @@ pub mod vocab;
 pub type VoiceStatusHandle = Arc<Mutex<VoiceStatusSnapshot>>;
 
 static GLOBAL_VOICE_STATUS: OnceLock<VoiceStatusHandle> = OnceLock::new();
+static GLOBAL_VOICE_TOGGLE: OnceLock<ToggleState> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoiceStatusSnapshot {
@@ -38,8 +41,30 @@ pub(crate) fn publish_voice_status(snapshot: VoiceStatusSnapshot) -> VoiceStatus
     handle
 }
 
+pub(crate) fn publish_voice_toggle(toggle: ToggleState) {
+    let _ = GLOBAL_VOICE_TOGGLE.set(toggle);
+}
+
 pub(crate) fn update_voice_status(update: impl FnOnce(&mut VoiceStatusSnapshot)) {
     if let Some(handle) = GLOBAL_VOICE_STATUS.get() {
         update(&mut handle.lock().unwrap());
     }
+}
+
+/// Toggle the voice listen state from another in-process consumer (the TUI).
+/// Returns the new listening state, or None if the voice service isn't running.
+pub fn request_voice_toggle() -> Option<bool> {
+    let toggle = GLOBAL_VOICE_TOGGLE.get()?;
+    set_voice_listening(!toggle.is_listening())
+}
+
+pub fn set_voice_listening(on: bool) -> Option<bool> {
+    let toggle = GLOBAL_VOICE_TOGGLE.get()?;
+    if on {
+        toggle.start();
+    } else {
+        toggle.stop();
+    }
+    update_voice_status(|status| status.listening = on);
+    Some(on)
 }
