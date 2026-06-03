@@ -133,7 +133,7 @@ impl VoiceControlLoop {
     /// Publish the loop log through a process-global handle for the future TUI
     /// panel. The first enabled loop owns the handle for the process lifetime.
     pub fn publish_activity_handle(&self) {
-        let _ = GLOBAL_ACTIVITY_LOG.set(self.activity_handle());
+        publish_activity_log(self.activity_handle());
     }
 
     pub fn global_activity_log() -> Option<VoiceActivityLog> {
@@ -345,6 +345,20 @@ impl VoiceControlLoop {
     ) {
         push_activity(&self.inner.activity_log, utterance, action, status, detail);
     }
+}
+
+pub fn publish_activity_log(activity_log: VoiceActivityLog) {
+    let _ = GLOBAL_ACTIVITY_LOG.set(activity_log);
+}
+
+pub fn record_activity(
+    activity_log: &VoiceActivityLog,
+    utterance: String,
+    action: VoiceAction,
+    status: VoiceActivityStatus,
+    detail: Option<String>,
+) {
+    push_activity(activity_log, utterance, action, status, detail);
 }
 
 #[derive(Clone)]

@@ -9,9 +9,11 @@ pub mod control_loop;
 pub mod device;
 pub mod engine;
 pub mod intent;
+pub mod portal;
 pub mod protocol;
 pub mod service;
 pub mod toggle;
+pub mod tts;
 pub mod vocab;
 
 pub type VoiceStatusHandle = Arc<Mutex<VoiceStatusSnapshot>>;
