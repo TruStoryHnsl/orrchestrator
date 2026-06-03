@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use crate::capture::capture_toggle;
+use crate::capture::{TARGET_SAMPLE_RATE, capture_stream};
 use crate::engine::{DEFAULT_MODEL_ID, VoiceEngine};
 use crate::protocol::{Utterance, VoiceRequest, VoiceResponse, default_socket_path};
 use crate::toggle::ToggleState;
@@ -23,6 +23,7 @@ pub struct VoiceConfig {
     pub device_name: Option<String>,
     pub socket_path: PathBuf,
     pub max_utterance_secs: u32,
+    pub chunk_secs: f32,
 }
 
 impl VoiceConfig {
@@ -41,9 +42,16 @@ impl VoiceConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(30),
+            chunk_secs: std::env::var("ORRCH_VOICE_CHUNK_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .filter(|secs: &f32| *secs > 0.0)
+                .unwrap_or(3.0),
         }
     }
 }
+
+const STREAM_TAIL_OVERLAP_SECS: f32 = 0.4;
 
 type UtteranceQueue = Arc<(Mutex<VecDeque<Utterance>>, Condvar)>;
 type UtteranceSubscribers = Arc<Mutex<Vec<mpsc::Sender<Utterance>>>>;
@@ -143,6 +151,7 @@ impl VoiceService {
             model: self.config.model_id.clone(),
             device,
             pending: None,
+            partial_transcript: String::new(),
             queued,
         }
     }
@@ -160,11 +169,13 @@ impl VoiceService {
 
     fn start_listening(&self) {
         self.toggle.start();
+        update_voice_status(|status| status.partial_transcript.clear());
         self.refresh_status();
     }
 
     fn stop_listening(&self) {
         self.toggle.stop();
+        update_voice_status(|status| status.partial_transcript.clear());
         self.refresh_status();
     }
 
@@ -234,47 +245,114 @@ impl VoiceService {
                 continue;
             }
 
-            let stop = Arc::new(AtomicBool::new(false));
-            let stop_watcher = stop.clone();
-            let toggle_watcher = self.toggle.clone();
-            std::thread::spawn(move || {
-                while toggle_watcher.is_listening() {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                stop_watcher.store(true, Ordering::SeqCst);
-            });
-
-            match capture_toggle(
-                self.config.max_utterance_secs,
-                self.config.device_name.as_deref(),
-                stop,
-            ) {
-                Ok(audio) if audio.is_empty() => self.stop_listening(),
-                Ok(audio) if self.model_ready.load(Ordering::SeqCst) => {
-                    let text = {
-                        let mut guard = self.engine.lock().unwrap();
-                        match guard.as_mut() {
-                            Some(engine) => engine.transcribe(&audio),
-                            None => Ok(String::new()),
-                        }
-                    };
-                    match text {
-                        Ok(text) if !text.trim().is_empty() => self.push_utterance(text),
-                        Ok(_) => {}
-                        Err(err) => warn!("voice transcription failed: {err}"),
-                    }
-                    self.stop_listening();
-                }
-                Ok(_) => {
-                    warn!("voice audio captured before model was ready");
-                    self.stop_listening();
-                }
-                Err(err) => {
-                    warn!("voice capture failed: {err}");
-                    self.stop_listening();
-                    std::thread::sleep(Duration::from_millis(500));
-                }
+            if let Err(err) = self.streaming_capture_once() {
+                warn!("voice capture failed: {err}");
+                self.stop_listening();
+                std::thread::sleep(Duration::from_millis(500));
             }
+        }
+    }
+
+    fn streaming_capture_once(&self) -> Result<()> {
+        if !self.model_ready.load(Ordering::SeqCst) {
+            warn!("voice listening requested before model was ready");
+            self.stop_listening();
+            return Ok(());
+        }
+
+        let (stream, frames) = capture_stream(self.config.device_name.as_deref())?;
+        let chunk_samples =
+            ((self.config.chunk_secs * TARGET_SAMPLE_RATE as f32).round() as usize).max(1);
+        let tail_samples = ((STREAM_TAIL_OVERLAP_SECS * TARGET_SAMPLE_RATE as f32).round()
+            as usize)
+            .min(chunk_samples.saturating_sub(1));
+        let max_samples = self.config.max_utterance_secs as usize * TARGET_SAMPLE_RATE as usize;
+        let mut segment = Vec::with_capacity(chunk_samples);
+        let mut full = Vec::with_capacity(max_samples.min(chunk_samples * 2));
+        let mut new_since_last_segment = 0usize;
+        let mut transcript = StreamingTranscript::default();
+
+        info!(
+            "Streaming voice capture active: chunk={:.2}s tail={:.2}s max={}s",
+            self.config.chunk_secs, STREAM_TAIL_OVERLAP_SECS, self.config.max_utterance_secs
+        );
+
+        while self.toggle.is_listening() {
+            match frames.recv_timeout(Duration::from_millis(50)) {
+                Ok(frame) => {
+                    new_since_last_segment += frame.len();
+                    full.extend_from_slice(&frame);
+                    segment.extend(frame);
+
+                    while segment.len() >= chunk_samples {
+                        self.transcribe_stream_segment(&segment, &mut transcript);
+                        self.publish_partial_transcript(&transcript);
+
+                        if tail_samples > 0 && segment.len() > tail_samples {
+                            segment = segment[segment.len() - tail_samples..].to_vec();
+                        } else {
+                            segment.clear();
+                        }
+                        new_since_last_segment = 0;
+                    }
+
+                    if full.len() >= max_samples {
+                        info!("voice capture reached max utterance duration");
+                        self.toggle.stop();
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        stream.stop();
+        drop(stream);
+        while let Ok(frame) = frames.try_recv() {
+            new_since_last_segment += frame.len();
+            full.extend_from_slice(&frame);
+            segment.extend(frame);
+        }
+
+        if new_since_last_segment > 0 && !segment.is_empty() {
+            self.transcribe_stream_segment(&segment, &mut transcript);
+        }
+
+        let final_text = transcript.finish();
+        update_voice_status(|status| {
+            status.listening = false;
+            status.partial_transcript.clear();
+        });
+
+        if final_text.is_empty() {
+            self.refresh_status();
+        } else {
+            self.push_utterance(final_text);
+        }
+
+        Ok(())
+    }
+
+    fn transcribe_stream_segment(&self, segment: &[f32], transcript: &mut StreamingTranscript) {
+        let text = {
+            let mut guard = self.engine.lock().unwrap();
+            match guard.as_mut() {
+                Some(engine) => engine.transcribe(segment),
+                None => Ok(String::new()),
+            }
+        };
+
+        match text {
+            Ok(text) => transcript.append_segment(&text),
+            Err(err) => warn!("voice transcription failed: {err}"),
+        }
+    }
+
+    fn publish_partial_transcript(&self, transcript: &StreamingTranscript) {
+        let partial = transcript.current().to_string();
+        if !partial.is_empty() {
+            update_voice_status(|status| status.partial_transcript = partial);
         }
     }
 
@@ -390,6 +468,69 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+#[derive(Default)]
+struct StreamingTranscript {
+    text: String,
+}
+
+impl StreamingTranscript {
+    fn append_segment(&mut self, text: &str) {
+        append_stitched_text(&mut self.text, text);
+    }
+
+    fn current(&self) -> &str {
+        self.text.trim()
+    }
+
+    fn finish(self) -> String {
+        self.text.trim().to_string()
+    }
+}
+
+fn append_stitched_text(transcript: &mut String, next: &str) {
+    let next = next.trim();
+    if next.is_empty() {
+        return;
+    }
+
+    if transcript.trim().is_empty() {
+        transcript.clear();
+        transcript.push_str(next);
+        return;
+    }
+
+    let existing_words = transcript.split_whitespace().collect::<Vec<_>>();
+    let next_words = next.split_whitespace().collect::<Vec<_>>();
+    let overlap = repeated_boundary_words(&existing_words, &next_words);
+    let remainder = next_words[overlap..].join(" ");
+    if remainder.is_empty() {
+        return;
+    }
+
+    transcript.push(' ');
+    transcript.push_str(&remainder);
+}
+
+fn repeated_boundary_words(existing_words: &[&str], next_words: &[&str]) -> usize {
+    let max = existing_words.len().min(next_words.len()).min(6);
+    (1..=max)
+        .rev()
+        .find(|&len| {
+            existing_words[existing_words.len() - len..]
+                .iter()
+                .zip(&next_words[..len])
+                .all(|(left, right)| {
+                    normalize_boundary_word(left) == normalize_boundary_word(right)
+                })
+        })
+        .unwrap_or(0)
+}
+
+fn normalize_boundary_word(word: &str) -> String {
+    word.trim_matches(|ch: char| !ch.is_alphanumeric())
+        .to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader, Write};
@@ -405,6 +546,7 @@ mod tests {
             device_name: None,
             socket_path,
             max_utterance_secs: 1,
+            chunk_secs: 3.0,
         }
     }
 
@@ -487,5 +629,34 @@ mod tests {
         let service = VoiceService::new(test_config(PathBuf::from("/tmp/not-used.sock")));
         let response = service.handle_request(VoiceRequest::NextUtterance { timeout_ms: 1 });
         assert_eq!(response, VoiceResponse::Utterance(None));
+    }
+
+    #[test]
+    fn streaming_transcript_stitches_incremental_segments() {
+        let mut transcript = StreamingTranscript::default();
+        for segment in ["spawn a", "session in", "orrchestrator"] {
+            transcript.append_segment(segment);
+        }
+
+        assert_eq!(transcript.finish(), "spawn a session in orrchestrator");
+    }
+
+    #[test]
+    fn streaming_transcript_deduplicates_overlap_boundary() {
+        let mut transcript = StreamingTranscript::default();
+        transcript.append_segment("spawn a session");
+        transcript.append_segment("a session in orrchestrator");
+
+        assert_eq!(transcript.current(), "spawn a session in orrchestrator");
+    }
+
+    #[test]
+    fn streaming_transcript_finalize_appends_last_partial() {
+        let mut transcript = StreamingTranscript::default();
+        transcript.append_segment("spawn a");
+        transcript.append_segment("session in");
+        transcript.append_segment("orrchestrator");
+
+        assert_eq!(transcript.finish(), "spawn a session in orrchestrator");
     }
 }

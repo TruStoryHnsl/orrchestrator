@@ -1,7 +1,8 @@
 // Ported from mojovoice (MIT, Copyright (c) 2024-2026 itsdevcoffee).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -11,6 +12,7 @@ use rubato::{FftFixedIn, Resampler};
 use tracing::{info, warn};
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+const STREAM_FRAME_MS: u32 = 500;
 
 struct AudioSetup {
     device: Device,
@@ -18,6 +20,28 @@ struct AudioSetup {
     sample_format: SampleFormat,
     sample_rate: u32,
     channels: u16,
+}
+
+pub struct StreamHandle {
+    stream: Option<Stream>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl StreamHandle {
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
+impl Drop for StreamHandle {
+    fn drop(&mut self) {
+        self.stop();
+        self.stream.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 pub fn list_input_devices() -> Vec<String> {
@@ -73,6 +97,35 @@ pub fn capture_toggle(
     drop(stream);
 
     finish_capture(buffer, &setup)
+}
+
+pub fn capture_stream(
+    device_name: Option<&str>,
+) -> Result<(StreamHandle, mpsc::Receiver<Vec<f32>>)> {
+    info!("Starting streaming audio capture");
+    let setup = setup_audio_device(device_name)?;
+    let (raw_tx, raw_rx) = mpsc::channel();
+    let (frame_tx, frame_rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
+    let stream = build_streaming_capture_stream(&setup, raw_tx, started)?;
+    let worker_stop = stop.clone();
+    let sample_rate = setup.sample_rate;
+    let channels = setup.channels;
+    let worker = std::thread::Builder::new()
+        .name("orrch-voice-stream-resample".into())
+        .spawn(move || {
+            stream_resample_worker(raw_rx, frame_tx, worker_stop, sample_rate, channels);
+        })?;
+
+    Ok((
+        StreamHandle {
+            stream: Some(stream),
+            stop,
+            worker: Some(worker),
+        },
+        frame_rx,
+    ))
 }
 
 fn setup_audio_device(device_name: Option<&str>) -> Result<AudioSetup> {
@@ -152,6 +205,27 @@ fn build_capture_stream(
     }
 }
 
+fn build_streaming_capture_stream(
+    setup: &AudioSetup,
+    tx: mpsc::Sender<Vec<f32>>,
+    started: Arc<AtomicBool>,
+) -> Result<Stream> {
+    match setup.sample_format {
+        SampleFormat::I8 => build_typed_streaming_capture_stream::<i8>(setup, tx, started),
+        SampleFormat::I16 => build_typed_streaming_capture_stream::<i16>(setup, tx, started),
+        SampleFormat::I24 => build_typed_streaming_capture_stream::<cpal::I24>(setup, tx, started),
+        SampleFormat::I32 => build_typed_streaming_capture_stream::<i32>(setup, tx, started),
+        SampleFormat::I64 => build_typed_streaming_capture_stream::<i64>(setup, tx, started),
+        SampleFormat::U8 => build_typed_streaming_capture_stream::<u8>(setup, tx, started),
+        SampleFormat::U16 => build_typed_streaming_capture_stream::<u16>(setup, tx, started),
+        SampleFormat::U32 => build_typed_streaming_capture_stream::<u32>(setup, tx, started),
+        SampleFormat::U64 => build_typed_streaming_capture_stream::<u64>(setup, tx, started),
+        SampleFormat::F32 => build_typed_streaming_capture_stream::<f32>(setup, tx, started),
+        SampleFormat::F64 => build_typed_streaming_capture_stream::<f64>(setup, tx, started),
+        other => anyhow::bail!("unsupported input sample format: {other}"),
+    }
+}
+
 fn build_typed_capture_stream<T>(
     setup: &AudioSetup,
     buffer: Arc<Mutex<Vec<f32>>>,
@@ -175,6 +249,85 @@ where
     )?;
     stream.play()?;
     Ok(stream)
+}
+
+fn build_typed_streaming_capture_stream<T>(
+    setup: &AudioSetup,
+    tx: mpsc::Sender<Vec<f32>>,
+    started: Arc<AtomicBool>,
+) -> Result<Stream>
+where
+    T: Sample + cpal::SizedSample + Send + 'static,
+    f32: cpal::FromSample<T>,
+{
+    let stream = setup.device.build_input_stream(
+        &setup.config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            if !started.swap(true, Ordering::Relaxed) {
+                info!("Streaming audio capture started");
+            }
+            let samples = data
+                .iter()
+                .map(|sample| sample.to_sample::<f32>())
+                .collect::<Vec<_>>();
+            if tx.send(samples).is_err() {
+                warn!("Streaming audio receiver dropped");
+            }
+        },
+        |err| warn!("Audio input stream error: {err}"),
+        None,
+    )?;
+    stream.play()?;
+    Ok(stream)
+}
+
+fn stream_resample_worker(
+    raw_rx: mpsc::Receiver<Vec<f32>>,
+    frame_tx: mpsc::Sender<Vec<f32>>,
+    stop: Arc<AtomicBool>,
+    sample_rate: u32,
+    channels: u16,
+) {
+    let channels_usize = usize::from(channels.max(1));
+    let source_frame_samples =
+        ((sample_rate as usize * STREAM_FRAME_MS as usize) / 1_000).max(1) * channels_usize;
+    let mut interleaved = Vec::with_capacity(source_frame_samples * 2);
+
+    loop {
+        match raw_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(samples) => interleaved.extend(samples),
+            Err(mpsc::RecvTimeoutError::Timeout) if stop.load(Ordering::SeqCst) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        while interleaved.len() >= source_frame_samples {
+            let chunk = interleaved
+                .drain(..source_frame_samples)
+                .collect::<Vec<_>>();
+            send_stream_frame(chunk, sample_rate, channels, &frame_tx);
+        }
+    }
+
+    if !interleaved.is_empty() {
+        send_stream_frame(interleaved, sample_rate, channels, &frame_tx);
+    }
+}
+
+fn send_stream_frame(
+    interleaved: Vec<f32>,
+    sample_rate: u32,
+    channels: u16,
+    frame_tx: &mpsc::Sender<Vec<f32>>,
+) {
+    let mono = to_mono(interleaved, channels);
+    match finalize_audio_samples(mono, sample_rate, TARGET_SAMPLE_RATE) {
+        Ok(frame) if !frame.is_empty() => {
+            let _ = frame_tx.send(frame);
+        }
+        Ok(_) => {}
+        Err(err) => warn!("Streaming audio resample failed: {err}"),
+    }
 }
 
 fn finish_capture(buffer: Arc<Mutex<Vec<f32>>>, setup: &AudioSetup) -> Result<Vec<f32>> {
