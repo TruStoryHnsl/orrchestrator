@@ -92,6 +92,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::NewProjectName => { draw_panel_content(frame, app, layout[1]); draw_new_project_name(frame, app); }
         SubView::NewProjectScope => { draw_panel_content(frame, app, layout[1]); draw_new_project_scope(frame, app); }
         SubView::NewProjectConfirm => { draw_panel_content(frame, app, layout[1]); draw_new_project_confirm(frame, app); }
+        SubView::ConnectionPreset
+        | SubView::ConnectionName
+        | SubView::ConnectionBaseUrl
+        | SubView::ConnectionApiKey
+        | SubView::ConnectionModel
+        | SubView::ConnectionRateLimit
+        | SubView::ConnectionConfirm => { draw_panel_content(frame, app, layout[1]); draw_connection_form(frame, app); }
+        SubView::ConfirmDeleteConnection => { draw_panel_content(frame, app, layout[1]); draw_confirm_delete_connection(frame, app); }
         SubView::FeedbackConfirm(_) => { draw_panel_content(frame, app, layout[1]); draw_feedback_confirm(frame, app); }
         SubView::CommitReview(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_review(frame, app); }
         SubView::CommitCorrecting(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_correcting(frame, app); }
@@ -1824,6 +1832,7 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
                 LibrarySub::McpServers => app.library_mcp_servers.len(),
                 LibrarySub::Skills => app.library_skills.len(),
                 LibrarySub::Tools => app.library_tools.len(),
+                LibrarySub::Connections => app.connection_store.list().len(),
                 LibrarySub::PiExtensions => app.library_pi_extensions.len(),
             };
             let style = if sel {
@@ -1866,6 +1875,7 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         LibrarySub::McpServers => draw_library_mcp(frame, app, chunks[0], chunks[1]),
         LibrarySub::Skills => draw_library_generic(frame, app, &app.library_skills, "Skills", "x=export to PI", chunks[0], chunks[1]),
         LibrarySub::Tools => draw_library_generic(frame, app, &app.library_tools, "Tools", "x=export to PI", chunks[0], chunks[1]),
+        LibrarySub::Connections => draw_library_connections(frame, app, chunks[0], chunks[1]),
         LibrarySub::PiExtensions => draw_library_pi_extensions(frame, app, chunks[0], chunks[1]),
     }
 }
@@ -2270,6 +2280,71 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
     };
     frame.render_widget(Paragraph::new(preview)
         .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false })
+        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+}
+
+fn draw_library_connections(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
+    let connections = app.connection_store.list();
+    let visible_rows = list_area.height.saturating_sub(2) as usize;
+    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let mut items = Vec::new();
+    for (i, connection) in connections.iter().enumerate().skip(scroll_offset) {
+        let sel = app.library_selected == i;
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else if connection.enabled {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(TEXT_MUTED).add_modifier(Modifier::DIM)
+        };
+        let marker = if sel { "■ " } else { "  " };
+        let status = if connection.enabled { "on" } else { "off" };
+        let test_status = app.connection_test_status.get(&connection.name).map(String::as_str).unwrap_or("");
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{marker}{}", connection.name), style),
+            Span::styled(format!(" | {} | {} rpm | [{}]", connection.kind.label(), connection.rate_limit_rpm, status), Style::default().fg(TEXT_DIM)),
+            Span::styled(
+                if test_status.is_empty() { String::new() } else { format!(" | {test_status}") },
+                Style::default().fg(if test_status.starts_with("failed") { WAITING_COLOR } else { GREEN }),
+            ),
+        ])));
+    }
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled("  No connections configured - press n to add one", Style::default().fg(TEXT_MUTED))));
+    }
+    let title = format!(" Connections ({}) - n new  e edit  d delete  t test  v toggle ", connections.len());
+    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+
+    let preview = if let Some(connection) = connections.get(app.library_selected) {
+        let test_status = app.connection_test_status.get(&connection.name).map(String::as_str).unwrap_or("not tested");
+        vec![
+            Line::styled(&connection.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(if connection.enabled { "Status: enabled" } else { "Status: disabled" }, Style::default().fg(if connection.enabled { GREEN } else { TEXT_MUTED })),
+            Line::styled(format!("Kind: {}", connection.kind.label()), Style::default().fg(TEXT)),
+            Line::styled(format!("Base URL: {}", connection.base_url), Style::default().fg(TEXT)),
+            Line::styled(format!("Default model: {}", connection.default_model), Style::default().fg(TEXT)),
+            Line::styled(
+                format!("Rate limit: {}", if connection.rate_limit_rpm == 0 { "unlimited".to_string() } else { format!("{} rpm", connection.rate_limit_rpm) }),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(format!("API key: {}", orrch_core::mask_key(&connection.api_key)), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled(format!("Last test: {test_status}"), Style::default().fg(TEXT_DIM)),
+            Line::raw(""),
+            Line::styled(format!("Stored locally in {}", orrch_core::connections_path().display()), Style::default().fg(TEXT_MUTED)),
+            Line::styled("Use ORRCH_VOICE_PORTAL_PROVIDER=connection:<name> for voice portal.", Style::default().fg(TEXT_MUTED)),
+        ]
+    } else {
+        vec![
+            Line::styled("Add a connection to use external model services.", Style::default().fg(TEXT_MUTED)),
+            Line::raw(""),
+            Line::styled("Presets: NVIDIA, OpenAI, Groq, OpenRouter, Together, Ollama.", Style::default().fg(TEXT_DIM)),
+            Line::styled(format!("Stored locally in {}", orrch_core::connections_path().display()), Style::default().fg(TEXT_MUTED)),
+        ]
+    };
+    frame.render_widget(Paragraph::new(preview)
+        .block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL))
         .wrap(Wrap { trim: false })
         .scroll((app.library_preview_scroll as u16, 0)), preview_area);
 }
@@ -5514,6 +5589,115 @@ fn draw_new_project_confirm(frame: &mut Frame, app: &App) {
     ];
     frame.render_widget(Paragraph::new(lines)
         .block(Block::default().title(" Confirm ").borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+        .wrap(Wrap { trim: false }), popup);
+}
+
+// ─── Connection Manager Overlays ─────────────────────────────────────
+
+fn draw_connection_form(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 76, 18);
+    frame.render_widget(Clear, popup);
+
+    let mut lines = vec![
+        Line::styled(
+            if app.connection_edit_original.is_some() { "Edit Connection" } else { "New Connection" },
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+    ];
+
+    match app.sub {
+        SubView::ConnectionPreset => {
+            lines.push(Line::styled("Preset (arrows/Tab to select):", Style::default().fg(TEXT_DIM)));
+            for (i, preset) in app.connection_presets.iter().enumerate() {
+                let sel = app.connection_preset_idx == i;
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
+                    Span::styled(&preset.name, if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
+                    Span::styled(format!("  {}  {}", preset.kind.label(), preset.base_url), Style::default().fg(TEXT_MUTED)),
+                ]));
+            }
+            let custom_idx = app.connection_presets.len();
+            let sel = app.connection_preset_idx == custom_idx;
+            lines.push(Line::from(vec![
+                Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
+                Span::styled("Custom", if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
+            ]));
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Enter: continue   Esc: cancel", Style::default().fg(TEXT_DIM)));
+        }
+        SubView::ConnectionName => {
+            draw_connection_input_lines(&mut lines, "Name:", &app.connection_form.name, false);
+            lines.push(Line::styled("Used by ORRCH_VOICE_PORTAL_PROVIDER=connection:<name>", Style::default().fg(TEXT_MUTED)));
+        }
+        SubView::ConnectionBaseUrl => {
+            draw_connection_input_lines(&mut lines, "Base URL:", &app.connection_form.base_url, false);
+            lines.push(Line::styled("Include /v1 where the provider expects it.", Style::default().fg(TEXT_MUTED)));
+        }
+        SubView::ConnectionApiKey => {
+            draw_connection_input_lines(&mut lines, "API key:", &app.connection_form.api_key, true);
+            lines.push(Line::styled("Leave empty for keyless local endpoints.", Style::default().fg(TEXT_MUTED)));
+        }
+        SubView::ConnectionModel => {
+            draw_connection_input_lines(&mut lines, "Default model:", &app.connection_form.default_model, false);
+        }
+        SubView::ConnectionRateLimit => {
+            draw_connection_input_lines(&mut lines, "Rate limit RPM (0 = unlimited):", &app.connection_form.rate_limit_rpm.to_string(), false);
+        }
+        SubView::ConnectionConfirm => {
+            let c = &app.connection_form;
+            lines.push(Line::styled("Save connection?", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![Span::styled("  Name:  ", Style::default().fg(TEXT_DIM)), Span::styled(&c.name, Style::default().fg(TEXT))]));
+            lines.push(Line::from(vec![Span::styled("  Kind:  ", Style::default().fg(TEXT_DIM)), Span::styled(c.kind.label(), Style::default().fg(TEXT))]));
+            lines.push(Line::from(vec![Span::styled("  URL:   ", Style::default().fg(TEXT_DIM)), Span::styled(&c.base_url, Style::default().fg(TEXT))]));
+            lines.push(Line::from(vec![Span::styled("  Model: ", Style::default().fg(TEXT_DIM)), Span::styled(&c.default_model, Style::default().fg(TEXT))]));
+            lines.push(Line::from(vec![Span::styled("  RPM:   ", Style::default().fg(TEXT_DIM)), Span::styled(c.rate_limit_rpm.to_string(), Style::default().fg(TEXT))]));
+            lines.push(Line::from(vec![Span::styled("  Key:   ", Style::default().fg(TEXT_DIM)), Span::styled(orrch_core::mask_key(&c.api_key), Style::default().fg(TEXT_DIM))]));
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("y/Enter: save   n: edit name   Esc: back", Style::default().fg(TEXT_DIM)));
+        }
+        _ => {}
+    }
+
+    if let Some(error) = &app.connection_form_error {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(format!("  x {error}"), Style::default().fg(Color::Red)));
+    }
+
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Connection ").borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
+        .wrap(Wrap { trim: false }), popup);
+}
+
+fn draw_connection_input_lines(lines: &mut Vec<Line>, label: &str, value: &str, masked: bool) {
+    lines.push(Line::styled(label.to_string(), Style::default().fg(TEXT_DIM)));
+    let shown = if masked { "*".repeat(value.chars().count()) } else { value.to_string() };
+    lines.push(Line::from(vec![
+        Span::styled("> ", Style::default().fg(ACCENT)),
+        Span::styled(shown, Style::default().fg(TEXT)),
+        Span::styled("█", Style::default().fg(ACCENT)),
+    ]));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled("Enter: next   Esc: back", Style::default().fg(TEXT_DIM)));
+}
+
+fn draw_confirm_delete_connection(frame: &mut Frame, app: &App) {
+    let popup = centered_popup(frame.area(), 58, 8);
+    frame.render_widget(Clear, popup);
+    let name = app.connection_store.list().get(app.library_selected).map(|c| c.name.as_str()).unwrap_or("unknown");
+    let lines = vec![
+        Line::styled("Delete Connection?", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::raw(""),
+        Line::styled(format!("  {name}"), Style::default().fg(ACCENT)),
+        Line::raw(""),
+        Line::styled("This removes it from local connections.json.", Style::default().fg(TEXT_DIM)),
+        Line::styled("y/Enter: delete   n/Esc: cancel", Style::default().fg(TEXT_DIM)),
+    ];
+    frame.render_widget(Paragraph::new(lines)
+        .block(Block::default().title(" Confirm Delete ").borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
         .wrap(Wrap { trim: false }), popup);
 }

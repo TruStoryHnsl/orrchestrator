@@ -11,6 +11,7 @@ pub mod engine;
 pub mod intent;
 pub mod portal;
 pub mod portal_local;
+pub mod portal_openai_compat;
 pub mod protocol;
 pub mod service;
 pub mod toggle;
