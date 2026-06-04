@@ -9,10 +9,10 @@ use tracing::{info, warn};
 
 use crate::portal::{PortalAgent, PortalConfig, PortalTurn};
 
-const MAX_TOOL_ROUNDS: usize = 4;
-const DEFAULT_DISPATCH_CAP: usize = 3;
+pub(crate) const MAX_TOOL_ROUNDS: usize = 4;
+pub(crate) const DEFAULT_DISPATCH_CAP: usize = 3;
 
-const LOCAL_SYSTEM_PROMPT: &str = r#"You are the conversational orrchestrator admin portal.
+pub(crate) const LOCAL_SYSTEM_PROMPT: &str = r#"You are the conversational orrchestrator admin portal.
 You help the user create and submit feedback or implementation instructions, and you can dispatch heavier work to Codex.
 Available tools are list_projects, submit_feedback, and dispatch_to_codex.
 Before calling submit_feedback or dispatch_to_codex, ask the user for clear confirmation, then act only on the next turn when the user agrees.
@@ -27,24 +27,28 @@ pub struct ChatMessage {
     pub tool_calls: Vec<OllamaToolCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
-    fn system(content: impl Into<String>) -> Self {
+    pub(crate) fn system(content: impl Into<String>) -> Self {
         Self {
             role: "system".to_string(),
             content: content.into(),
             tool_calls: Vec::new(),
             name: None,
+            tool_call_id: None,
         }
     }
 
-    fn user(content: impl Into<String>) -> Self {
+    pub(crate) fn user(content: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
             content: content.into(),
             tool_calls: Vec::new(),
             name: None,
+            tool_call_id: None,
         }
     }
 
@@ -54,6 +58,21 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: Vec::new(),
             name: Some(name.into()),
+            tool_call_id: None,
+        }
+    }
+
+    pub(crate) fn tool_with_id(
+        name: impl Into<String>,
+        content: impl Into<String>,
+        tool_call_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: "tool".to_string(),
+            content: content.into(),
+            tool_calls: Vec::new(),
+            name: Some(name.into()),
+            tool_call_id: Some(tool_call_id.into()),
         }
     }
 }
@@ -172,44 +191,14 @@ impl OllamaPortal {
     }
 
     fn execute_tool(&self, call: &OllamaToolCall, user_text: &str) -> Result<String> {
-        let args = normalized_arguments(&call.function.arguments)?;
-        match call.function.name.as_str() {
-            "list_projects" => {
-                let projects = self.tools.list_projects()?;
-                Ok(if projects.is_empty() {
-                    "No projects found.".to_string()
-                } else {
-                    format!("Projects: {}", projects.join(", "))
-                })
-            }
-            "submit_feedback" => {
-                if !looks_like_confirmation(user_text) {
-                    return Ok("Confirmation required before submit_feedback. Ask the user to confirm, then call the tool on the next turn.".to_string());
-                }
-                let project = required_arg(&args, "project")?;
-                let text = required_arg(&args, "text")?;
-                self.tools.submit_feedback(project, text)
-            }
-            "dispatch_to_codex" => {
-                if !looks_like_confirmation(user_text) {
-                    return Ok("Confirmation required before dispatch_to_codex. Ask the user to confirm, then call the tool on the next turn.".to_string());
-                }
-                {
-                    let mut count = self.dispatch_count.lock().unwrap();
-                    if *count >= self.dispatch_cap {
-                        return Ok(format!(
-                            "Dispatch cap reached for this conversation ({}/{}).",
-                            *count, self.dispatch_cap
-                        ));
-                    }
-                    *count += 1;
-                }
-                let project = required_arg(&args, "project")?;
-                let goal = required_arg(&args, "goal")?;
-                self.tools.dispatch_to_codex(project, goal)
-            }
-            other => Ok(format!("Unknown portal tool: {other}")),
-        }
+        execute_portal_tool(
+            self.tools.as_ref(),
+            &self.dispatch_count,
+            self.dispatch_cap,
+            &call.function.name,
+            &call.function.arguments,
+            user_text,
+        )
     }
 }
 
@@ -238,6 +227,7 @@ impl PortalAgent for OllamaPortal {
                     content: reply.clone(),
                     tool_calls: Vec::new(),
                     name: None,
+                    tool_call_id: None,
                 });
                 return Ok(PortalTurn {
                     reply,
@@ -326,13 +316,13 @@ impl ReqwestOllamaClient {
     }
 }
 
-struct RealPortalTools {
+pub(crate) struct RealPortalTools {
     projects_dir: PathBuf,
     process_manager: Arc<Mutex<orrch_core::ProcessManager>>,
 }
 
 impl RealPortalTools {
-    fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let config = orrch_core::Config::load();
         let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
@@ -403,7 +393,7 @@ impl PortalTools for RealPortalTools {
     }
 }
 
-fn portal_tool_schema() -> Vec<Value> {
+pub(crate) fn portal_tool_schema() -> Vec<Value> {
     vec![
         json!({
             "type": "function",
@@ -450,7 +440,55 @@ fn portal_tool_schema() -> Vec<Value> {
     ]
 }
 
-fn normalized_arguments(arguments: &Value) -> Result<Value> {
+pub(crate) fn execute_portal_tool(
+    tools: &dyn PortalTools,
+    dispatch_count: &Mutex<usize>,
+    dispatch_cap: usize,
+    name: &str,
+    arguments: &Value,
+    user_text: &str,
+) -> Result<String> {
+    let args = normalized_arguments(arguments)?;
+    match name {
+        "list_projects" => {
+            let projects = tools.list_projects()?;
+            Ok(if projects.is_empty() {
+                "No projects found.".to_string()
+            } else {
+                format!("Projects: {}", projects.join(", "))
+            })
+        }
+        "submit_feedback" => {
+            if !looks_like_confirmation(user_text) {
+                return Ok("Confirmation required before submit_feedback. Ask the user to confirm, then call the tool on the next turn.".to_string());
+            }
+            let project = required_arg(&args, "project")?;
+            let text = required_arg(&args, "text")?;
+            tools.submit_feedback(project, text)
+        }
+        "dispatch_to_codex" => {
+            if !looks_like_confirmation(user_text) {
+                return Ok("Confirmation required before dispatch_to_codex. Ask the user to confirm, then call the tool on the next turn.".to_string());
+            }
+            {
+                let mut count = dispatch_count.lock().unwrap();
+                if *count >= dispatch_cap {
+                    return Ok(format!(
+                        "Dispatch cap reached for this conversation ({}/{}).",
+                        *count, dispatch_cap
+                    ));
+                }
+                *count += 1;
+            }
+            let project = required_arg(&args, "project")?;
+            let goal = required_arg(&args, "goal")?;
+            tools.dispatch_to_codex(project, goal)
+        }
+        other => Ok(format!("Unknown portal tool: {other}")),
+    }
+}
+
+pub(crate) fn normalized_arguments(arguments: &Value) -> Result<Value> {
     match arguments {
         Value::String(raw) => serde_json::from_str(raw)
             .with_context(|| format!("tool arguments were not valid JSON: {raw}")),
@@ -460,7 +498,7 @@ fn normalized_arguments(arguments: &Value) -> Result<Value> {
     }
 }
 
-fn required_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
+pub(crate) fn required_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
     args.get(name)
         .and_then(Value::as_str)
         .map(str::trim)
@@ -468,7 +506,7 @@ fn required_arg<'a>(args: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| anyhow::anyhow!("missing required tool argument '{name}'"))
 }
 
-fn looks_like_confirmation(text: &str) -> bool {
+pub(crate) fn looks_like_confirmation(text: &str) -> bool {
     let normalized = text
         .trim()
         .to_ascii_lowercase()
@@ -564,6 +602,7 @@ mod tests {
                 content: content.to_string(),
                 tool_calls: Vec::new(),
                 name: None,
+                tool_call_id: None,
             },
         }
     }
@@ -582,6 +621,7 @@ mod tests {
                     },
                 }],
                 name: None,
+                tool_call_id: None,
             },
         }
     }
@@ -680,6 +720,7 @@ mod tests {
                             },
                         ],
                         name: None,
+                        tool_call_id: None,
                     },
                 },
                 assistant("Done."),

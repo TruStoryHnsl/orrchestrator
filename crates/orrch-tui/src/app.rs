@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc as std_mpsc;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -289,6 +290,15 @@ pub enum SubView {
     NewProjectName,
     NewProjectScope,
     NewProjectConfirm,
+    /// Connection manager wizard steps.
+    ConnectionPreset,
+    ConnectionName,
+    ConnectionBaseUrl,
+    ConnectionApiKey,
+    ConnectionModel,
+    ConnectionRateLimit,
+    ConnectionConfirm,
+    ConfirmDeleteConnection,
     /// Feedback submission confirmation — shows routing targets, lets user edit.
     FeedbackConfirm(usize), // index into feedback_items
     /// Workflow picker — select a workflow script to run.
@@ -430,14 +440,16 @@ pub enum LibrarySub {
     McpServers,
     Skills,
     Tools,
+    Connections,
     PiExtensions,
 }
 
 impl LibrarySub {
-    pub const ALL: [LibrarySub; 8] = [
+    pub const ALL: [LibrarySub; 9] = [
         LibrarySub::Fit,
         LibrarySub::Agents, LibrarySub::Models, LibrarySub::Harnesses,
         LibrarySub::McpServers, LibrarySub::Skills, LibrarySub::Tools,
+        LibrarySub::Connections,
         LibrarySub::PiExtensions,
     ];
 
@@ -450,6 +462,7 @@ impl LibrarySub {
             Self::McpServers => "MCP",
             Self::Skills => "Skills",
             Self::Tools => "Tools",
+            Self::Connections => "Connections",
             Self::PiExtensions => "PI Ext",
         }
     }
@@ -790,6 +803,10 @@ pub struct App {
     pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
     pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
     pub library_pi_extensions: Vec<orrch_library::LibraryItem>, // PI extensions (.ts)
+    pub connection_store: orrch_core::ConnectionStore,
+    pub connection_test_status: HashMap<String, String>,
+    pub connection_test_tx: std_mpsc::Sender<(String, String)>,
+    pub connection_test_rx: std_mpsc::Receiver<(String, String)>,
 
     // HWF-005 Fit panel state
     pub fit_registry: orrch_hwfit::MachineRegistry,
@@ -960,6 +977,13 @@ pub struct App {
     pub new_project_scope: orrch_core::Scope,
     pub new_project_temp: Temperature,
     pub new_project_error: Option<String>,
+
+    // Connection manager wizard
+    pub connection_presets: Vec<orrch_core::Connection>,
+    pub connection_preset_idx: usize,
+    pub connection_form: orrch_core::Connection,
+    pub connection_edit_original: Option<String>,
+    pub connection_form_error: Option<String>,
 
     // Action menu
     pub action_items: Vec<ActionItem>,
@@ -1136,6 +1160,36 @@ pub struct ProductionEntry {
     pub working: bool, // false = marked red
 }
 
+fn blank_connection_form() -> orrch_core::Connection {
+    orrch_core::Connection {
+        name: "custom".to_string(),
+        kind: orrch_core::ConnectionKind::OpenAiCompatible,
+        base_url: "https://example.com/v1".to_string(),
+        api_key: String::new(),
+        default_model: String::new(),
+        rate_limit_rpm: 0,
+        enabled: true,
+    }
+}
+
+fn sanitize_connection_status(connection: &orrch_core::Connection, status: &str) -> String {
+    let mut sanitized = status.to_string();
+    if !connection.api_key.trim().is_empty() {
+        sanitized = sanitized.replace(
+            connection.api_key.trim(),
+            &orrch_core::mask_key(connection.api_key.trim()),
+        );
+    }
+    const MAX: usize = 180;
+    if sanitized.chars().count() > MAX {
+        let mut truncated = sanitized.chars().take(MAX).collect::<String>();
+        truncated.push_str("...");
+        truncated
+    } else {
+        sanitized
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1172,6 +1226,9 @@ impl App {
         let valve_store = orrch_library::ValveStore::load();
         let mut usage_tracker = orrch_core::UsageTracker::new();
         usage_tracker.set_defaults();
+        let connection_store = orrch_core::ConnectionStore::load().unwrap_or_default();
+        let connection_presets = orrch_core::presets();
+        let (connection_test_tx, connection_test_rx) = std_mpsc::channel();
 
         // Load Config once for library sync settings (Task 28).
         let config = orrch_core::Config::load();
@@ -1240,6 +1297,10 @@ impl App {
             library_tools,
             library_profiles,
             library_pi_extensions,
+            connection_store,
+            connection_test_status: HashMap::new(),
+            connection_test_tx,
+            connection_test_rx,
             valve_store,
             usage_tracker,
             workforce_files,
@@ -1318,6 +1379,11 @@ impl App {
             new_project_scope: orrch_core::Scope::Private,
             new_project_temp: Temperature::Hot,
             new_project_error: None,
+            connection_presets,
+            connection_preset_idx: 0,
+            connection_form: blank_connection_form(),
+            connection_edit_original: None,
+            connection_form_error: None,
             action_items: Vec::new(),
             action_selected: 0,
             action_return_sub: None,
@@ -2126,6 +2192,10 @@ impl App {
     // ─── Event Processing ─────────────────────────────────────────
 
     pub fn process_events(&mut self) {
+        while let Ok((name, status)) = self.connection_test_rx.try_recv() {
+            self.connection_test_status.insert(name, status);
+        }
+
         let mut events = Vec::new();
         while let Ok(ev) = self.event_rx.try_recv() {
             events.push(ev);
@@ -2411,7 +2481,7 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction || self.session_prompt_active;
+        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::ConnectionName | SubView::ConnectionBaseUrl | SubView::ConnectionApiKey | SubView::ConnectionModel | SubView::ConnectionRateLimit | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction || self.session_prompt_active;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -2558,6 +2628,14 @@ impl App {
             SubView::NewProjectName => self.key_new_project_name(key),
             SubView::NewProjectScope => self.key_new_project_scope(key),
             SubView::NewProjectConfirm => self.key_new_project_confirm(key),
+            SubView::ConnectionPreset => self.key_connection_preset(key),
+            SubView::ConnectionName => self.key_connection_name(key),
+            SubView::ConnectionBaseUrl => self.key_connection_base_url(key),
+            SubView::ConnectionApiKey => self.key_connection_api_key(key),
+            SubView::ConnectionModel => self.key_connection_model(key),
+            SubView::ConnectionRateLimit => self.key_connection_rate_limit(key),
+            SubView::ConnectionConfirm => self.key_connection_confirm(key),
+            SubView::ConfirmDeleteConnection => self.key_confirm_delete_connection(key),
             SubView::FeedbackConfirm(idx) => {
                 let idx = *idx;
                 self.key_feedback_confirm(key, idx)
@@ -3376,6 +3454,23 @@ impl App {
                     self.notify(format!("{} {}", name, status));
                 }
             }
+            KeyCode::Char('n') if self.library_sub == LibrarySub::Connections => {
+                self.start_new_connection();
+            }
+            KeyCode::Char('e') if self.library_sub == LibrarySub::Connections => {
+                self.start_edit_connection();
+            }
+            KeyCode::Char('d') if self.library_sub == LibrarySub::Connections => {
+                if self.connection_store.list().get(self.library_selected).is_some() {
+                    self.sub = SubView::ConfirmDeleteConnection;
+                }
+            }
+            KeyCode::Char('v') if self.library_sub == LibrarySub::Connections => {
+                self.toggle_selected_connection();
+            }
+            KeyCode::Char('t') if self.library_sub == LibrarySub::Connections => {
+                self.test_selected_connection();
+            }
             // Task 28: Pull library repo from git remote.
             KeyCode::Char('P') => {
                 let dir = self.library_dir.clone();
@@ -3507,6 +3602,223 @@ impl App {
         Ok(())
     }
 
+    fn selected_connection(&self) -> Option<&orrch_core::Connection> {
+        self.connection_store.list().get(self.library_selected)
+    }
+
+    fn start_new_connection(&mut self) {
+        self.connection_preset_idx = 0;
+        self.connection_form = self.connection_presets.first().cloned().unwrap_or_else(blank_connection_form);
+        self.connection_edit_original = None;
+        self.connection_form_error = None;
+        self.sub = SubView::ConnectionPreset;
+    }
+
+    fn start_edit_connection(&mut self) {
+        let Some(connection) = self.selected_connection().cloned() else {
+            self.notify("No connection selected".into());
+            return;
+        };
+        self.connection_form = connection.clone();
+        self.connection_edit_original = Some(connection.name);
+        self.connection_form_error = None;
+        self.sub = SubView::ConnectionName;
+    }
+
+    fn toggle_selected_connection(&mut self) {
+        let Some((name, enabled)) = self.selected_connection().map(|c| (c.name.clone(), !c.enabled)) else {
+            self.notify("No connection selected".into());
+            return;
+        };
+        match self.connection_store.set_enabled(&name, enabled).and_then(|_| self.connection_store.save()) {
+            Ok(()) => self.notify(format!("{name} {}", if enabled { "enabled" } else { "disabled" })),
+            Err(err) => self.notify(format!("Connection save failed: {err}")),
+        }
+    }
+
+    fn test_selected_connection(&mut self) {
+        let Some(connection) = self.selected_connection().cloned() else {
+            self.notify("No connection selected".into());
+            return;
+        };
+        let name = connection.name.clone();
+        self.connection_test_status.insert(name.clone(), "testing...".to_string());
+        let tx = self.connection_test_tx.clone();
+        std::thread::Builder::new()
+            .name(format!("orrch-connection-test-{name}"))
+            .spawn(move || {
+                let status = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(rt) => match rt.block_on(orrch_core::test_connection(&connection)) {
+                        Ok(message) => message,
+                        Err(err) => sanitize_connection_status(&connection, &format!("failed: {err}")),
+                    },
+                    Err(err) => format!("failed: runtime unavailable: {err}"),
+                };
+                let _ = tx.send((name, status));
+            })
+            .ok();
+    }
+
+    fn key_connection_preset(&mut self, key: KeyCode) -> Result<()> {
+        let total = self.connection_presets.len() + 1;
+        match key {
+            KeyCode::Esc => self.sub = SubView::List,
+            KeyCode::Up => self.connection_preset_idx = if self.connection_preset_idx == 0 { total - 1 } else { self.connection_preset_idx - 1 },
+            KeyCode::Down | KeyCode::Tab => self.connection_preset_idx = (self.connection_preset_idx + 1) % total,
+            KeyCode::Enter => {
+                self.connection_form = self.connection_presets.get(self.connection_preset_idx).cloned().unwrap_or_else(blank_connection_form);
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionName;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_name(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = if self.connection_edit_original.is_some() { SubView::List } else { SubView::ConnectionPreset },
+            KeyCode::Enter => {
+                let name = self.connection_form.name.trim().to_string();
+                if name.is_empty() {
+                    self.connection_form_error = Some("Name cannot be empty".into());
+                    return Ok(());
+                }
+                if name.contains(|ch: char| ch.is_whitespace() || "/\\:$".contains(ch)) {
+                    self.connection_form_error = Some("Use a simple name without spaces or path characters".into());
+                    return Ok(());
+                }
+                self.connection_form.name = name;
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionBaseUrl;
+            }
+            KeyCode::Backspace => { self.connection_form.name.pop(); self.connection_form_error = None; }
+            KeyCode::Char(c) => { self.connection_form.name.push(c); self.connection_form_error = None; }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_base_url(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = SubView::ConnectionName,
+            KeyCode::Enter => {
+                let base_url = self.connection_form.base_url.trim().trim_end_matches('/').to_string();
+                if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+                    self.connection_form_error = Some("Base URL must start with http:// or https://".into());
+                    return Ok(());
+                }
+                self.connection_form.base_url = base_url;
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionApiKey;
+            }
+            KeyCode::Backspace => { self.connection_form.base_url.pop(); self.connection_form_error = None; }
+            KeyCode::Char(c) => { self.connection_form.base_url.push(c); self.connection_form_error = None; }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_api_key(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = SubView::ConnectionBaseUrl,
+            KeyCode::Enter => { self.connection_form_error = None; self.sub = SubView::ConnectionModel; }
+            KeyCode::Backspace => { self.connection_form.api_key.pop(); self.connection_form_error = None; }
+            KeyCode::Char(c) => { self.connection_form.api_key.push(c); self.connection_form_error = None; }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_model(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = SubView::ConnectionApiKey,
+            KeyCode::Enter => {
+                let model = self.connection_form.default_model.trim().to_string();
+                if model.is_empty() {
+                    self.connection_form_error = Some("Default model cannot be empty".into());
+                    return Ok(());
+                }
+                self.connection_form.default_model = model;
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionRateLimit;
+            }
+            KeyCode::Backspace => { self.connection_form.default_model.pop(); self.connection_form_error = None; }
+            KeyCode::Char(c) => { self.connection_form.default_model.push(c); self.connection_form_error = None; }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_rate_limit(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = SubView::ConnectionModel,
+            KeyCode::Enter => { self.connection_form_error = None; self.sub = SubView::ConnectionConfirm; }
+            KeyCode::Backspace => {
+                let mut value = self.connection_form.rate_limit_rpm.to_string();
+                value.pop();
+                self.connection_form.rate_limit_rpm = value.parse::<u32>().unwrap_or(0);
+                self.connection_form_error = None;
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                let mut value = self.connection_form.rate_limit_rpm.to_string();
+                if self.connection_form.rate_limit_rpm == 0 {
+                    value.clear();
+                }
+                value.push(c);
+                self.connection_form.rate_limit_rpm = value.parse::<u32>().unwrap_or(0);
+                self.connection_form_error = None;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_connection_confirm(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => self.sub = SubView::ConnectionRateLimit,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                let connection = self.connection_form.clone();
+                let result = if let Some(original) = self.connection_edit_original.clone() {
+                    self.connection_store.update(&original, connection)
+                } else {
+                    self.connection_store.add(connection)
+                };
+                match result.and_then(|_| self.connection_store.save()) {
+                    Ok(()) => {
+                        self.library_selected = self.connection_store.list().iter().position(|c| c.name == self.connection_form.name).unwrap_or(0);
+                        self.notify(format!("Connection saved: {}", self.connection_form.name));
+                        self.sub = SubView::List;
+                    }
+                    Err(err) => self.connection_form_error = Some(format!("Failed: {err}")),
+                }
+            }
+            KeyCode::Char('n') => self.sub = SubView::ConnectionName,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn key_confirm_delete_connection(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc | KeyCode::Char('n') => self.sub = SubView::List,
+            KeyCode::Char('y') | KeyCode::Enter => {
+                if let Some(name) = self.selected_connection().map(|connection| connection.name.clone()) {
+                    self.connection_store.remove(&name);
+                    self.connection_test_status.remove(&name);
+                    match self.connection_store.save() {
+                        Ok(()) => self.notify(format!("Deleted connection: {name}")),
+                        Err(err) => self.notify(format!("Connection save failed: {err}")),
+                    }
+                    self.library_selected = self.library_selected.min(self.connection_store.list().len().saturating_sub(1));
+                }
+                self.sub = SubView::List;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Task 28: clone the configured library repo into `library_dir` if it's
     /// not already a git repo. No-op when `library_repo_url` is `None`.
     /// Failures are logged via `tracing::warn!` and do not abort startup.
@@ -3553,6 +3865,7 @@ impl App {
             LibrarySub::McpServers => self.library_mcp_servers.len(),
             LibrarySub::Skills => self.library_skills.len(),
             LibrarySub::Tools => self.library_tools.len(),
+            LibrarySub::Connections => self.connection_store.list().len(),
             LibrarySub::PiExtensions => self.library_pi_extensions.len(),
         }
     }

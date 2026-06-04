@@ -75,10 +75,47 @@ pub fn portal_agent_from_env() -> Result<Box<dyn PortalAgent>> {
 }
 
 pub fn portal_agent_from_config(config: PortalConfig) -> Result<Box<dyn PortalAgent>> {
-    match config.provider.trim().to_ascii_lowercase().as_str() {
+    let provider = config.provider.trim().to_ascii_lowercase();
+    if let Some(name) = provider.strip_prefix("connection:") {
+        let store = orrch_core::ConnectionStore::load()?;
+        let connection = store
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("portal connection '{name}' not found/disabled"))?;
+        if !connection.enabled {
+            anyhow::bail!("portal connection '{name}' not found/disabled");
+        }
+        return Ok(Box::new(
+            crate::portal_openai_compat::OpenAiCompatPortal::from_connection(connection, config)?,
+        ));
+    }
+
+    match provider.as_str() {
         "local" | "ollama" => Ok(Box::new(crate::portal_local::OllamaPortal::from_config(
             config,
         )?)),
+        "openai-compat" => {
+            let store = orrch_core::ConnectionStore::load()?;
+            let connection = store
+                .list()
+                .iter()
+                .find(|connection| {
+                    connection.enabled
+                        && matches!(
+                            connection.kind,
+                            orrch_core::ConnectionKind::OpenAiCompatible
+                        )
+                })
+                .cloned()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("portal connection 'openai-compat' not found/disabled")
+                })?;
+            Ok(Box::new(
+                crate::portal_openai_compat::OpenAiCompatPortal::from_connection(
+                    connection, config,
+                )?,
+            ))
+        }
         _ => Ok(Box::new(Portal::new(config)?)),
     }
 }
