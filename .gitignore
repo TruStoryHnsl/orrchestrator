@@ -64,3 +64,4 @@ plans/*.rescued.*
 # Session logs (written continuously by tmux pipe-pane — must not trigger cargo watch)
 .session-logs/
 .superpowers/
+docs/superpowers/
