@@ -6353,8 +6353,23 @@ KeyCode::Char('i') => {
                     } else { self.spawn_goal_text.clone() };
 
                     let goal = if self.spawn_workforce_idx > 0 {
-                        // MCP tool path: instruct session to call the develop_feature MCP tool
-                        format!("Call the orrchestrator MCP tool 'develop_feature' with goal: {}", raw_goal)
+                        // Deterministic workflow dispatch: invoke the
+                        // `/run-workforce` slash command so the spawned session
+                        // is HANDED the selected workforce's compiled team
+                        // script and executes it mechanically — instead of a
+                        // prose request the model can (and did) ignore. The
+                        // slash command body is expanded by Claude Code at
+                        // startup, so workflow adherence no longer depends on
+                        // the model choosing to call an MCP tool. The selected
+                        // workforce drives which teams run.
+                        // (Requires `install.sh` to have registered the command
+                        // in ~/.claude/commands/ — step [3/6].)
+                        let wf_name = self
+                            .loaded_workforces
+                            .get(self.spawn_workforce_idx - 1)
+                            .map(|w| w.name.clone())
+                            .unwrap_or_else(|| "general_software_development".to_string());
+                        format!("/run-workforce {wf_name} :: {raw_goal}")
                     } else if self.spawn_agent_idx > 0 {
                         // Agent-only path (existing behavior)
                         if let Some(profile) = self.agent_profiles.get(self.spawn_agent_idx - 1) {
