@@ -24,12 +24,18 @@ PKG_CFG_DIR="$REPO_ROOT/packaging/config"
 LOCAL_BIN="$HOME/.local/bin"
 CFG_DIR="$HOME/.config/$APP_NAME"
 CFG_FILE="$CFG_DIR/launch.env"
+CMD_DIR="$HOME/.claude/commands"
+SKILLS_DIR="$REPO_ROOT/library/skills"
+# Dispatch-loop skills that must resolve as Claude Code slash commands in every
+# spawned session (any project). Without these, `/run-workforce` / `/develop-*`
+# silently do nothing and spawned sessions ignore the guided workflow.
+DISPATCH_COMMANDS=(run-workforce develop-feature develop-aio)
 
 cyan() { printf '\033[36m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 
-cyan "[1/4] Build check"
+cyan "[1/6] Build check"
 BINARY="$REPO_ROOT/target/release/$APP_NAME"
 NEED_BUILD=0
 if [[ ! -x "$BINARY" ]]; then
@@ -50,7 +56,7 @@ else
     green "      binary is current"
 fi
 
-cyan "[2/5] MCP server"
+cyan "[2/6] MCP server"
 # The MCP server is a separate workspace binary the Claude Code MCP config launches
 # by absolute path. Pointing that config at target/release/ is fragile — `cargo
 # clean` (or a linker-config change) wipes target/ and the server vanishes (ENOENT).
@@ -67,7 +73,32 @@ install -m 0755 "$MCP_BIN" "$MCP_DST"
 green "      installed $MCP_DST (copy — survives cargo clean, refreshed each run)"
 yellow "      MCP config command should be: $MCP_DST"
 
-cyan "[3/5] Config"
+cyan "[3/6] Slash commands"
+# Register the workflow dispatch skills as global Claude Code slash commands so
+# orrchestrator-spawned sessions are HANDED the compiled workflow and execute it
+# mechanically, instead of a prose request the model can ignore. Symlink (not
+# copy) so the repo stays the single source of truth.
+mkdir -p "$CMD_DIR"
+for cmd in "${DISPATCH_COMMANDS[@]}"; do
+    src="$SKILLS_DIR/$cmd.md"
+    dst="$CMD_DIR/$cmd.md"
+    if [[ ! -f "$src" ]]; then
+        yellow "      skill $src missing — skipping /$cmd"
+        continue
+    fi
+    if [[ -L "$dst" && "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then
+        green "      /$cmd → already linked"
+    else
+        if [[ -e "$dst" && ! -L "$dst" ]]; then
+            yellow "      $dst exists and is NOT a symlink — backing up to $dst.bak"
+            mv "$dst" "$dst.bak"
+        fi
+        ln -sfn "$src" "$dst"
+        green "      /$cmd → $src"
+    fi
+done
+
+cyan "[4/6] Config"
 mkdir -p "$CFG_DIR"
 if [[ -f "$CFG_FILE" ]]; then
     green "      $CFG_FILE already exists (left untouched)"
@@ -76,7 +107,7 @@ else
     green "      seeded $CFG_FILE from template"
 fi
 
-cyan "[4/5] Symlink"
+cyan "[5/6] Symlink"
 mkdir -p "$LOCAL_BIN"
 for name in "$APP_NAME" "$APP_NAME-dev"; do
     src="$PKG_BIN_DIR/$name"
@@ -96,7 +127,7 @@ for name in "$APP_NAME" "$APP_NAME-dev"; do
     fi
 done
 
-cyan "[5/5] PATH check"
+cyan "[6/6] PATH check"
 case ":$PATH:" in
     *":$LOCAL_BIN:"*)
         green "      $LOCAL_BIN is in PATH"
