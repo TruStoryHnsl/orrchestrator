@@ -226,12 +226,17 @@ async fn main() -> Result<()> {
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
     let _ = terminal.show_cursor();
 
-    // Clean up managed sessions (non-blocking)
+    // Clean up in-process PTY-managed sessions (these are forkpty children the
+    // process owns; they cannot outlive it). NOT tmux.
     app.pm.cleanup();
 
-    // Kill all managed tmux sessions and clear state records on clean exit
-    orrch_core::windows::kill_all_managed_tmux_sessions();
-    orrch_core::windows::clear_session_records();
+    // Tmux sessions and the work running inside them MUST survive orrchestrator
+    // quitting — detachable persistence is the entire reason this app uses tmux.
+    // Do NOT kill `orrch-dev`/`orrch-edit`/`orrch-proc` on exit, and KEEP the
+    // managed-sessions.json records so the next launch re-discovers and lists the
+    // still-running sessions instead of treating them as orphans.
+    // (Was INS-006 kill-on-exit; reversed 2026-06-09 — killing them destroyed
+    //  the user's live agent sessions.)
 
     // Force exit — don't wait for background tokio tasks (remote discovery, timers)
     // They're all detached and will die with the process.
