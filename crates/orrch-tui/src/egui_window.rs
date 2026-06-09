@@ -107,13 +107,13 @@ impl WorkforceViewerApp {
 
 #[cfg(feature = "egui-window")]
 impl eframe::App for WorkforceViewerApp {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         use eframe::egui;
 
-        egui::SidePanel::left("workforces")
+        egui::Panel::left("workforces")
             .resizable(true)
-            .default_width(240.0)
-            .show(ctx, |ui| {
+            .default_size(240.0)
+            .show_inside(ui, |ui| {
                 ui.heading("Workforces");
                 ui.separator();
 
@@ -137,7 +137,7 @@ impl eframe::App for WorkforceViewerApp {
                 }
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(idx) = self.selected else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(120.0);

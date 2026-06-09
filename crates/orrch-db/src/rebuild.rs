@@ -82,7 +82,7 @@ fn ingest_library(conn: &Connection, root: &Path) -> rusqlite::Result<()> {
                 description: extract_field_pub(&fm, "description").unwrap_or_default(),
                 tags: extract_list_pub(&fm, "tags"),
                 path: path.to_string_lossy().to_string(),
-                body_hash: format!("{:x}", Sha256::digest(body.as_bytes())),
+                body_hash: Sha256::digest(body.as_bytes()).iter().map(|b| format!("{b:02x}")).collect(),
             };
             insert_library_item(conn, &row)?;
             record_source_file(conn, &path.to_string_lossy(), mtime_secs(&path), &content)?;

@@ -397,7 +397,8 @@ impl FileRegistry {
             Ok(bytes) => {
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
-                (bytes.len() as u64, format!("{:x}", hasher.finalize()))
+                let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+                (bytes.len() as u64, hex)
             }
             Err(_) => (0, String::new()),
         }
@@ -414,7 +415,7 @@ impl FileRegistry {
         // Hash to produce a UUID-shaped opaque ID.
         let mut h = Sha256::new();
         h.update(format!("{}-{}", ts, self.seq).as_bytes());
-        let hex = format!("{:x}", h.finalize());
+        let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         format!(
             "{}-{}-{}-{}-{}",
             &hex[0..8],

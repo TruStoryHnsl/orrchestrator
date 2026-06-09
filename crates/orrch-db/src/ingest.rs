@@ -44,7 +44,7 @@ pub fn insert_library_item(conn: &Connection, row: &LibraryRow) -> rusqlite::Res
 /// Record a source file's mtime + content hash so incremental rebuilds can
 /// skip unchanged files.
 pub fn record_source_file(conn: &Connection, path: &str, mtime: i64, content: &str) -> rusqlite::Result<()> {
-    let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+    let hash: String = Sha256::digest(content.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     conn.execute(
         "INSERT OR REPLACE INTO source_files (path, mtime, hash) VALUES (?1,?2,?3)",
         params![path, mtime, hash],

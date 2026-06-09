@@ -6,8 +6,8 @@ edition.workspace = true
 
 [dependencies]
 orrch-core = { path = "../orrch-core" }
-axum = { version = "0.7", features = ["ws", "macros"] }
-axum-server = { version = "0.7", features = ["tls-rustls"] }
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -20,6 +20,6 @@ portable-pty = "0.9"
 
 [dev-dependencies]
 tempfile = "3"
-rcgen = "0.13"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+rcgen = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking", "json"] }
 tokio-tungstenite = "0.21"
