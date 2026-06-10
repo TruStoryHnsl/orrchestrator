@@ -89,8 +89,16 @@ for cmd in "${DISPATCH_COMMANDS[@]}"; do
     if [[ -L "$dst" && "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then
         green "      /$cmd → already linked"
     else
-        if [[ -e "$dst" && ! -L "$dst" ]]; then
-            yellow "      $dst exists and is NOT a symlink — backing up to $dst.bak"
+        # Anything already at $dst that isn't the correct symlink (excluded above)
+        # gets backed up before we clobber it: plain files/dirs, AND symlinks
+        # pointing at a different (or now-missing) target. -e is false for broken
+        # symlinks, so test -L too.
+        if [[ -e "$dst" || -L "$dst" ]]; then
+            if [[ -L "$dst" ]]; then
+                yellow "      $dst is a symlink to a different target ($(readlink "$dst")) — backing up to $dst.bak"
+            else
+                yellow "      $dst exists and is NOT a symlink — backing up to $dst.bak"
+            fi
             mv "$dst" "$dst.bak"
         fi
         ln -sfn "$src" "$dst"
