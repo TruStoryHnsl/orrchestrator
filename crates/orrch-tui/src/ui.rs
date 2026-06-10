@@ -4296,8 +4296,11 @@ fn draw_confirm_delete_feedback(frame: &mut Frame, app: &App, idx: usize) {
         Line::styled(format!("\"{preview}\""), Style::default().fg(TEXT_DIM)),
         Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
     ];
-    frame.render_widget(Paragraph::new(lines).block(Block::default().title(" Delete ").borders(Borders::ALL)
-        .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 // ─── Overlays ─────────────────────────────────────────────────────────
@@ -4308,10 +4311,68 @@ fn centered_popup(area: Rect, w: u16, h: u16) -> Rect {
     Rect::new((area.width - width) / 2, (area.height - height) / 2, width, height)
 }
 
+/// Compute a scroll offset (in logical lines) so popup content fits the visible
+/// inner height. When `focus_line` is set (a selected menu item or focused form
+/// field), the offset is derived to keep that line on screen — stateless, so it
+/// works at ANY terminal size. Otherwise `manual_offset` (PgUp/PgDn driven) is
+/// used. Always clamped so it can never scroll past the end.
+fn popup_scroll_offset(total: usize, inner_h: usize, focus_line: Option<usize>, manual_offset: usize) -> usize {
+    let max_off = total.saturating_sub(inner_h);
+    match focus_line {
+        // Keep the focused line visible with one line of trailing context when possible.
+        Some(f) => {
+            let want_end = f.saturating_add(2); // focus + 1 context line, 1-based
+            let off = want_end.saturating_sub(inner_h);
+            off.min(max_off)
+        }
+        None => manual_offset.min(max_off),
+    }
+}
+
+/// Render scrollable popup content. The caller supplies its own styled `Block`
+/// (title/borders/bg); this fn applies scrolling, draws ▲/▼ overflow indicators
+/// as a bottom-right title, and renders. `focus_line` keeps a selected item /
+/// focused field visible (stateless); otherwise `manual_offset` scrolls it.
+fn render_scrollable_popup<'a>(
+    frame: &mut Frame,
+    popup: Rect,
+    block: Block<'a>,
+    lines: Vec<Line<'a>>,
+    focus_line: Option<usize>,
+    manual_offset: usize,
+    wrap: bool,
+) {
+    let inner_h = block.inner(popup).height as usize;
+    let total = lines.len();
+    let offset = popup_scroll_offset(total, inner_h, focus_line, manual_offset);
+
+    let has_above = offset > 0;
+    let has_below = total > offset + inner_h;
+    let hint = match (has_above, has_below) {
+        (true, true) => " ▲▼ ",
+        (true, false) => " ▲ ",
+        (false, true) => " ▼ ",
+        (false, false) => "",
+    };
+    let block = if hint.is_empty() {
+        block
+    } else {
+        block.title_bottom(Line::styled(hint, Style::default().fg(WAITING_COLOR)).right_aligned())
+    };
+
+    let visible: Vec<Line<'a>> = lines.into_iter().skip(offset).collect();
+    let mut para = Paragraph::new(visible).block(block);
+    if wrap {
+        para = para.wrap(Wrap { trim: false });
+    }
+    frame.render_widget(para, popup);
+}
+
 fn draw_spawn_goal(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 60, 16);
     frame.render_widget(Clear, popup);
     let proj_name = app.projects.get(app.spawn_project_idx).map(|p| p.name.as_str()).unwrap_or("?");
+    let mut focus_line: Option<usize> = None;
     let mut lines = vec![
         Line::from(vec![Span::raw("Project: "), Span::styled(proj_name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD))]),
         Line::raw(""),
@@ -4338,6 +4399,7 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
             lines.push(Line::raw(""));
             for (i, item) in open.iter().enumerate() {
                 let sel = app.spawn_goal_from_roadmap == Some(i);
+                if sel { focus_line = Some(lines.len()); }
                 let marker = if sel { "■ " } else { "  " };
                 // Show existing session count next to each roadmap item
                 let existing = app.duplicate_goal_count(&proj.path, &item.title);
@@ -4350,9 +4412,11 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
             }
         }
     }
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Goal (N=spawn all) ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Goal (N=spawn all) ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
@@ -4368,6 +4432,8 @@ fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
 
     // Option 0: no workforce (solo session)
     let no_wf_sel = app.spawn_workforce_idx == 0;
+    let mut focus_line: Option<usize> = None;
+    if no_wf_sel { focus_line = Some(lines.len()); }
     lines.push(Line::styled(
         format!("{} (none) — solo session", if no_wf_sel { "▶" } else { " " }),
         if no_wf_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
@@ -4376,6 +4442,7 @@ fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
     // Workforce templates
     for (i, wf) in app.loaded_workforces.iter().enumerate() {
         let sel = app.spawn_workforce_idx == i + 1;
+        if sel { focus_line = Some(lines.len()); }
         let marker = if sel { "■ " } else { "  " };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{}", marker, wf.name),
@@ -4384,9 +4451,11 @@ fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Workforce ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Workforce ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 fn draw_workflow_picker(frame: &mut Frame, app: &App) {
@@ -4423,14 +4492,19 @@ fn draw_workflow_picker(frame: &mut Frame, app: &App) {
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default()
-                .title(" Workflow ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-            .wrap(Wrap { trim: false }),
+    // Items begin after the 2-line header; keep the selected one visible.
+    let focus_line = Some(2 + app.workflow_picker_idx);
+    render_scrollable_popup(
+        frame,
         popup,
+        Block::default()
+            .title(" Workflow ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4472,14 +4546,15 @@ fn draw_add_feature(frame: &mut Frame, app: &App) {
         Line::styled("Appends: N. [ ] **Title** — Description", Style::default().fg(TEXT_MUTED)),
     ];
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default()
-                .title(" Add Feature ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-            .wrap(Wrap { trim: false }),
-        popup,
+    // Keep the focused input line visible (title=line 3, description=line 6).
+    let focus_line = Some(if app.add_feature_field == 0 { 3 } else { 6 });
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Add Feature ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
     );
 }
 
@@ -4556,14 +4631,21 @@ fn draw_add_mcp_server(frame: &mut Frame, app: &App) {
         Span::styled(cursor(5), label_style(5)),
     ]));
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default()
-                .title(" Register MCP Server ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-            .wrap(Wrap { trim: false }),
-        popup,
+    // Map the focused field to its input line so it stays visible at any size.
+    let stdio = app.add_mcp_transport == 0;
+    let focus_line = Some(match field {
+        0 => 3, 1 => 6, 2 => 8, 3 => 11,
+        4 => 14,                              // args (stdio only)
+        5 => if stdio { 17 } else { 14 },     // roles
+        _ => 0,
+    });
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Register MCP Server ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
     );
 }
 
@@ -4580,6 +4662,8 @@ fn draw_spawn_agent(frame: &mut Frame, app: &App) {
 
     // Option 0: no agent (direct session)
     let no_agent_sel = app.spawn_agent_idx == 0;
+    let mut focus_line: Option<usize> = None;
+    if no_agent_sel { focus_line = Some(lines.len()); }
     lines.push(Line::styled(
         format!("{} (none) — direct session", if no_agent_sel { "▶" } else { " " }),
         if no_agent_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
@@ -4588,6 +4672,7 @@ fn draw_spawn_agent(frame: &mut Frame, app: &App) {
     // Agent profiles
     for (i, profile) in app.agent_profiles.iter().enumerate() {
         let sel = app.spawn_agent_idx == i + 1;
+        if sel { focus_line = Some(lines.len()); }
         let marker = if sel { "■ " } else { "  " };
         lines.push(Line::from(vec![
             Span::styled(format!("{}{}", marker, profile.name),
@@ -4601,9 +4686,11 @@ fn draw_spawn_agent(frame: &mut Frame, app: &App) {
         lines.push(Line::styled("  No agent profiles found in agents/", Style::default().fg(TEXT_MUTED)));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Agent ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Agent ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 fn draw_spawn_backend(frame: &mut Frame, app: &App) {
@@ -4617,8 +4704,10 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled("Backend (Tab to toggle):", Style::default().fg(TEXT_DIM)),
     ];
+    let mut focus_line: Option<usize> = None;
     for &backend in BackendKind::cli_backends() {
         let selected = app.spawn_backend == backend;
+        if selected { focus_line = Some(lines.len()); }
         let found = avail.contains(&backend);
         let marker = if selected { "▶" } else { " " };
         let suffix = if found { "" } else { " (not found)" };
@@ -4635,8 +4724,11 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
             if selected { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
         ));
     }
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Backend ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Backend ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, false,
+    );
 }
 
 fn draw_spawn_engine(frame: &mut Frame, app: &App) {
@@ -4661,6 +4753,8 @@ fn draw_spawn_engine(frame: &mut Frame, app: &App) {
     // Index 0 — resolver default. Show which engine the precedence layers would
     // pick (agent role / project / global default), or "harness default".
     let default_sel = app.spawn_engine_idx == 0;
+    let mut focus_line: Option<usize> = None;
+    if default_sel { focus_line = Some(lines.len()); }
     let resolver_hint = app
         .resolved_default_engine_label()
         .unwrap_or_else(|| "harness default endpoint".to_string());
@@ -4678,6 +4772,7 @@ fn draw_spawn_engine(frame: &mut Frame, app: &App) {
 
     for (i, eng) in engines.iter().enumerate() {
         let sel = app.spawn_engine_idx == i + 1;
+        if sel { focus_line = Some(lines.len()); }
         let loc = match eng.location {
             orrch_library::EngineLocation::Cloud => "cloud",
             orrch_library::EngineLocation::Gateway => "gateway",
@@ -4692,8 +4787,11 @@ fn draw_spawn_engine(frame: &mut Frame, app: &App) {
     lines.push(Line::raw(""));
     lines.push(Line::styled("Enter: continue · Esc: cancel", Style::default().fg(TEXT_MUTED)));
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Engine ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Engine ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, false,
+    );
 }
 
 fn draw_spawn_host(frame: &mut Frame, app: &App) {
@@ -4716,6 +4814,8 @@ fn draw_spawn_host(frame: &mut Frame, app: &App) {
 
     // Local option
     let local_sel = app.spawn_host_idx == 0;
+    let mut focus_line: Option<usize> = None;
+    if local_sel { focus_line = Some(lines.len()); }
     let local_hostname = app.remote_hosts.iter().find(|h| h.is_local).map(|h| h.name.as_str()).unwrap_or("local");
     lines.push(Line::styled(
         format!("{} {} (local)", if local_sel { "▶" } else { " " }, local_hostname),
@@ -4725,6 +4825,7 @@ fn draw_spawn_host(frame: &mut Frame, app: &App) {
     // Remote options
     for (i, host) in remote_hosts.iter().enumerate() {
         let sel = app.spawn_host_idx == i + 1;
+        if sel { focus_line = Some(lines.len()); }
         let status = if host.reachable {
             if let Some(caps) = &host.capabilities {
                 format!(" ({}/{})", caps.os, caps.mux)
@@ -4742,8 +4843,11 @@ fn draw_spawn_host(frame: &mut Frame, app: &App) {
         ));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Host ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Host ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, false,
+    );
 }
 
 fn draw_routing_summary(frame: &mut Frame, app: &App) {
@@ -4761,8 +4865,11 @@ fn draw_routing_summary(frame: &mut Frame, app: &App) {
     lines.push(Line::raw(""));
     lines.push(Line::styled("Enter: spawn continue-dev sessions", Style::default().fg(TEXT)));
     lines.push(Line::styled("Esc: back", Style::default().fg(TEXT_DIM)));
-    frame.render_widget(Paragraph::new(lines).block(Block::default().title(" Routed ").borders(Borders::ALL)
-        .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Routed ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 fn draw_confirm_complete(frame: &mut Frame, app: &App, proj_idx: usize) {
@@ -4777,8 +4884,11 @@ fn draw_confirm_complete(frame: &mut Frame, app: &App, proj_idx: usize) {
         Line::styled("Development can continue on the versioned source.", Style::default().fg(TEXT_DIM)),
         Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
     ];
-    frame.render_widget(Paragraph::new(lines).block(Block::default().title(" Complete → v1 ").borders(Borders::ALL)
-        .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Complete → v1 ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 fn draw_confirm_deprecate(frame: &mut Frame, app: &App, proj_idx: usize) {
@@ -4792,8 +4902,11 @@ fn draw_confirm_deprecate(frame: &mut Frame, app: &App, proj_idx: usize) {
         Line::styled("Kept as reference, not deleted.", Style::default().fg(TEXT_DIM)),
         Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_DIM)),
     ];
-    frame.render_widget(Paragraph::new(lines).block(Block::default().title(" Deprecate ").borders(Borders::ALL)
-        .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Deprecate ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 // ─── Rename popup (94a/94b) ───────────────────────────────────────────
@@ -4801,20 +4914,21 @@ fn draw_confirm_deprecate(frame: &mut Frame, app: &App, proj_idx: usize) {
 fn draw_rename_popup(frame: &mut Frame, app: &App, title: &str) {
     let popup = centered_popup(frame.area(), 50, 5);
     frame.render_widget(Clear, popup);
-    let content = format!(
-        "New name: {}_\n\nEnter=save  Esc=cancel",
-        app.rename_buffer
-    );
-    frame.render_widget(
-        Paragraph::new(content)
-            .style(Style::default().fg(TEXT))
-            .block(
-                Block::default()
-                    .title(format!(" {title} "))
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(ACCENT)),
-            ),
-        popup,
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("New name: ", Style::default().fg(TEXT)),
+            Span::styled(format!("{}_", app.rename_buffer), Style::default().fg(TEXT)),
+        ]),
+        Line::raw(""),
+        Line::styled("Enter=save  Esc=cancel", Style::default().fg(TEXT_DIM)),
+    ];
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(format!(" {title} "))
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(ACCENT)),
+        lines, None, app.popup_scroll, false,
     );
 }
 
@@ -4840,14 +4954,13 @@ fn draw_confirm_rollback(frame: &mut Frame, app: &App) {
         ),
         Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
     ];
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Rollback Release ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(40, 10, 10)).fg(TEXT)),
-        ),
-        popup,
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Rollback Release ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(40, 10, 10)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
     );
 }
 
@@ -4864,14 +4977,13 @@ fn draw_confirm_kill_session(frame: &mut Frame, name: &str) {
         Line::raw(""),
         Line::styled("Y to confirm, n/Esc to cancel", Style::default().fg(TEXT_MUTED)),
     ];
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Kill Session ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(40, 20, 10)).fg(TEXT)),
-        ),
-        popup,
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Kill Session ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(40, 20, 10)).fg(TEXT)),
+        lines, None, 0, false,
     );
 }
 
@@ -4892,14 +5004,13 @@ fn draw_steer_session_input(frame: &mut Frame, app: &App, session_idx: usize) {
         Line::raw(""),
         Line::styled(cursor_buf, Style::default().fg(TEXT)),
     ];
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Send Input ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
-        ),
-        popup,
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Send Input ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
     );
 }
 
@@ -4919,14 +5030,13 @@ fn draw_set_logo_path(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled("Leave blank + Enter to clear.  Esc = cancel.", Style::default().fg(TEXT_MUTED)),
     ];
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title(" Set Logo Path (Enter=save  Esc=cancel) ")
-                .borders(Borders::ALL)
-                .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
-        ),
-        popup,
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Set Logo Path (Enter=save  Esc=cancel) ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
     );
 }
 
@@ -5131,9 +5241,11 @@ fn draw_confirm_delete_deprecated(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled("y: delete forever    n/Esc: cancel", Style::default().fg(TEXT_DIM)),
     ];
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Delete ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(40, 15, 15)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(40, 15, 15)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 // ─── Commit Review Overlay ───────────────────────────────────────────
@@ -5216,9 +5328,11 @@ fn draw_commit_correcting(frame: &mut Frame, app: &App) {
         Line::styled("  Esc: cancel correction", Style::default().fg(TEXT_MUTED)),
     ];
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Correcting ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Correcting ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, false,
+    );
 }
 
 // ─── App Menu (Esc) ──────────────────────────────────────────────────
@@ -5360,8 +5474,10 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         lines.push(Line::raw(""));
     }
 
+    let mut focus_line: Option<usize> = None;
     for (i, (key, label)) in items.iter().enumerate() {
         let sel = i == app.app_menu_selected;
+        if sel { focus_line = Some(lines.len()); }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", if sel { "▶" } else { " " }),
@@ -5378,9 +5494,11 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Menu ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Menu ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, false,
+    );
 }
 
 // ─── Action Menu ─────────────────────────────────────────────────────
@@ -5407,8 +5525,10 @@ fn draw_action_menu(frame: &mut Frame, app: &App) {
     }
     lines.push(Line::raw(""));
 
+    let mut focus_line: Option<usize> = None;
     for (i, item) in app.action_items.iter().enumerate() {
         let sel = i == app.action_selected;
+        if sel { focus_line = Some(lines.len()); }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", if sel { "▶" } else { " " }),
@@ -5425,9 +5545,11 @@ fn draw_action_menu(frame: &mut Frame, app: &App) {
         ]));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Actions ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT))), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Actions ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, false,
+    );
 }
 
 // ─── New Project Wizard Overlays ─────────────────────────────────────
@@ -5449,10 +5571,11 @@ fn draw_new_project_name(frame: &mut Frame, app: &App) {
         lines.push(Line::raw(""));
         lines.push(Line::styled(format!("  ✗ {err}"), Style::default().fg(Color::Red)));
     }
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" New Project ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" New Project ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, Some(3), app.popup_scroll, true,
+    );
 }
 
 /// VIS-001: build the Oversee panel block title, appending a `(N hidden)`
@@ -5481,8 +5604,10 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
         ),
         Line::raw(""),
     ];
+    let mut focus_line: Option<usize> = None;
     for (i, scope) in scopes.iter().enumerate() {
         let sel = i == app.scope_visibility_selected;
+        if sel { focus_line = Some(lines.len()); }
         let hidden = app.hidden_scopes.contains(scope);
         let checkbox = if hidden { "[ ] " } else { "[x] " };
         let cursor = if sel { "▶ " } else { "  " };
@@ -5513,16 +5638,13 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
         Style::default().fg(TEXT_DIM),
     ));
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title(" Project Visibility ")
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-            )
-            .wrap(Wrap { trim: false }),
-        popup,
+    render_scrollable_popup(
+        frame, popup,
+        Block::default()
+            .title(" Project Visibility ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
     );
 }
 
@@ -5545,8 +5667,10 @@ fn draw_new_project_scope(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled("Scope (Tab/arrows to select):", Style::default().fg(TEXT_DIM)),
     ];
+    let mut focus_line: Option<usize> = None;
     for (scope, label, desc) in &scopes {
         let sel = app.new_project_scope == *scope;
+        if sel { focus_line = Some(lines.len()); }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} {label}", if sel { "▶" } else { " " }),
@@ -5555,10 +5679,11 @@ fn draw_new_project_scope(frame: &mut Frame, app: &App) {
             Span::styled(format!("  {desc}"), Style::default().fg(TEXT_MUTED)),
         ]));
     }
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Scope ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Scope ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 fn draw_new_project_confirm(frame: &mut Frame, app: &App) {
@@ -5587,10 +5712,11 @@ fn draw_new_project_confirm(frame: &mut Frame, app: &App) {
         Line::raw(""),
         Line::styled("  y/Enter: create + spawn plan session    n/Esc: back", Style::default().fg(TEXT_DIM)),
     ];
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Confirm ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Confirm ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, true,
+    );
 }
 
 // ─── Connection Manager Overlays ─────────────────────────────────────
@@ -5607,11 +5733,13 @@ fn draw_connection_form(frame: &mut Frame, app: &App) {
         Line::raw(""),
     ];
 
+    let mut focus_line: Option<usize> = None;
     match app.sub {
         SubView::ConnectionPreset => {
             lines.push(Line::styled("Preset (arrows/Tab to select):", Style::default().fg(TEXT_DIM)));
             for (i, preset) in app.connection_presets.iter().enumerate() {
                 let sel = app.connection_preset_idx == i;
+                if sel { focus_line = Some(lines.len()); }
                 lines.push(Line::from(vec![
                     Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
                     Span::styled(&preset.name, if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
@@ -5620,6 +5748,7 @@ fn draw_connection_form(frame: &mut Frame, app: &App) {
             }
             let custom_idx = app.connection_presets.len();
             let sel = app.connection_preset_idx == custom_idx;
+            if sel { focus_line = Some(lines.len()); }
             lines.push(Line::from(vec![
                 Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
                 Span::styled("Custom", if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
@@ -5666,10 +5795,11 @@ fn draw_connection_form(frame: &mut Frame, app: &App) {
         lines.push(Line::styled(format!("  x {error}"), Style::default().fg(Color::Red)));
     }
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Connection ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Connection ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 fn draw_connection_input_lines(lines: &mut Vec<Line>, label: &str, value: &str, masked: bool) {
@@ -5696,10 +5826,11 @@ fn draw_confirm_delete_connection(frame: &mut Frame, app: &App) {
         Line::styled("This removes it from local connections.json.", Style::default().fg(TEXT_DIM)),
         Line::styled("y/Enter: delete   n/Esc: cancel", Style::default().fg(TEXT_DIM)),
     ];
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Confirm Delete ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Confirm Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, None, app.popup_scroll, true,
+    );
 }
 
 // ─── Feedback Confirmation Overlay ───────────────────────────────────
@@ -5746,8 +5877,10 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
         format!("Suggest routing ({enabled_count} hinted — Claude decides final):"),
         Style::default().fg(TEXT_DIM),
     ));
+    let mut focus_line: Option<usize> = None;
     for (i, (name, _, enabled)) in app.confirm_routes.iter().enumerate() {
         let sel = i == app.confirm_route_selected;
+        if sel { focus_line = Some(lines.len()); }
         let check = if *enabled { "☑" } else { "☐" };
         let marker = if sel { "▶" } else { " " };
         lines.push(Line::styled(
@@ -5780,10 +5913,11 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
         Style::default().fg(TEXT_DIM),
     ));
 
-    frame.render_widget(Paragraph::new(lines)
-        .block(Block::default().title(" Confirm Feedback ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    render_scrollable_popup(
+        frame, popup,
+        Block::default().title(" Confirm Feedback ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines, focus_line, app.popup_scroll, true,
+    );
 }
 
 use orrch_core::BackendKind;

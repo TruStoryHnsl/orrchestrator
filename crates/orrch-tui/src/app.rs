@@ -335,6 +335,23 @@ pub enum SubView {
     ScopeVisibility,
 }
 
+impl SubView {
+    /// True for overlay popups/modals (drawn on top of a base panel), false for
+    /// full-panel views. Used to drive generic popup scroll-offset reset and
+    /// PgUp/PgDn handling. The full-panel views manage their own scrolling.
+    pub fn is_popup(&self) -> bool {
+        !matches!(
+            self,
+            SubView::List
+                | SubView::ProjectDetail(_)
+                | SubView::SessionFocus(_)
+                | SubView::ExternalSessionView(_)
+                | SubView::DeprecatedBrowser
+                | SubView::ExpandedSession(_)
+        )
+    }
+}
+
 /// Sub-panels within the Design panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DesignSub {
@@ -996,6 +1013,12 @@ pub struct App {
     pub confirm_feedback_text: String,
     pub confirm_feedback_type: orrch_core::FeedbackType,
 
+    /// Manual scroll offset (logical lines) for the active popup/modal, driven by
+    /// PgUp/PgDn. Selection-based popups derive their own offset from the selected
+    /// index and ignore this; it's for focus-less content popups. Reset to 0
+    /// whenever a popup opens (see `reset_popup_scroll`).
+    pub popup_scroll: usize,
+
     // Commit review
     pub commit_packages: Vec<CommitPackage>,
     pub commit_scroll: usize,
@@ -1391,6 +1414,7 @@ impl App {
             confirm_route_selected: 0,
             confirm_feedback_text: String::new(),
             confirm_feedback_type: orrch_core::FeedbackType::Feedback,
+            popup_scroll: 0,
             commit_packages: Vec::new(),
             commit_scroll: 0,
             commit_correction_text: String::new(),
@@ -2557,6 +2581,28 @@ impl App {
             }
             // Unhandled key at a bar level: drop to content and process it there
             self.focus_depth = self.content_depth();
+        }
+
+        // Generic popup scrolling. Focus-less content popups scroll with
+        // PgUp/PgDn via `popup_scroll`; selection/form popups derive their own
+        // offset from the selected index and ignore it. Reset to 0 whenever no
+        // popup is open so each popup opens scrolled to the top. No popup
+        // handler consumes PgUp/PgDn, so intercepting them here is conflict-free.
+        if self.sub.is_popup() {
+            const POPUP_PAGE: usize = 5;
+            match key {
+                KeyCode::PageUp => {
+                    self.popup_scroll = self.popup_scroll.saturating_sub(POPUP_PAGE);
+                    return Ok(());
+                }
+                KeyCode::PageDown => {
+                    self.popup_scroll = self.popup_scroll.saturating_add(POPUP_PAGE);
+                    return Ok(());
+                }
+                _ => {}
+            }
+        } else {
+            self.popup_scroll = 0;
         }
 
         match &self.sub {
