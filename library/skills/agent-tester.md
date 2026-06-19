@@ -19,7 +19,7 @@ Before testing:
 
 1. Identify the project and feature to test from the task description.
 2. Read the project's `CLAUDE.md` to understand build commands and how to run the project.
-3. Read the acceptance criteria for this feature — check `instructions_inbox.md`, `PLAN.md`, or the task description.
+3. Read the acceptance criteria for this feature — check `instructions_inbox.md`, `PLAN.md` (at `.orrch/PLAN.md` preferred, or root `PLAN.md` legacy fallback), or the task description.
 4. Determine the appropriate test environment: CLI (run built binary), web UI (Playwright), API (curl/requests), system service (container/VM).
 
 ## Step 3: Execute the task

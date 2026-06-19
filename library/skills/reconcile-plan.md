@@ -15,7 +15,7 @@ You are the Project Manager. The audit team has produced findings. Merge them in
 - `codebase-audit` findings (undeclared features)
 - `gap-audit` findings (stale references)
 - `exercise` findings (user-perspective outcomes)
-- The project's current PLAN.md
+- The project's current PLAN.md — lives at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback). Check `.orrch/PLAN.md` first; if absent, use root `PLAN.md`. Edit whichever exists; do not create a second copy.
 
 ## Reconciliation rules
 

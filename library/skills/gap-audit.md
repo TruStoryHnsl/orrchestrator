@@ -10,7 +10,7 @@ You are the Researcher running an audit. Scan PLAN.md for items that reference a
 
 ## Input
 
-- The project's PLAN.md
+- The project's PLAN.md — at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback); check `.orrch/PLAN.md` first, fall back to root
 - The project's codebase
 
 ## Process

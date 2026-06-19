@@ -12,7 +12,7 @@ Transforms raw, conversational user instructions into structured LLM-optimized d
 
 - If a file path is provided, read that file.
 - If no arguments, search the current directory for feedback files:
-  - Look for: `instructions.md`, `INSTRUCTIONS.md`, `TODO.md`, `plan.md`, `PLAN.md`, `*.instructions.md`, `dev_notes.md`, `notes.md`, `feedback.md`, `feedback.txt`, `*.feedback.md`, `*.feedback.txt`
+  - Look for: `instructions.md`, `INSTRUCTIONS.md`, `TODO.md`, `plan.md`, `PLAN.md`, `.orrch/PLAN.md`, `*.instructions.md`, `dev_notes.md`, `notes.md`, `feedback.md`, `feedback.txt`, `*.feedback.md`, `*.feedback.txt`
   - Also check any `.md` or `.txt` file whose first non-empty line contains "instructions", "plan", "todo", "goals", or "feedback" (case-insensitive)
   - If multiple candidates found, list them and ask the user to choose.
   - If none found, tell the user and stop.
@@ -90,7 +90,9 @@ Transform the raw text into a structured prompt with these sections:
 
 ### 5. Update the project feedback record (PLAN.md)
 
-Append to `PLAN.md` in the target project directory (create if it doesn't exist).
+> **PLAN.md location:** the plan lives at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback). Resolve it by checking `.orrch/PLAN.md` first, then root `PLAN.md`. Read and write whichever already exists; if neither exists, create it at `.orrch/PLAN.md` (`mkdir -p .orrch` first). Never create a second copy in the location you didn't use. Every "PLAN.md" below means this resolved file.
+
+Append to the resolved `PLAN.md` in the target project (create at `.orrch/PLAN.md` if it doesn't exist).
 
 Format:
 ```markdown
@@ -113,7 +115,7 @@ Queued: <position in queue, e.g., "3 of 5">
 
 ### 6. Incorporate into master development plan
 
-Each project should have a `PLAN.md` in its root (create if it doesn't exist). This is the **master development plan** — a living document that evolves with every feedback intake.
+Each project should have a `PLAN.md` (at `.orrch/PLAN.md` preferred, or root `PLAN.md` legacy fallback — see the location note in step 5; create at `.orrch/PLAN.md` if it doesn't exist). This is the **master development plan** — a living document that evolves with every feedback intake.
 
 After generating the optimized prompt:
 

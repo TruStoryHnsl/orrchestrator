@@ -287,7 +287,7 @@ For each project that received new instructions, read the agent profile from `~/
 > {the instructions that were routed to this project}
 >
 > **Instructions**:
-> 1. Read the project's `PLAN.md` (if it exists).
+> 1. Read the project's `PLAN.md` (if it exists). It lives at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback) — check `.orrch/PLAN.md` first, fall back to root. Use whichever exists for all reads and writes below; never create a duplicate in the other location.
 > 2. Read the project's `CLAUDE.md` for context on what the project does.
 > 3. Determine if each new **actionable instruction**:
 >    - **Extends** an existing planned feature — merge into that section
@@ -302,7 +302,7 @@ For each project that received new instructions, read the agent profile from `~/
 >    - **<idea title>** (captured <date>, source: <source_idea file>): <preserved brainstorm text>
 >    ```
 >    If the section already exists, append to it. Do not promote deferred ideas into the active roadmap — they stay deferred until the user explicitly acts on them.
-> 5. Update `PLAN.md`. If `PLAN.md` does not exist, create it with sections: Open Conflicts, Architecture, Feature Roadmap (including a Deferred subsection), Recent Changes.
+> 5. Update `PLAN.md`. If `PLAN.md` exists in neither `.orrch/` nor the project root, create it at `.orrch/PLAN.md` (`mkdir -p .orrch` first) with sections: Open Conflicts, Architecture, Feature Roadmap (including a Deferred subsection), Recent Changes.
 >
 > **Output**: Summary of what was incorporated, what was deferred, and any conflicts detected.
 

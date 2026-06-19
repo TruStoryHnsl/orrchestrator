@@ -41,7 +41,7 @@ echo '{"workflow":"develop-feature","step":0,"status":"init"}' > .orrch/workflow
 
 Read `.scope` if it exists → store as `$SCOPE` (default: "private").
 
-**Parse input**: If $ARGUMENTS is a specific goal, use that as `$INSTRUCTIONS`. If $ARGUMENTS is "continue development" or "continue", read `PLAN.md` and collect unchecked `[ ]` items from the lowest incomplete phase.
+**Parse input**: If $ARGUMENTS is a specific goal, use that as `$INSTRUCTIONS`. If $ARGUMENTS is "continue development" or "continue", read `PLAN.md` (check `.orrch/PLAN.md` first, then root `PLAN.md` — `.orrch/` is preferred, root is the legacy fallback; use whichever exists) and collect unchecked `[ ]` items from the lowest incomplete phase.
 
 **If no unchecked items: STOP.** Say "Dev map is complete — no unchecked items in PLAN.md." Do not search elsewhere.
 
@@ -322,7 +322,7 @@ Update workflow.json: `{"step":7,"status":"finishing"}`.
 <remaining inbox items, or "inbox clear">
 ```
 
-**Update dev map** — mark completed items in `PLAN.md`:
+**Update dev map** — mark completed items in `PLAN.md` (the same file you read in Step 1: `.orrch/PLAN.md` if it exists, else root `PLAN.md`):
 For each instruction/feature that was implemented (from `.orrch/instructions.md`), find its matching entry in `PLAN.md` and change `[ ]` to `[x]`. Match by instruction ID (e.g., `INS-004`) or feature name keyword. If no matching entry exists in PLAN.md, skip — the dev map only tracks items that were formally planned.
 
 **Clean instruction inbox** — if ALL instructions from the current batch are now implemented:
@@ -335,7 +335,7 @@ current=$(git tag -l 'v*' --sort=-v:refname | head -1)
 # feat = minor bump, fix = patch, feat! = major
 ```
 
-**Commit** — execute directly (include PLAN.md and instructions_inbox.md in the staged files):
+**Commit** — execute directly (stage the PLAN.md you edited — `.orrch/PLAN.md` or root `PLAN.md` — plus instructions_inbox.md and the changed files):
 ```bash
 git add <files from workspace_state.md>
 git commit -m "feat: <summary derived from instructions>"
