@@ -26,7 +26,7 @@ Before acting on the task, orient yourself:
    cannot plan against a codebase you have not reconciled. A new session must be
    able to trust `main` as the single source of truth — your job is to make that
    true before you do anything else.
-3. Read the project's `PLAN.md` if one exists — understand current state, priorities, and recent changes.
+3. Read the project's `PLAN.md` if one exists (check `.orrch/PLAN.md` first, then root `PLAN.md` — `.orrch/` is preferred, root is the legacy fallback) — understand current state, priorities, and recent changes.
 4. Read the project's `instructions_inbox.md` if one exists — check for queued instructions.
 5. Read the project's `CLAUDE.md` if one exists — understand project conventions and constraints.
 6. Check the project's `.scope` file to calibrate rigor.

@@ -19,7 +19,7 @@ Before designing anything:
 
 1. Identify the target project from the task description.
 2. Read the project's `CLAUDE.md` to understand the tech stack, crate structure, and conventions.
-3. Read the project's `PLAN.md` to understand the roadmap and existing design decisions.
+3. Read the project's `PLAN.md` (check `.orrch/PLAN.md` first, then root `PLAN.md` — `.orrch/` is preferred, root is the legacy fallback) to understand the roadmap and existing design decisions.
 4. Read the project's `.scope` file to calibrate rigor.
 5. Analyze the current codebase architecture — understand existing patterns, module boundaries, data flows, and constraints in the area relevant to this task.
 

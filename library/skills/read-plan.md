@@ -10,7 +10,7 @@ You are the Project Manager. An audit is starting. Enumerate every item in PLAN.
 
 ## Input
 
-- The project's PLAN.md
+- The project's PLAN.md — lives at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback). Check `.orrch/PLAN.md` first; if absent, use root `PLAN.md`. Every "PLAN.md" below means whichever exists.
 - The project's CLAUDE.md and README.md for phase / component context
 
 ## Output schema
@@ -34,7 +34,7 @@ Emit a structured list, one block per claimed item:
 - If an item has been deprecated or struck through but also marked complete, treat it as `in-progress` with a note, not `complete`.
 - Do not skip partial-complete items that explicitly call themselves partial — include them as `in-progress`.
 - Preserve the original wording of each item; downstream auditors match against it.
-- If PLAN.md does not exist, emit `ERROR: PLAN.md not found at <path>` and halt.
+- If PLAN.md exists in neither `.orrch/` nor the project root, emit `ERROR: PLAN.md not found (checked .orrch/PLAN.md and ./PLAN.md)` and halt.
 - If the plan has zero claimed-complete items, emit `### NO CLAIMED ITEMS` and halt.
 
 ## Output

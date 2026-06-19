@@ -12,7 +12,7 @@ You are the Project Manager. The audit is finished. Write a persistent report so
 
 - The `RECONCILIATION SUMMARY` emitted by `reconcile-plan`
 - The raw findings from `verify-claim`, `codebase-audit`, `gap-audit`, `exercise`
-- The before/after PLAN.md diff (you may `git diff PLAN.md` to get it)
+- The before/after PLAN.md diff (PLAN.md is at `.orrch/PLAN.md` (preferred) or root `PLAN.md` (legacy); `git diff -- .orrch/PLAN.md PLAN.md` covers both)
 
 ## Output
 

@@ -14,6 +14,16 @@ PROJECT_DIR="${1:-.}"
 PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
 GOAL="${2:-continue development}"
 ORRCH_DIR="${PROJECT_DIR}/.orrch"
+# PLAN.md may live in .orrch/ (preferred) or the project root (legacy).
+# Resolve to whichever exists, preferring .orrch/. If neither exists yet,
+# point at the .orrch/ location so new plans are written there.
+if [[ -f "${ORRCH_DIR}/PLAN.md" ]]; then
+    PLAN_FILE="${ORRCH_DIR}/PLAN.md"
+elif [[ -f "${PROJECT_DIR}/PLAN.md" ]]; then
+    PLAN_FILE="${PROJECT_DIR}/PLAN.md"
+else
+    PLAN_FILE="${ORRCH_DIR}/PLAN.md"
+fi
 TOOLS_DIR="${SCRIPT_DIR}"
 AGENTS_DIR="${SCRIPT_DIR}/../../agents"
 LOG_FILE="${ORRCH_DIR}/workflow.log"
@@ -112,9 +122,10 @@ if [[ "${GOAL}" == "continue development" || "${GOAL}" == "continue" ]]; then
             | grep -v '~~' | grep -v 'IMPLEMENTED' | grep -v 'No pending' || true)
     fi
 
-    # Read PLAN.md for uncompleted items from lowest incomplete phase
-    if [[ ! -f "${PROJECT_DIR}/PLAN.md" ]]; then
-        log "ERROR: No PLAN.md found. Nothing to do."
+    # Read PLAN.md for uncompleted items from lowest incomplete phase.
+    # PLAN_FILE resolves to .orrch/PLAN.md (preferred) or root PLAN.md (legacy).
+    if [[ ! -f "${PLAN_FILE}" ]]; then
+        log "ERROR: No PLAN.md found (checked ${ORRCH_DIR}/PLAN.md and ${PROJECT_DIR}/PLAN.md). Nothing to do."
         exit 0
     fi
 
@@ -123,17 +134,17 @@ if [[ "${GOAL}" == "continue development" || "${GOAL}" == "continue" ]]; then
     #   Format B (visualizorr etc): "### Task N: Title" — task-header style
     #   Format C: "- [ ] item" — markdown task list
     INSTRUCTIONS=""
-    if grep -q '\[ \]' "${PROJECT_DIR}/PLAN.md"; then
+    if grep -q '\[ \]' "${PLAN_FILE}"; then
         # Format A/C: checkbox items
-        INSTRUCTIONS=$(grep -n '\[ \]' "${PROJECT_DIR}/PLAN.md" || true)
+        INSTRUCTIONS=$(grep -n '\[ \]' "${PLAN_FILE}" || true)
         log "plan format: checkbox ($(echo "${INSTRUCTIONS}" | wc -l) unchecked items)"
-    elif grep -qE '^### Task [0-9]+:' "${PROJECT_DIR}/PLAN.md"; then
+    elif grep -qE '^### Task [0-9]+:' "${PLAN_FILE}"; then
         # Format B: task headers — treat ALL tasks as uncompleted unless marked DONE/COMPLETE
-        INSTRUCTIONS=$(grep -nE '^### Task [0-9]+:' "${PROJECT_DIR}/PLAN.md" | grep -iv 'DONE\|COMPLETE\|✓' || true)
+        INSTRUCTIONS=$(grep -nE '^### Task [0-9]+:' "${PLAN_FILE}" | grep -iv 'DONE\|COMPLETE\|✓' || true)
         log "plan format: task-header ($(echo "${INSTRUCTIONS}" | wc -l) tasks)"
     else
         # Fallback: pass the whole PLAN.md to the PM and let it figure out what to do
-        INSTRUCTIONS=$(cat "${PROJECT_DIR}/PLAN.md")
+        INSTRUCTIONS=$(cat "${PLAN_FILE}")
         log "plan format: unstructured (passing full plan to PM)"
     fi
 
@@ -437,7 +448,7 @@ while IFS= read -r line; do
     if [[ -n "${feature}" ]]; then
         # Escape for sed and replace [ ] with [x]
         escaped=$(printf '%s\n' "${feature}" | sed 's/[[\.*^$()+?{|]/\\&/g')
-        sed -i "s/\[ \] \*\*${escaped}/[x] **${escaped}/" "${PROJECT_DIR}/PLAN.md" 2>/dev/null || true
+        sed -i "s/\[ \] \*\*${escaped}/[x] **${escaped}/" "${PLAN_FILE}" 2>/dev/null || true
     fi
 done < "${ORRCH_DIR}/instructions.md"
 
@@ -467,7 +478,7 @@ update_status 9 "committing"
 CHANGED_FILES=$(grep -oE 'crates/[^ ]+\.rs|src/[^ ]+\.rs|library/[^ ]+\.(sh|md)' \
     "${ORRCH_DIR}/workspace_state.md" | sort -u)
 
-git add PLAN.md DEVLOG.md ${CHANGED_FILES} 2>/dev/null || true
+git add "${PLAN_FILE}" DEVLOG.md ${CHANGED_FILES} 2>/dev/null || true
 git commit -m "feat: implement dev map items (automated workflow)
 
 Verdict: ${VERDICT}

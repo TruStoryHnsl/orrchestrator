@@ -11,7 +11,7 @@ You are the Developer running an audit. Scan the codebase for user-facing featur
 ## Input
 
 - The project's codebase
-- The project's PLAN.md (so you know what IS tracked)
+- The project's PLAN.md (so you know what IS tracked) — at either `.orrch/PLAN.md` (preferred) or the project root `PLAN.md` (legacy fallback); check `.orrch/PLAN.md` first, fall back to root
 - The project's CLAUDE.md and README.md
 
 ## Process
