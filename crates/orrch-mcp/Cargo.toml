@@ -20,3 +20,4 @@ serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
 rusqlite = { workspace = true }
+toml_edit = "0.25"
