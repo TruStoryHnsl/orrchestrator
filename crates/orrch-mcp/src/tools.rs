@@ -577,6 +577,28 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "List all workforce .md files registered in the orrchestrator workforces/ directory. Returns name, description, team count for each workforce.",
             "inputSchema": {"type": "object", "properties": {}}
         }),
+        serde_json::json!({
+            "name": "infra_placement",
+            "description": "Query the infra topology guard: answers \"can service X deploy on host Y (in mode Z)?\". Reads the authoritative infra/topology.toml (single source of truth for machine + service placement) and folds allow/deny rules exactly like infra/gen.py. Returns a human-readable ALLOW/DENY verdict with allowed modes+dirs, the specific deny reason if forbidden, the ingress note, and a pointer to topology.toml. Use this BEFORE deploying, moving, or building any service on any host — it is the live query surface for the generated placement guards.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "service": {
+                        "type": "string",
+                        "description": "Service name as keyed in topology.toml (e.g. 'concord', 'orrapus', 'plex')"
+                    },
+                    "host": {
+                        "type": "string",
+                        "description": "Target host name (e.g. 'orrgate', 'orrion', 'orrigins')"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Optional deployment mode to check: 'docker-image' (load prebuilt image), 'source-build' (git checkout + compile — heavy target/ trees), or 'source-dev' (run from a dev checkout). When omitted, reports the allowed modes and whether the service is placeable on that host at all."
+                    }
+                },
+                "required": ["service", "host"]
+            }
+        }),
     ]
 }
 
@@ -685,6 +707,7 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
         "voice_toggle" => voice_toggle(args),
         "team_list" => team_list(server),
         "workflow_list" => workflow_list(server),
+        "infra_placement" => infra_placement(server, args),
         _ => format!("Error: unknown tool '{name}'"),
     }
 }
@@ -970,6 +993,265 @@ fn workflow_list(server: &OrrchMcpServer) -> String {
             w.description
         ));
     }
+    out
+}
+
+// ─── infra_placement ────────────────────────────────────────────────────────
+
+/// Locate the authoritative `infra/topology.toml`. Tries, in order:
+///   1. <projects_dir>/orrchestrator/infra/topology.toml
+///   2. <library_dir>/../infra/topology.toml   (library_dir = orrch/library)
+///   3. an upward walk from the current working directory.
+fn find_topology_path(server: &OrrchMcpServer) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    candidates.push(
+        server
+            .projects_dir
+            .join("orrchestrator")
+            .join("infra")
+            .join("topology.toml"),
+    );
+    if let Some(orrch_root) = server.library_dir.parent() {
+        candidates.push(orrch_root.join("infra").join("topology.toml"));
+    }
+    for c in &candidates {
+        if c.is_file() {
+            return Some(c.clone());
+        }
+    }
+    // Upward walk from cwd as a last resort.
+    let mut dir = std::env::current_dir().ok();
+    while let Some(d) = dir {
+        let cand = d.join("infra").join("topology.toml");
+        if cand.is_file() {
+            return Some(cand);
+        }
+        dir = d.parent().map(|p| p.to_path_buf());
+    }
+    None
+}
+
+/// Borrow an `[[...]]` array-of-tables as a Vec of table refs, or empty.
+fn array_of_tables(item: Option<&toml_edit::Item>) -> Vec<&toml_edit::Table> {
+    item.and_then(|i| i.as_array_of_tables())
+        .map(|aot| aot.iter().collect())
+        .unwrap_or_default()
+}
+
+/// Does this allow/deny entry apply to `host`? Matches an exact host or the
+/// "*" wildcard, mirroring gen.py's `a.get("host") in (host, "*")`.
+fn entry_matches_host(entry: &toml_edit::Table, host: &str) -> bool {
+    matches!(
+        entry.get("host").and_then(|v| v.as_str()),
+        Some(h) if h == host || h == "*"
+    )
+}
+
+/// Answer "can `service` deploy on `host` (in `mode`)?" by folding
+/// topology.toml exactly like gen.py's `host_placement`.
+fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
+    let service = match args.get("service").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s,
+        _ => return "Error: 'service' parameter is required".into(),
+    };
+    let host = match args.get("host").and_then(|v| v.as_str()) {
+        Some(h) if !h.is_empty() => h,
+        _ => return "Error: 'host' parameter is required".into(),
+    };
+    let mode = args.get("mode").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+
+    let topo_path = match find_topology_path(server) {
+        Some(p) => p,
+        None => return "Error: could not locate infra/topology.toml (single source of truth).".into(),
+    };
+    let content = match std::fs::read_to_string(&topo_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Error: cannot read {}: {e}", topo_path.display()),
+    };
+    let doc = match content.parse::<toml_edit::DocumentMut>() {
+        Ok(d) => d,
+        Err(e) => return format!("Error: cannot parse {}: {e}", topo_path.display()),
+    };
+    let topo_ref = topo_path.display().to_string();
+
+    // Known-host sanity note (does not change placement folding, mirrors gen.py
+    // which folds "*"/exact matches regardless of host-table membership).
+    let hosts = doc.get("hosts").and_then(|i| i.as_table());
+    let host_known = hosts.map(|t| t.contains_key(host)).unwrap_or(false);
+    let host_role = hosts
+        .and_then(|t| t.get(host))
+        .and_then(|i| i.as_table())
+        .and_then(|t| t.get("role"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let services = doc.get("services").and_then(|i| i.as_table());
+
+    // Unknown service → list the ones we know about.
+    let svc_item = services.and_then(|t| t.get(service));
+    if svc_item.is_none() {
+        let known: Vec<&str> = services
+            .map(|t| t.iter().map(|(k, _)| k).collect())
+            .unwrap_or_default();
+        return format!(
+            "Infra placement — service '{service}' NOT FOUND in topology.toml.\n\
+             Known services: {}\n\
+             Source of truth: {topo_ref}\n\
+             Add a `[[services.{service}.allow]]` block there before deploying.",
+            if known.is_empty() { "(none)".into() } else { known.join(", ") }
+        );
+    }
+
+    // Collect allow / deny tables (array-of-tables) filtered to this host.
+    let svc_item = svc_item.unwrap();
+    let allow_all = array_of_tables(svc_item.get("allow"));
+    let deny_all = array_of_tables(svc_item.get("deny"));
+
+    let allows: Vec<&toml_edit::Table> =
+        allow_all.into_iter().filter(|t| entry_matches_host(t, host)).collect();
+    let denies: Vec<&toml_edit::Table> =
+        deny_all.into_iter().filter(|t| entry_matches_host(t, host)).collect();
+
+    // allowed_modes / allowed_dirs — sorted + de-duped like gen.py.
+    let field = |t: &toml_edit::Table, k: &str| -> Option<String> {
+        t.get(k).and_then(|v| v.as_str()).map(|s| s.to_string())
+    };
+    let mut allowed_modes: Vec<String> =
+        allows.iter().filter_map(|t| field(t, "mode")).collect();
+    allowed_modes.sort();
+    allowed_modes.dedup();
+    let mut allowed_dirs: Vec<String> = allows
+        .iter()
+        .filter_map(|t| field(t, "dir"))
+        .filter(|s| !s.is_empty())
+        .collect();
+    allowed_dirs.sort();
+    allowed_dirs.dedup();
+
+    let fully_forbidden = allows.is_empty();
+
+    // forbidden_modes: sorted deny modes; explicit "any" or no allow → ["any"].
+    let mut forbidden_modes: Vec<String> =
+        denies.iter().filter_map(|t| field(t, "mode")).collect();
+    forbidden_modes.sort();
+    forbidden_modes.dedup();
+    if fully_forbidden || forbidden_modes.iter().any(|m| m == "any") {
+        forbidden_modes = vec!["any".to_string()];
+    }
+
+    // Folded reason: first deny that carries a reason; else default if fully forbidden.
+    let folded_reason: Option<String> = denies
+        .iter()
+        .find_map(|t| field(t, "reason"))
+        .or_else(|| {
+            if fully_forbidden {
+                Some(format!(
+                    "{service} has no sanctioned placement on {host}. Add one to topology.toml and regenerate before deploying here."
+                ))
+            } else {
+                None
+            }
+        });
+
+    // Ingress note(s) from the matching allow entries.
+    let ingress: Vec<String> = allows.iter().filter_map(|t| field(t, "ingress")).collect();
+
+    // A mode-specific deny reason (deny entry whose mode == mode or "any").
+    let mode_deny_reason = |m: &str| -> Option<String> {
+        denies
+            .iter()
+            .find(|t| matches!(field(t, "mode").as_deref(), Some(dm) if dm == m || dm == "any"))
+            .and_then(|t| field(t, "reason"))
+    };
+
+    // ─── Render ──────────────────────────────────────────────────────────
+    let mut out = String::new();
+    out.push_str(&format!("Infra placement — service '{service}' on host '{host}'"));
+    if let Some(m) = mode {
+        out.push_str(&format!(" (mode '{m}')"));
+    }
+    out.push('\n');
+    if !host_known {
+        out.push_str(&format!(
+            "  note: '{host}' is not a declared host in topology.toml; only exact/'*' rules apply.\n"
+        ));
+    } else if let Some(role) = &host_role {
+        out.push_str(&format!("  host role: {role}\n"));
+    }
+    out.push('\n');
+
+    match mode {
+        Some(m) => {
+            let allowed = allowed_modes.iter().any(|am| am == m);
+            if allowed {
+                out.push_str("VERDICT: ALLOW\n");
+                out.push_str(&format!("  '{service}' may deploy on '{host}' in mode '{m}'.\n"));
+                // Report the sanctioned dir(s) for this mode specifically.
+                let dirs_for_mode: Vec<String> = allows
+                    .iter()
+                    .filter(|t| field(t, "mode").as_deref() == Some(m))
+                    .filter_map(|t| field(t, "dir"))
+                    .collect();
+                if !dirs_for_mode.is_empty() {
+                    out.push_str(&format!("  target dir(s): {}\n", dirs_for_mode.join(", ")));
+                }
+            } else {
+                out.push_str("VERDICT: DENY\n");
+                let reason = mode_deny_reason(m)
+                    .or_else(|| folded_reason.clone())
+                    .unwrap_or_else(|| format!(
+                        "mode '{m}' is not sanctioned for '{service}' on '{host}'."
+                    ));
+                out.push_str(&format!("  reason: {reason}\n"));
+                if allowed_modes.is_empty() {
+                    out.push_str(&format!(
+                        "  '{service}' is not sanctioned on '{host}' in ANY mode.\n"
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  sanctioned modes on '{host}': {}\n",
+                        allowed_modes.join(", ")
+                    ));
+                }
+            }
+        }
+        None => {
+            let placeable = !fully_forbidden;
+            out.push_str(&format!(
+                "VERDICT: {}\n",
+                if placeable { "PLACEABLE" } else { "NOT PLACEABLE" }
+            ));
+            if placeable {
+                out.push_str(&format!(
+                    "  '{service}' is sanctioned on '{host}'. Allowed modes: {}\n",
+                    allowed_modes.join(", ")
+                ));
+                out.push_str("  Re-run with a `mode` to get an ALLOW/DENY on a specific deployment mode.\n");
+            } else {
+                out.push_str(&format!(
+                    "  '{service}' has NO sanctioned placement on '{host}'.\n"
+                ));
+                if let Some(r) = &folded_reason {
+                    out.push_str(&format!("  reason: {r}\n"));
+                }
+            }
+        }
+    }
+
+    // Common context block.
+    if !allowed_dirs.is_empty() {
+        out.push_str(&format!("  sanctioned dir(s): {}\n", allowed_dirs.join(", ")));
+    }
+    if !forbidden_modes.is_empty() {
+        out.push_str(&format!("  forbidden mode(s): {}\n", forbidden_modes.join(", ")));
+    }
+    if !ingress.is_empty() {
+        for ing in &ingress {
+            out.push_str(&format!("  ingress: {ing}\n"));
+        }
+    }
+    out.push_str(&format!("  source of truth: {topo_ref}\n"));
+
     out
 }
 
@@ -3325,5 +3607,45 @@ pub mod inner;
                 "missing tool '{expected}' in {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_tool_definitions_include_infra_placement() {
+        let names: Vec<String> = tool_definitions()
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
+            .collect();
+        assert!(names.iter().any(|n| n == "infra_placement"),
+            "missing infra_placement in {names:?}");
+    }
+
+    #[test]
+    fn test_infra_placement_concord_orrgate() {
+        // Requires the real infra/topology.toml under ~/projects/orrchestrator.
+        let server = OrrchMcpServer::from_defaults();
+        if find_topology_path(&server).is_none() {
+            eprintln!("skipping: topology.toml not found in this environment");
+            return;
+        }
+
+        // source-build on orrgate → DENY with the disk-fill reason.
+        let deny = infra_placement(&server, &serde_json::json!({
+            "service": "concord", "host": "orrgate", "mode": "source-build"
+        }));
+        assert!(deny.contains("VERDICT: DENY"), "expected DENY, got:\n{deny}");
+        assert!(deny.to_lowercase().contains("disk") || deny.to_lowercase().contains("root lv"),
+            "expected disk-fill reason, got:\n{deny}");
+
+        // docker-image on orrgate → ALLOW.
+        let allow = infra_placement(&server, &serde_json::json!({
+            "service": "concord", "host": "orrgate", "mode": "docker-image"
+        }));
+        assert!(allow.contains("VERDICT: ALLOW"), "expected ALLOW, got:\n{allow}");
+
+        // orrigins (storage) → NOT PLACEABLE in any mode.
+        let storage = infra_placement(&server, &serde_json::json!({
+            "service": "concord", "host": "orrigins"
+        }));
+        assert!(storage.contains("NOT PLACEABLE"), "expected NOT PLACEABLE, got:\n{storage}");
     }
 }
