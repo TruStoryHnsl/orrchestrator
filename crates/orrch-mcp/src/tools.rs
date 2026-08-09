@@ -3036,8 +3036,9 @@ mod tests {
         // + continue_intake + incorporate_inbox + assess_development = 28
         // + workflow/team architectural split: develop_aio, team_call,
         //   workflow_call, team_list, workflow_list = +5 → 33
-        // + orrch-voice bridge tools = +3 → 36.
-        assert_eq!(tool_definitions().len(), 36);
+        // + orrch-voice bridge tools = +3 → 36
+        // + infra_placement = +1 → 37.
+        assert_eq!(tool_definitions().len(), 37);
     }
 
     #[test]
