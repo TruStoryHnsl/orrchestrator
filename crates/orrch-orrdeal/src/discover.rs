@@ -32,7 +32,10 @@ async fn find_device_ip(device: &str) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow!("no Peer map in tailscale status"))?;
     for peer in peers.values() {
         let hostname = peer.get("HostName").and_then(|h| h.as_str()).unwrap_or("");
-        let online = peer.get("Online").and_then(|o| o.as_bool()).unwrap_or(false);
+        let online = peer
+            .get("Online")
+            .and_then(|o| o.as_bool())
+            .unwrap_or(false);
         if hostname.eq_ignore_ascii_case(device)
             && online
             && let Some(ip) = peer
@@ -51,10 +54,14 @@ async fn find_device_ip(device: &str) -> anyhow::Result<String> {
 async fn ssh_probe(cfg: &MeshConfig, ip: &str) -> anyhow::Result<String> {
     let mut child = Command::new("ssh")
         .args([
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=15",
-            "-i", &cfg.ssh_private_key_path,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=15",
+            "-i",
+            &cfg.ssh_private_key_path,
             &format!("{}@{}", cfg.ssh_user, ip),
             "sh -s",
         ])
@@ -84,12 +91,17 @@ async fn ssh_probe(cfg: &MeshConfig, ip: &str) -> anyhow::Result<String> {
 /// Run the discover arm. Always returns a Target (Reachable on success, otherwise
 /// Unreachable/ProbeFailed with a note). Errors only on genuinely unexpected faults.
 pub async fn run(cfg: &MeshConfig) -> Target {
-    let base = |status: TargetStatus, note: String, os: String, arch: String, caps: CapabilityFlags, addr: String| Target {
+    let base = |status: TargetStatus,
+                note: String,
+                os: String,
+                arch: String,
+                caps: CapabilityFlags,
+                addr: String| Target {
         id: format!("mesh:{}", cfg.device),
         source: TargetSource::Mesh,
         ui_surface: UiSurface::Desktop, // source default — refined later
         capabilities: caps,
-        input: InputModality::Pointer,  // source default — refined later
+        input: InputModality::Pointer, // source default — refined later
         arch,
         os,
         reach: Reach::TailnetSsh(addr),

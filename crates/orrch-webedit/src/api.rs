@@ -8,7 +8,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use orrch_workforce::{load_workforces, parse_workforce_markdown, serialize_workforce_markdown, Workforce};
+use orrch_workforce::{
+    Workforce, load_workforces, parse_workforce_markdown, serialize_workforce_markdown,
+};
 use serde::Serialize;
 use tiny_http::{Header, Response};
 
@@ -40,8 +42,7 @@ impl WorkforceSummary {
 /// `orrch_workforce::load_workforces`).
 pub fn list_workforces(dir: &Path) -> HttpResponse {
     let workforces = load_workforces(dir);
-    let summaries: Vec<WorkforceSummary> =
-        workforces.iter().map(WorkforceSummary::from).collect();
+    let summaries: Vec<WorkforceSummary> = workforces.iter().map(WorkforceSummary::from).collect();
     json_response(&summaries, 200)
 }
 
@@ -83,10 +84,10 @@ pub fn put_workforce(dir: &Path, name: &str, body: &str) -> HttpResponse {
     }
 
     // Round-trip sanity check so we never quietly corrupt a file.
-    if let Ok(written) = fs::read_to_string(&path) {
-        if parse_workforce_markdown(&written).is_none() {
-            return json_error("serialized workforce failed round-trip parse", 500);
-        }
+    if let Ok(written) = fs::read_to_string(&path)
+        && parse_workforce_markdown(&written).is_none()
+    {
+        return json_error("serialized workforce failed round-trip parse", 500);
     }
 
     json_response(
@@ -120,7 +121,14 @@ fn filename_for(name: &str) -> String {
         }
     }
     let trimmed = out.trim_matches('_').to_string();
-    format!("{}.md", if trimmed.is_empty() { "workforce" } else { &trimmed })
+    format!(
+        "{}.md",
+        if trimmed.is_empty() {
+            "workforce"
+        } else {
+            &trimmed
+        }
+    )
 }
 
 /// Minimal URL percent-decoder — only handles the characters that show up in
@@ -255,7 +263,10 @@ mod tests {
 
     #[test]
     fn filename_for_slugifies_spaces_and_case() {
-        assert_eq!(filename_for("General Software Development"), "general_software_development.md");
+        assert_eq!(
+            filename_for("General Software Development"),
+            "general_software_development.md"
+        );
         assert_eq!(filename_for("Mid-Tier"), "mid_tier.md");
     }
 }

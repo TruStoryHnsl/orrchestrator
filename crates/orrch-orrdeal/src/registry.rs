@@ -47,7 +47,11 @@ pub struct CapabilityFlags {
 impl CapabilityFlags {
     /// `web-sandboxed` preset — only camera/mic guest access.
     pub fn web_sandboxed() -> Self {
-        Self { camera: true, mic: true, ..Self::default() }
+        Self {
+            camera: true,
+            mic: true,
+            ..Self::default()
+        }
     }
 }
 
@@ -104,7 +108,9 @@ impl Registry {
 
     /// Path to the persisted registry: `~/.config/orrchestrator/orrdeal/registry.json`.
     pub fn path() -> PathBuf {
-        orrch_core::config::config_dir().join("orrdeal").join("registry.json")
+        orrch_core::config::config_dir()
+            .join("orrdeal")
+            .join("registry.json")
     }
 
     pub fn save(&self) -> anyhow::Result<()> {

@@ -95,7 +95,12 @@ pub fn list_session_briefs(project_dir: &Path) -> Vec<SessionBrief> {
                 return None;
             }
             let (epoch, sid) = parse_brief_filename(&filename);
-            Some(SessionBrief { path, filename, epoch, sid })
+            Some(SessionBrief {
+                path,
+                filename,
+                epoch,
+                sid,
+            })
         })
         .collect();
     briefs.sort_by(|a, b| b.epoch.cmp(&a.epoch));
@@ -113,7 +118,13 @@ fn parse_brief_filename(filename: &str) -> (u64, String) {
 
 fn sanitize_sid(sid: &str) -> String {
     sid.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -135,13 +146,20 @@ fn rfc3339_from_epoch(_epoch: u64) -> String {
 
 fn git_diff_stat(project_dir: &Path) -> String {
     let output = process_spawn::command("git", SliceMode::OrrchSlice)
-        .arg("-C").arg(project_dir)
-        .arg("diff").arg("--stat").arg("HEAD")
+        .arg("-C")
+        .arg(project_dir)
+        .arg("diff")
+        .arg("--stat")
+        .arg("HEAD")
         .output();
     match output {
         Ok(o) if o.status.success() => {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() { "(no changes)".into() } else { s }
+            if s.is_empty() {
+                "(no changes)".into()
+            } else {
+                s
+            }
         }
         _ => "(no git data)".into(),
     }
@@ -150,13 +168,20 @@ fn git_diff_stat(project_dir: &Path) -> String {
 fn git_log_since(project_dir: &Path, start: &str) -> String {
     let range = format!("{start}..HEAD");
     let output = process_spawn::command("git", SliceMode::OrrchSlice)
-        .arg("-C").arg(project_dir)
-        .arg("log").arg("--oneline").arg(&range)
+        .arg("-C")
+        .arg(project_dir)
+        .arg("log")
+        .arg("--oneline")
+        .arg(&range)
         .output();
     match output {
         Ok(o) if o.status.success() => {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() { "(no new commits)".into() } else { s }
+            if s.is_empty() {
+                "(no new commits)".into()
+            } else {
+                s
+            }
         }
         _ => "(no git data)".into(),
     }
@@ -229,7 +254,8 @@ mod tests {
             goal: None,
             duration_secs: 0,
             start_commit: None,
-        }).unwrap();
+        })
+        .unwrap();
         let filename = res.file_name().unwrap().to_string_lossy().into_owned();
         assert!(!filename.contains('/'));
         assert!(!filename.contains(' '));

@@ -2,17 +2,19 @@ use std::io::{self, IsTerminal};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use crossterm::event::{self, Event, KeyEventKind, MouseEventKind, EnableMouseCapture, DisableMouseCapture};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
 use orrch_tui::App;
-use orrch_tui::editor::{spawn_vim_window, PendingEditor};
+use orrch_tui::editor::{PendingEditor, spawn_vim_window};
 use orrch_tui::ui;
 
 /// Updates from the background remote discovery task.
@@ -28,7 +30,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,orrch_webui=info"))
+                .unwrap_or_else(|_| EnvFilter::new("info,orrch_webui=info")),
         )
         .with_writer(|| {
             std::fs::OpenOptions::new()
@@ -86,8 +88,12 @@ async fn main() -> Result<()> {
         println!("  orrchestrator --web      Open the WebUI in browser");
         println!("  orrchestrator --egui     Launch the native egui window (feature-gated)");
         println!("  orrchestrator --webedit  Launch the local HTTP web node editor");
-        println!("  orrchestrator --voice-toggle  Toggle orrch-voice listening via the local socket");
-        println!("  orrchestrator orrdeal …  Heterogeneous test fabric (try: orrdeal skeleton run)");
+        println!(
+            "  orrchestrator --voice-toggle  Toggle orrch-voice listening via the local socket"
+        );
+        println!(
+            "  orrchestrator orrdeal …  Heterogeneous test fabric (try: orrdeal skeleton run)"
+        );
         println!("  orrchestrator --help     Show this help");
         return Ok(());
     }
@@ -173,8 +179,7 @@ async fn main() -> Result<()> {
         });
         tracing::info!(
             "orrch-relay enabled at http://{}/v1",
-            std::env::var("ORRCH_RELAY_BIND")
-                .unwrap_or_else(|_| "127.0.0.1:8585".to_string())
+            std::env::var("ORRCH_RELAY_BIND").unwrap_or_else(|_| "127.0.0.1:8585".to_string())
         );
     }
 
@@ -208,7 +213,8 @@ async fn main() -> Result<()> {
     // Build a writer that tees stdout → local terminal AND → WebUI broadcast.
     // If the WebUI didn't start, the broadcast is a dangling channel with no
     // receivers — sends are silently dropped, no-op.
-    let term_tx = webui.as_ref()
+    let term_tx = webui
+        .as_ref()
         .map(|w| w.terminal_tx.clone())
         .unwrap_or_else(|| tokio::sync::broadcast::channel::<Vec<u8>>(1).0);
     let mut tee = orrch_webui::TeeWriter::new(io::stdout(), term_tx, 64 * 1024);
@@ -223,7 +229,11 @@ async fn main() -> Result<()> {
 
     // Restore terminal FIRST — before any cleanup that might hang
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture);
+    let _ = execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
     let _ = terminal.show_cursor();
 
     // Clean up in-process PTY-managed sessions (these are forkpty children the
@@ -280,7 +290,9 @@ fn voice_toggle_poke() -> Result<()> {
     };
 
     // Prevent an infinite hang if the service accepts but never replies.
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .ok();
 
     serde_json::to_writer(&mut stream, &orrch_voice::protocol::VoiceRequest::Toggle)?;
     stream.write_all(b"\n")?;
@@ -428,7 +440,9 @@ async fn run_loop(
                 orrch_core::remote::check_host_reachable(host).await;
             }
         }
-        let _ = remote_tx.send(RemoteUpdate::Capabilities(probed_hosts.clone())).await;
+        let _ = remote_tx
+            .send(RemoteUpdate::Capabilities(probed_hosts.clone()))
+            .await;
 
         // Periodic discovery loop
         loop {
@@ -455,7 +469,9 @@ async fn run_loop(
                 RemoteUpdate::Capabilities(hosts) => {
                     // Merge reachability + capabilities into app's host list
                     for probed in &hosts {
-                        if let Some(existing) = app.remote_hosts.iter_mut().find(|h| h.name == probed.name) {
+                        if let Some(existing) =
+                            app.remote_hosts.iter_mut().find(|h| h.name == probed.name)
+                        {
                             existing.reachable = probed.reachable;
                             existing.capabilities = probed.capabilities.clone();
                         }
@@ -484,7 +500,8 @@ async fn run_loop(
             let throttled = app.usage_tracker.check_throttle();
             for (provider, reason, cooldown) in throttled {
                 if !app.valve_store.is_blocked(&provider) {
-                    app.valve_store.auto_close(&provider, &format!("IRM: {}", reason), cooldown);
+                    app.valve_store
+                        .auto_close(&provider, &format!("IRM: {}", reason), cooldown);
                     app.notify(format!("{} auto-throttled: {}", provider, reason));
                 }
             }
@@ -512,10 +529,11 @@ async fn run_loop(
             // that haven't yet reached the user-confirmation gate.
             let mut any_changed = false;
             for idea in &app.ideas {
-                if idea.pipeline.is_submitted() && idea.pipeline.progress < 50 {
-                    if orrch_core::vault::sync_intake_progress(&vault, &idea.filename) {
-                        any_changed = true;
-                    }
+                if idea.pipeline.is_submitted()
+                    && idea.pipeline.progress < 50
+                    && orrch_core::vault::sync_intake_progress(&vault, &idea.filename)
+                {
+                    any_changed = true;
                 }
             }
             if any_changed {
@@ -542,7 +560,11 @@ async fn run_loop(
             } else {
                 // Fallback: suspend TUI, run nvim in same terminal
                 disable_raw_mode()?;
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )?;
                 terminal.show_cursor()?;
                 // Use the same orrchestrator-branded nvim args as the windowed path
                 let vim_args = orrch_tui::editor::vim_title_args_pub(&req.title);
@@ -551,7 +573,11 @@ async fn run_loop(
                     .arg(&req.file)
                     .status();
                 enable_raw_mode()?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)?;
+                execute!(
+                    terminal.backend_mut(),
+                    EnterAlternateScreen,
+                    EnableMouseCapture
+                )?;
                 terminal.clear()?;
                 app.handle_vim_complete(&req.file, req.kind);
             }
@@ -561,25 +587,27 @@ async fn run_loop(
         app.check_pending_editors();
 
         // Re-read feedback files from disk every 2s while editors are open
-        if !app.pending_editors.is_empty() && last_feedback_reload.elapsed() > Duration::from_secs(2) {
+        if !app.pending_editors.is_empty()
+            && last_feedback_reload.elapsed() > Duration::from_secs(2)
+        {
             app.reload_feedback();
             last_feedback_reload = Instant::now();
         }
 
         // Check for correction session completion (auto-refresh commit review)
-        if let orrch_tui::SubView::CommitCorrecting(idx) = app.sub {
-            if let Some(ref session) = app.commit_correction_session {
-                let exists = std::process::Command::new("tmux")
-                    .args(["has-session", "-t", session.as_str()])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .is_ok_and(|s| s.success());
-                if !exists {
-                    app.commit_correction_session = None;
-                    app.open_commit_review(idx);
-                    app.notify("Correction complete — review revised packages".into());
-                }
+        if let orrch_tui::SubView::CommitCorrecting(idx) = app.sub
+            && let Some(ref session) = app.commit_correction_session
+        {
+            let exists = std::process::Command::new("tmux")
+                .args(["has-session", "-t", session.as_str()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success());
+            if !exists {
+                app.commit_correction_session = None;
+                app.open_commit_review(idx);
+                app.notify("Correction complete — review revised packages".into());
             }
         }
 
@@ -595,22 +623,28 @@ async fn run_loop(
 
             // Snapshot ideas that are mid-distribution (progress=50, targets empty)
             // so we can detect when distribution completes and kill the continuation session.
-            let awaiting_distribution: Vec<String> = app.ideas.iter()
+            let awaiting_distribution: Vec<String> = app
+                .ideas
+                .iter()
                 .filter(|i| i.pipeline.progress == 50 && i.pipeline.targets.is_empty())
                 .map(|i| i.filename.clone())
                 .collect();
 
             let mut any_changed = false;
             for idea in &app.ideas {
-                if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
-                    if orrch_core::vault::sync_pipeline_progress(&vault, &app.projects_dir, idea) {
-                        any_changed = true;
-                    }
+                if idea.pipeline.is_submitted()
+                    && !idea.pipeline.is_complete()
+                    && orrch_core::vault::sync_pipeline_progress(&vault, &app.projects_dir, idea)
+                {
+                    any_changed = true;
                 }
             }
             // Also sweep for intentions whose inboxes have fully cleared
-            let swept = orrch_core::vault::refresh_implementation_from_inboxes(&app.projects_dir, &vault);
-            if swept > 0 { any_changed = true; }
+            let swept =
+                orrch_core::vault::refresh_implementation_from_inboxes(&app.projects_dir, &vault);
+            if swept > 0 {
+                any_changed = true;
+            }
             if any_changed {
                 app.ideas = orrch_core::vault::load_ideas(&vault);
             }
@@ -618,13 +652,18 @@ async fn run_loop(
             // Kill intake continuation sessions whose distribution is now done
             // (targets populated since the snapshot above).
             for filename in &awaiting_distribution {
-                let now_has_targets = app.ideas.iter()
+                let now_has_targets = app
+                    .ideas
+                    .iter()
                     .find(|i| &i.filename == filename)
                     .is_some_and(|i| !i.pipeline.targets.is_empty());
                 if now_has_targets {
                     let stem = filename.trim_end_matches(".md");
                     let cont_name = format!("intake-cont-{stem}");
-                    orrch_core::windows::kill_session(orrch_core::windows::SessionCategory::Dev, &cont_name);
+                    orrch_core::windows::kill_session(
+                        orrch_core::windows::SessionCategory::Dev,
+                        &cont_name,
+                    );
                 }
             }
 
@@ -649,7 +688,8 @@ async fn run_loop(
 
         // Poll workflow status for the selected session every 2s
         if last_workflow_poll.elapsed() > Duration::from_secs(2) {
-            let cwd = app.managed_sessions
+            let cwd = app
+                .managed_sessions
                 .get(app.session_tab_selected)
                 .map(|s| std::path::PathBuf::from(&s.cwd));
             app.workflow_status = cwd.and_then(|p| orrch_core::load_workflow_status(&p));
@@ -698,7 +738,8 @@ async fn run_loop(
                         }
                         WebAction::Retract { ref filename } => {
                             let vault = orrch_core::vault::vault_dir(&app.projects_dir);
-                            let _ = orrch_core::vault::update_pipeline_progress(&vault, filename, 0);
+                            let _ =
+                                orrch_core::vault::update_pipeline_progress(&vault, filename, 0);
                             app.ideas = orrch_core::vault::load_ideas(&vault);
                         }
                     }
@@ -728,8 +769,10 @@ async fn run_loop(
                             // Click on the WebUI presence indicator → open browser.
                             if let Some(badge) = app.webui_badge_area {
                                 let (cx, cy) = (mouse.column, mouse.row);
-                                if cy >= badge.y && cy < badge.y + badge.height
-                                    && cx >= badge.x && cx < badge.x + badge.width
+                                if cy >= badge.y
+                                    && cy < badge.y + badge.height
+                                    && cx >= badge.x
+                                    && cx < badge.x + badge.width
                                 {
                                     app.open_webui();
                                 }

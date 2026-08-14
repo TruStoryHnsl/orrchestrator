@@ -24,7 +24,7 @@ those events impossible by gating every deliverable before it can ship.
 
 This posture overrides the default "iterate fast" stance for `private` scope
 where the deliverable touches:
-- production-deployed services (concord, orrapus, openclaw, orradash, comfyui-launcher)
+- production-deployed services
 - public-facing repos (concord, orrdia, porrtfolio, conquered, orrchestrator-releases)
 - shared infra (orrtellite, orrguard, orrbit, orrigins, mbp15 Servarr stack)
 - the umbrella `~/projects` workspace state (regression here breaks every parallel session)

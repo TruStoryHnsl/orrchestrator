@@ -1,10 +1,13 @@
 # orrchestrator
 
+[![CI](https://github.com/TruStoryHnsl/orrchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/TruStoryHnsl/orrchestrator/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+
 AI-powered software development hypervisor — a Rust TUI that runs many parallel coding sessions, organizes them into agent workforces, and routes raw user thought into a managed dev pipeline.
 
 ## What it is
 
-orrchestrator is a single Rust binary (with a workspace of nine crates) that sits between you and the army of AI coding sessions you'd otherwise be juggling by hand. It does four things:
+orrchestrator is a single Rust binary (a workspace of 14 crates) that sits between you and the army of AI coding sessions you'd otherwise be juggling by hand. It does four things:
 
 1. **Manages parallel sessions.** tmux-controlled local Claude Code (and other harness) sessions, grouped by project, displayed in a TUI.
 2. **Runs agent workforces.** A workforce is a team of agent profiles (Project Manager, Developer, Researcher, Penetration Tester, Repository Manager, etc.) wired together as a step pipeline. The hypervisor mechanically dispatches each step — no LLM reasoning in the dispatcher itself.
@@ -146,7 +149,7 @@ cd orrchestrator
 cargo build              # debug, warnings OK
 cargo build --release    # ~5MB native binary at target/release/orrchestrator
 
-# test (~119 tests across 9 crates)
+# test (~660 tests across 14 crates)
 cargo test
 
 # run the TUI
@@ -191,7 +194,7 @@ ORRCH_WEBUI_TRUSTED_CIDRS=100.64.0.0/10 \
 orrchestrator
 ```
 
-Full WebUI env reference is in [CLAUDE.md](CLAUDE.md#native-tls-for-the-webui).
+Full WebUI env reference is in the `[webui]` section of `packaging/config/launch.env.example`.
 
 ### Config
 
@@ -215,7 +218,7 @@ Full WebUI env reference is in [CLAUDE.md](CLAUDE.md#native-tls-for-the-webui).
 
 ## Status
 
-**Single-user beta.** Runs daily on the maintainer's primary dev machine (orrion). Roughly 119 tests across 9 crates, ~5MB release binary on Linux x86_64. Scope is `commercial` (intent: monetizable; currently distributed as source).
+**Single-user beta.** Runs daily on the maintainer's primary dev machine. Roughly 660 tests across 14 crates, ~5MB release binary on Linux x86_64.
 
 Audience right now: solo developers running multiple AI coding sessions on a single workstation.
 
@@ -232,7 +235,7 @@ This is also not yet a "drop into your team's dev process" tool. It assumes a si
 
 orrchestrator coordinates work across the rest of the TruStoryHnsl ecosystem; it doesn't replace any of them. The repos it touches most directly:
 
-- **concord** — self-hosted Matrix chat. orrchestrator can post to a concord room from a Hypervisor-managed agent (e.g., OpenClaw multi-account agents on `example.com`).
+- **A chat/notification service** — orrchestrator can post to a Matrix room from a Hypervisor-managed agent, so long-running work can report status out-of-band.
 - **concord-extensions** — pluggable concord features. Often a target *for* orrchestrator-managed dev sessions.
 - **orrtellite** — self-hosted Headscale/WireGuard mesh. The "tailnet-only" WebUI mode targets orrtellite peers.
 - **orrbeam** — bidirectional remote-desktop mesh. Useful for visually-supervising orrchestrator sessions running on a different machine.
@@ -242,4 +245,4 @@ orrchestrator coordinates work across the rest of the TruStoryHnsl ecosystem; it
 
 ## License
 
-[MIT](LICENSE).
+Licensed under [Apache-2.0](LICENSE).

@@ -32,16 +32,29 @@ pub struct Scheduler<C: Clock> {
 
 impl<C: Clock> Scheduler<C> {
     pub fn new(policy: SchedulerPolicy, clock: C) -> Self {
-        Self { policy, clock, queue: Vec::new(), last: None }
+        Self {
+            policy,
+            clock,
+            queue: Vec::new(),
+            last: None,
+        }
     }
-    pub fn len(&self) -> usize { self.queue.len() }
-    pub fn is_empty(&self) -> bool { self.queue.is_empty() }
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 
     pub fn enqueue(&mut self, id: u64, descriptor: AffinityDescriptor) -> Result<(), EnqueueError> {
         if self.queue.len() >= self.policy.max_queue_depth {
             return Err(EnqueueError::Full);
         }
-        self.queue.push(Entry { id, descriptor, enqueued_ms: self.clock.now_ms() });
+        self.queue.push(Entry {
+            id,
+            descriptor,
+            enqueued_ms: self.clock.now_ms(),
+        });
         Ok(())
     }
 
@@ -49,10 +62,15 @@ impl<C: Clock> Scheduler<C> {
     /// (anti-starve); (2) else best affinity to last cluster above threshold;
     /// (3) else oldest (start a new cluster).
     pub fn next(&mut self) -> Option<u64> {
-        if self.queue.is_empty() { return None; }
+        if self.queue.is_empty() {
+            return None;
+        }
         let now = self.clock.now_ms();
 
-        let aged = self.queue.iter().enumerate()
+        let aged = self
+            .queue
+            .iter()
+            .enumerate()
             .filter(|(_, e)| now.saturating_sub(e.enqueued_ms) >= self.policy.max_wait_ms)
             .min_by_key(|(_, e)| e.enqueued_ms)
             .map(|(i, _)| i);
@@ -60,12 +78,18 @@ impl<C: Clock> Scheduler<C> {
         let idx = if let Some(i) = aged {
             i
         } else if let Some(last) = &self.last {
-            let best = self.queue.iter().enumerate()
+            let best = self
+                .queue
+                .iter()
+                .enumerate()
                 .map(|(i, e)| (i, affinity(last, &e.descriptor)))
                 .filter(|(_, sim)| *sim >= self.policy.similarity_threshold)
-                .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                    // tie-break: prefer earlier enqueue index (oldest first)
-                    .then(b.0.cmp(&a.0)))
+                .max_by(|a, b| {
+                    a.1.partial_cmp(&b.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        // tie-break: prefer earlier enqueue index (oldest first)
+                        .then(b.0.cmp(&a.0))
+                })
                 .map(|(i, _)| i);
             best.unwrap_or_else(|| oldest_idx(&self.queue))
         } else {
@@ -79,7 +103,11 @@ impl<C: Clock> Scheduler<C> {
 }
 
 fn oldest_idx(q: &[Entry]) -> usize {
-    q.iter().enumerate().min_by_key(|(_, e)| e.enqueued_ms).map(|(i, _)| i).unwrap_or(0)
+    q.iter()
+        .enumerate()
+        .min_by_key(|(_, e)| e.enqueued_ms)
+        .map(|(i, _)| i)
+        .unwrap_or(0)
 }
 
 fn affinity(a: &AffinityDescriptor, b: &AffinityDescriptor) -> f32 {
@@ -97,7 +125,11 @@ mod tests {
     use crate::types::AffinityDescriptor;
 
     fn policy() -> SchedulerPolicy {
-        SchedulerPolicy { max_wait_ms: 1000, similarity_threshold: 0.8, max_queue_depth: 100 }
+        SchedulerPolicy {
+            max_wait_ms: 1000,
+            similarity_threshold: 0.8,
+            max_queue_depth: 100,
+        }
     }
 
     #[test]
@@ -112,7 +144,9 @@ mod tests {
         s.enqueue(3, b()).unwrap();
         s.enqueue(4, a()).unwrap();
         let mut order = vec![];
-        while let Some(id) = s.next() { order.push(id); }
+        while let Some(id) = s.next() {
+            order.push(id);
+        }
         assert_eq!(order[0], 0);
         let a_ids: Vec<u64> = order.iter().take(3).copied().collect();
         assert_eq!(a_ids, vec![0, 2, 4], "all A-cluster before B-cluster");
@@ -142,6 +176,9 @@ mod tests {
         p.max_queue_depth = 1;
         let mut s = Scheduler::new(p, clock);
         s.enqueue(0, AffinityDescriptor::None).unwrap();
-        assert!(matches!(s.enqueue(1, AffinityDescriptor::None), Err(EnqueueError::Full)));
+        assert!(matches!(
+            s.enqueue(1, AffinityDescriptor::None),
+            Err(EnqueueError::Full)
+        ));
     }
 }

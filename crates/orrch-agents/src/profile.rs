@@ -87,10 +87,7 @@ impl AgentProfile {
 
     /// Format the agent profile as a prompt preamble to prepend to a task goal.
     pub fn as_preamble(&self, task: &str) -> String {
-        format!(
-            "{}\n\n---\n\n## Your Task\n\n{}",
-            self.prompt, task,
-        )
+        format!("{}\n\n---\n\n## Your Task\n\n{}", self.prompt, task,)
     }
 
     /// Format the agent profile as a prompt preamble, with a Mentor-generated
@@ -132,9 +129,7 @@ pub fn agent_layer_engine(
     importance: Importance,
 ) -> Option<String> {
     match importance {
-        Importance::Critical | Importance::Important => {
-            optimal.or(standard).map(str::to_string)
-        }
+        Importance::Critical | Importance::Important => optimal.or(standard).map(str::to_string),
         Importance::Routine => standard.or(optimal).map(str::to_string),
     }
 }
@@ -145,10 +140,10 @@ pub fn load_agents(dir: &Path) -> Vec<AgentProfile> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(profile) = AgentProfile::load(&path) {
-                    agents.push(profile);
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(profile) = AgentProfile::load(&path)
+            {
+                agents.push(profile);
             }
         }
     }
@@ -165,7 +160,7 @@ pub fn agents_dir() -> PathBuf {
         return local;
     }
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home)
         .join(".config")
         .join("orrchestrator")
@@ -240,7 +235,10 @@ mod tests {
         let fm = "name: Hypervisor\ndepartment: admin\nrole: Workforce Orchestrator";
         assert_eq!(extract_field(fm, "name"), Some("Hypervisor".into()));
         assert_eq!(extract_field(fm, "department"), Some("admin".into()));
-        assert_eq!(extract_field(fm, "role"), Some("Workforce Orchestrator".into()));
+        assert_eq!(
+            extract_field(fm, "role"),
+            Some("Workforce Orchestrator".into())
+        );
     }
 
     #[test]
@@ -288,7 +286,11 @@ mod tests {
 
     fn write_tmp(name: &str, contents: &str) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("orrch-agents-test-{}-{}.md", std::process::id(), name));
+        p.push(format!(
+            "orrch-agents-test-{}-{}.md",
+            std::process::id(),
+            name
+        ));
         let mut f = std::fs::File::create(&p).unwrap();
         f.write_all(contents.as_bytes()).unwrap();
         p
@@ -303,8 +305,14 @@ mod tests {
         let a = AgentProfile::load(&p).unwrap();
         assert_eq!(a.standard_engine(), Some("Claude Sonnet 4.6"));
         assert_eq!(a.optimal_engine(), Some("Claude Opus 4.6"));
-        assert_eq!(a.engine_for(Importance::Routine).as_deref(), Some("Claude Sonnet 4.6"));
-        assert_eq!(a.engine_for(Importance::Critical).as_deref(), Some("Claude Opus 4.6"));
+        assert_eq!(
+            a.engine_for(Importance::Routine).as_deref(),
+            Some("Claude Sonnet 4.6")
+        );
+        assert_eq!(
+            a.engine_for(Importance::Critical).as_deref(),
+            Some("Claude Opus 4.6")
+        );
         let _ = std::fs::remove_file(&p);
     }
 
@@ -316,7 +324,10 @@ mod tests {
         assert_eq!(a.standard_engine(), Some("GPT-4o"));
         assert_eq!(a.optimal_engine(), Some("GPT-4o"));
         assert_eq!(a.engine_for(Importance::Routine).as_deref(), Some("GPT-4o"));
-        assert_eq!(a.engine_for(Importance::Critical).as_deref(), Some("GPT-4o"));
+        assert_eq!(
+            a.engine_for(Importance::Critical).as_deref(),
+            Some("GPT-4o")
+        );
         let _ = std::fs::remove_file(&p);
     }
 
@@ -339,14 +350,20 @@ mod tests {
         // Tests run with cwd = crate dir; workspace agents/ is two levels up.
         let base = PathBuf::from("../../agents");
         if !base.is_dir() {
-            eprintln!("skipping ENG-008 acceptance: {} not present", base.display());
+            eprintln!(
+                "skipping ENG-008 acceptance: {} not present",
+                base.display()
+            );
             return;
         }
 
         // Reasoning role -> GPT-4o (standard == optimal today).
         let r = AgentProfile::load(&base.join("researcher.md")).unwrap();
         assert_eq!(r.engine_for(Importance::Routine).as_deref(), Some("GPT-4o"));
-        assert_eq!(r.engine_for(Importance::Critical).as_deref(), Some("GPT-4o"));
+        assert_eq!(
+            r.engine_for(Importance::Critical).as_deref(),
+            Some("GPT-4o")
+        );
 
         // Execution role -> Claude Sonnet standard, Opus optimal for critical.
         let d = AgentProfile::load(&base.join("developer.md")).unwrap();

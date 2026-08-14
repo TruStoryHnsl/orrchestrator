@@ -34,8 +34,14 @@ async fn workflow_call_is_deterministic() {
     });
     let r1 = dispatch(&server, "workflow_call", &args).await;
     let r2 = dispatch(&server, "workflow_call", &args).await;
-    assert_eq!(r1, r2, "two consecutive workflow_call invocations must be byte-identical");
-    assert!(!r1.starts_with("Error:"), "workflow_call returned error: {r1}");
+    assert_eq!(
+        r1, r2,
+        "two consecutive workflow_call invocations must be byte-identical"
+    );
+    assert!(
+        !r1.starts_with("Error:"),
+        "workflow_call returned error: {r1}"
+    );
 }
 
 #[tokio::test]
@@ -73,7 +79,7 @@ async fn workflow_call_ends_with_cleanup() {
     let last_scope = body
         .lines()
         .filter_map(|l| l.strip_prefix("- **Team scope:** "))
-        .last()
+        .next_back()
         .unwrap_or_else(|| panic!("no Team scope: lines found:\n{body}"));
     assert_eq!(
         last_scope, "Cleanup",

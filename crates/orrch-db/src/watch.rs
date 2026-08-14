@@ -51,7 +51,11 @@ mod tests {
 
         let ok = reingest_event_file(&conn, "p", &p).unwrap();
         assert!(ok);
-        let n: i64 = conn.query_row("SELECT count(*) FROM bugs WHERE bug_id='nb'", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM bugs WHERE bug_id='nb'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(n, 1);
     }
 }

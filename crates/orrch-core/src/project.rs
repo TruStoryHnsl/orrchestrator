@@ -150,7 +150,7 @@ pub struct ProjectMeta {
     pub has_package_json: bool,
     pub has_git: bool,
     pub git_dirty: usize,
-    pub version_dirs: Vec<String>,  // "v1", "v2", etc.
+    pub version_dirs: Vec<String>, // "v1", "v2", etc.
     pub current_version: Option<String>,
     pub plan_file: Option<String>,
     pub file_count: usize,
@@ -166,15 +166,33 @@ impl ProjectMeta {
     pub fn summary_line(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
 
-        if self.has_claude_md { parts.push("CLAUDE.md"); }
-        if self.has_gemini_md { parts.push("GEMINI.md"); }
-        if self.has_master_plan { parts.push("master plan"); }
-        if self.has_cargo_toml { parts.push("Cargo.toml"); }
-        if self.has_pyproject { parts.push("pyproject"); }
-        if self.has_package_json { parts.push("package.json"); }
-        if self.has_dockerfile { parts.push("Docker"); }
-        if self.has_readme { parts.push("README"); }
-        if self.apple_target { parts.push("🍎 Apple"); }
+        if self.has_claude_md {
+            parts.push("CLAUDE.md");
+        }
+        if self.has_gemini_md {
+            parts.push("GEMINI.md");
+        }
+        if self.has_master_plan {
+            parts.push("master plan");
+        }
+        if self.has_cargo_toml {
+            parts.push("Cargo.toml");
+        }
+        if self.has_pyproject {
+            parts.push("pyproject");
+        }
+        if self.has_package_json {
+            parts.push("package.json");
+        }
+        if self.has_dockerfile {
+            parts.push("Docker");
+        }
+        if self.has_readme {
+            parts.push("README");
+        }
+        if self.apple_target {
+            parts.push("🍎 Apple");
+        }
 
         if let Some(ver) = &self.current_version {
             parts.push(ver.as_str());
@@ -269,7 +287,11 @@ impl Temperature {
         }
     }
     pub fn label(&self) -> &'static str {
-        match self { Self::Hot => "hot", Self::Cold => "cold", Self::Ignored => "ignored" }
+        match self {
+            Self::Hot => "hot",
+            Self::Cold => "cold",
+            Self::Ignored => "ignored",
+        }
     }
 }
 
@@ -315,28 +337,29 @@ impl Project {
         let scope = load_scope(path);
         let color_tag = load_color_tag(path);
         let meta = scan_project_meta(path);
-        let (roadmap, description, has_plan, plan_phases) = if let Some(ref plan_file) = meta.plan_file {
-            // Prefer .orrch/PLAN.md; fall back to root for un-migrated projects.
-            let plan_path = if plan_file == "PLAN.md" {
-                resolve_plan_path(path)
-            } else {
-                path.join(plan_file)
-            };
-            let (rm, desc, hp) = parse_plan_file(&plan_path);
-            let phases = if hp {
-                if let Ok(content) = std::fs::read_to_string(&plan_path) {
-                    plan_parser::parse_plan(&content)
+        let (roadmap, description, has_plan, plan_phases) =
+            if let Some(ref plan_file) = meta.plan_file {
+                // Prefer .orrch/PLAN.md; fall back to root for un-migrated projects.
+                let plan_path = if plan_file == "PLAN.md" {
+                    resolve_plan_path(path)
+                } else {
+                    path.join(plan_file)
+                };
+                let (rm, desc, hp) = parse_plan_file(&plan_path);
+                let phases = if hp {
+                    if let Ok(content) = std::fs::read_to_string(&plan_path) {
+                        plan_parser::parse_plan(&content)
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     Vec::new()
-                }
+                };
+                (rm, desc, hp, phases)
             } else {
-                Vec::new()
+                let desc = read_description_from_claude_md(path);
+                (Vec::new(), desc, false, Vec::new())
             };
-            (rm, desc, hp, phases)
-        } else {
-            let desc = read_description_from_claude_md(path);
-            (Vec::new(), desc, false, Vec::new())
-        };
         let queued_prompts = count_queued_prompts(path);
 
         let temperature = load_temperature(path);
@@ -378,9 +401,7 @@ impl Project {
     /// project context when spawning agents. Defaults to `CLAUDE.md` when the
     /// project has not set an explicit profile.
     pub fn agent_profile_filename(&self) -> &str {
-        self.agent_profile
-            .as_deref()
-            .unwrap_or("CLAUDE.md")
+        self.agent_profile.as_deref().unwrap_or("CLAUDE.md")
     }
 
     /// Task AP: absolute path to the project's configured agent profile file.
@@ -475,8 +496,12 @@ impl Project {
     pub fn save_logo_path(&self) {
         let path = self.path.join(".orrlogo");
         match self.logo_path.as_deref() {
-            None => { let _ = std::fs::remove_file(path); }
-            Some(p) => { let _ = std::fs::write(path, p.trim()); }
+            None => {
+                let _ = std::fs::remove_file(path);
+            }
+            Some(p) => {
+                let _ = std::fs::write(path, p.trim());
+            }
         }
     }
 
@@ -512,15 +537,23 @@ pub struct DirEntry {
 impl DirEntry {
     /// Human-readable size.
     pub fn size_display(&self) -> String {
-        if self.is_dir { return "dir".into(); }
-        if self.size < 1024 { return format!("{} B", self.size); }
-        if self.size < 1024 * 1024 { return format!("{:.1} KB", self.size as f64 / 1024.0); }
+        if self.is_dir {
+            return "dir".into();
+        }
+        if self.size < 1024 {
+            return format!("{} B", self.size);
+        }
+        if self.size < 1024 * 1024 {
+            return format!("{:.1} KB", self.size as f64 / 1024.0);
+        }
         format!("{:.1} MB", self.size as f64 / (1024.0 * 1024.0))
     }
 
     /// File type description.
     pub fn type_label(&self) -> &'static str {
-        if self.is_dir { return "Directory"; }
+        if self.is_dir {
+            return "Directory";
+        }
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         match ext.to_lowercase().as_str() {
             "rs" => "Rust source",
@@ -539,13 +572,15 @@ impl DirEntry {
             "lock" => "Lock file",
             "txt" => "Text",
             "" => "File",
-            _other => return "File", // can't return dynamic str, just "File"
+            _other => "File", // can't return dynamic str, just "File"
         }
     }
 
     /// Icon for the file type.
     pub fn icon(&self) -> &'static str {
-        if self.is_dir { return "📁"; }
+        if self.is_dir {
+            return "📁";
+        }
         let ext = self.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         match ext.to_lowercase().as_str() {
             "rs" => "🦀",
@@ -593,16 +628,44 @@ pub fn list_directory(path: &Path) -> Vec<DirEntry> {
 
 fn is_text_file(name: &str) -> bool {
     let text_exts = [
-        "md", "txt", "rs", "py", "js", "ts", "json", "toml", "yaml", "yml",
-        "sh", "bash", "fish", "css", "html", "htm", "xml", "csv", "cfg",
-        "conf", "ini", "env", "dockerfile", "makefile", "gitignore",
+        "md",
+        "txt",
+        "rs",
+        "py",
+        "js",
+        "ts",
+        "json",
+        "toml",
+        "yaml",
+        "yml",
+        "sh",
+        "bash",
+        "fish",
+        "css",
+        "html",
+        "htm",
+        "xml",
+        "csv",
+        "cfg",
+        "conf",
+        "ini",
+        "env",
+        "dockerfile",
+        "makefile",
+        "gitignore",
     ];
     let lower = name.to_lowercase();
     // No extension = potentially editable (Makefile, Dockerfile, etc)
     if !lower.contains('.') {
-        return matches!(lower.as_str(), "makefile" | "dockerfile" | "readme" | "license");
+        return matches!(
+            lower.as_str(),
+            "makefile" | "dockerfile" | "readme" | "license"
+        );
     }
-    lower.rsplit('.').next().is_some_and(|ext| text_exts.contains(&ext))
+    lower
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| text_exts.contains(&ext))
 }
 
 /// Load deprecated project names from ~/projects/deprecated/.
@@ -619,7 +682,7 @@ fn load_sub_projects(path: &Path) -> Vec<Project> {
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_dir() && !p.read_link().is_ok() {
+            if p.is_dir() && p.read_link().is_err() {
                 let name = p.file_name().unwrap_or_default().to_string_lossy();
                 if !name.starts_with('.') {
                     subs.push(Project::load(&p));
@@ -864,7 +927,11 @@ fn load_logo_path(path: &Path) -> Option<String> {
     let file = path.join(".orrlogo");
     let contents = std::fs::read_to_string(file).ok()?;
     let trimmed = contents.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn load_color_tag(path: &Path) -> ColorTag {
@@ -918,10 +985,11 @@ fn scan_project_meta(path: &Path) -> ProjectMeta {
 
         // Detect version directories and Apple signals
         if entry.path().is_dir() {
-            if let Some(rest) = lower.strip_prefix('v') {
-                if rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty() {
-                    meta.version_dirs.push(name.clone());
-                }
+            if let Some(rest) = lower.strip_prefix('v')
+                && rest.chars().all(|c| c.is_ascii_digit())
+                && !rest.is_empty()
+            {
+                meta.version_dirs.push(name.clone());
             }
             // Apple: .xcodeproj, src-tauri with iOS
             if lower.ends_with(".xcodeproj") || lower.ends_with(".xcworkspace") {
@@ -972,11 +1040,17 @@ fn scan_project_meta(path: &Path) -> ProjectMeta {
 }
 
 fn has_file_recursive(path: &Path, ext: &str, max_depth: usize) -> bool {
-    if max_depth == 0 { return false; }
-    let Ok(entries) = std::fs::read_dir(path) else { return false; };
+    if max_depth == 0 {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') { continue; }
+        if name.starts_with('.') {
+            continue;
+        }
         if entry.path().is_file() && name.to_lowercase().ends_with(&format!(".{ext}")) {
             return true;
         }
@@ -1085,7 +1159,7 @@ fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
 
     // Check for strikethrough → Deprecated
     let (status, rest) = if rest.starts_with("~~") && rest.ends_with("~~") {
-        let inner = &rest[2..rest.len()-2];
+        let inner = &rest[2..rest.len() - 2];
         if let Some((_inner_status, consumed)) = parse_status_marker(inner) {
             (FeatureStatus::Deprecated, &inner[consumed..])
         } else {
@@ -1105,12 +1179,11 @@ fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
         .and_then(|n| n.trim().parse().ok())
         .unwrap_or(0);
 
-    let (title, description) = if rest.starts_with("**") {
-        let after_open = &rest[2..];
+    let (title, description) = if let Some(after_open) = rest.strip_prefix("**") {
         if let Some(close_pos) = after_open.find("**") {
             let title = after_open[..close_pos].to_string();
             let desc = after_open[close_pos + 2..]
-                .trim_start_matches(|c: char| c == ' ' || c == '—' || c == '-' || c == '–')
+                .trim_start_matches([' ', '—', '-', '–'])
                 .trim()
                 .to_string();
             (title, desc)
@@ -1140,7 +1213,11 @@ fn parse_roadmap_line(line: &str) -> Option<RoadmapItem> {
 }
 
 /// Update a feature's status marker in a plan file on disk.
-pub fn update_feature_status_in_plan(plan_path: &Path, item_title: &str, new_status: FeatureStatus) -> std::io::Result<()> {
+pub fn update_feature_status_in_plan(
+    plan_path: &Path,
+    item_title: &str,
+    new_status: FeatureStatus,
+) -> std::io::Result<()> {
     let contents = std::fs::read_to_string(plan_path)?;
     let mut lines: Vec<String> = contents.lines().map(|l| l.to_string()).collect();
     let new_marker = new_status.write_marker();
@@ -1150,17 +1227,23 @@ pub fn update_feature_status_in_plan(plan_path: &Path, item_title: &str, new_sta
             continue;
         }
         let trimmed = line.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ');
-        if parse_status_marker(trimmed).is_some() {
-            if let Some(bracket_start) = line.find('[') {
-                if let Some(bracket_end) = line[bracket_start..].find(']') {
-                    let old_marker = &line[bracket_start..bracket_start + bracket_end + 1];
-                    if matches!(old_marker, "[ ]" | "[x]" | "[X]" | "[~]" | "[=]" | "[t]" | "[T]" | "[v]" | "[V]")
-                        || old_marker == "[✓]"
-                    {
-                        *line = format!("{}{}{}", &line[..bracket_start], new_marker, &line[bracket_start + old_marker.len()..]);
-                        break;
-                    }
-                }
+        if parse_status_marker(trimmed).is_some()
+            && let Some(bracket_start) = line.find('[')
+            && let Some(bracket_end) = line[bracket_start..].find(']')
+        {
+            let old_marker = &line[bracket_start..bracket_start + bracket_end + 1];
+            if matches!(
+                old_marker,
+                "[ ]" | "[x]" | "[X]" | "[~]" | "[=]" | "[t]" | "[T]" | "[v]" | "[V]"
+            ) || old_marker == "[✓]"
+            {
+                *line = format!(
+                    "{}{}{}",
+                    &line[..bracket_start],
+                    new_marker,
+                    &line[bracket_start + old_marker.len()..]
+                );
+                break;
             }
         }
     }
@@ -1252,10 +1335,8 @@ mod count_queued_tests {
 
     #[test]
     fn missing_inbox_returns_zero() {
-        let dir = std::env::temp_dir().join(format!(
-            "orrch_count_queued_missing_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("orrch_count_queued_missing_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         assert_eq!(count_queued_prompts(&dir), 0);
@@ -1269,7 +1350,8 @@ mod tests {
 
     #[test]
     fn test_parse_roadmap_done() {
-        let item = parse_roadmap_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
+        let item =
+            parse_roadmap_line("1. [x] **Core process manager** — spawn/kill/monitor").unwrap();
         assert!(item.done());
         assert_eq!(item.status, FeatureStatus::Done);
         assert_eq!(item.number, 1);
@@ -1315,7 +1397,8 @@ mod tests {
 
     #[test]
     fn test_parse_roadmap_bulleted_open() {
-        let item = parse_roadmap_line("- [ ] Sideload test builds to physical iOS devices").unwrap();
+        let item =
+            parse_roadmap_line("- [ ] Sideload test builds to physical iOS devices").unwrap();
         assert!(!item.done());
         assert_eq!(item.status, FeatureStatus::Planned);
         assert_eq!(item.title, "Sideload test builds to physical iOS devices");
@@ -1340,10 +1423,7 @@ mod tests {
             slugify_project_name("Hypeland Widget Distributer"),
             "hypeland-widget-distributer"
         );
-        assert_eq!(
-            slugify_project_name("  MyProj_123  "),
-            "myproj-123"
-        );
+        assert_eq!(slugify_project_name("  MyProj_123  "), "myproj-123");
         assert_eq!(slugify_project_name("foo!!bar??"), "foo-bar");
         assert_eq!(slugify_project_name(""), "");
         assert_eq!(slugify_project_name("---"), "");

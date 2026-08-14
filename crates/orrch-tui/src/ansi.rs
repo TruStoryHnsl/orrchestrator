@@ -33,18 +33,14 @@ pub fn parse(input: &str) -> Vec<Line<'static>> {
         if b == b'\x1b' {
             // Flush text accumulated so far under the current style.
             if !current_text.is_empty() {
-                current_spans.push(Span::styled(
-                    std::mem::take(&mut current_text),
-                    style,
-                ));
+                current_spans.push(Span::styled(std::mem::take(&mut current_text), style));
             }
             // Dispatch on next byte.
             if let Some(&next) = bytes.get(i + 1) {
                 match next {
                     b'[' => {
                         // CSI sequence — read until a final byte in 0x40..=0x7E.
-                        let (consumed, params, final_byte) =
-                            read_csi(&bytes[i + 2..]);
+                        let (consumed, params, final_byte) = read_csi(&bytes[i + 2..]);
                         i += 2 + consumed;
                         if final_byte == b'm' {
                             apply_sgr(&mut style, &params);
@@ -77,10 +73,7 @@ pub fn parse(input: &str) -> Vec<Line<'static>> {
 
         if b == b'\n' {
             if !current_text.is_empty() {
-                current_spans.push(Span::styled(
-                    std::mem::take(&mut current_text),
-                    style,
-                ));
+                current_spans.push(Span::styled(std::mem::take(&mut current_text), style));
             }
             lines.push(Line::from(std::mem::take(&mut current_spans)));
             i += 1;
@@ -126,9 +119,7 @@ fn read_csi(bytes: &[u8]) -> (usize, Vec<u32>, u8) {
     for (i, &b) in bytes.iter().enumerate() {
         match b {
             b'0'..=b'9' => {
-                current = current
-                    .saturating_mul(10)
-                    .saturating_add((b - b'0') as u32);
+                current = current.saturating_mul(10).saturating_add((b - b'0') as u32);
                 have_digit = true;
             }
             b';' => {
@@ -294,11 +285,17 @@ fn color_from_256(n: u8) -> Color {
 
 /// Length in bytes of the UTF-8 character whose first byte is `b`.
 fn utf8_char_len(b: u8) -> usize {
-    if b & 0x80 == 0 { 1 }
-    else if b & 0xE0 == 0xC0 { 2 }
-    else if b & 0xF0 == 0xE0 { 3 }
-    else if b & 0xF8 == 0xF0 { 4 }
-    else { 1 }
+    if b & 0x80 == 0 {
+        1
+    } else if b & 0xE0 == 0xC0 {
+        2
+    } else if b & 0xF0 == 0xE0 {
+        3
+    } else if b & 0xF8 == 0xF0 {
+        4
+    } else {
+        1
+    }
 }
 
 #[cfg(test)]
@@ -322,7 +319,10 @@ mod tests {
         let lines = parse("\x1b[31merror\x1b[0m\n");
         assert_eq!(lines.len(), 1);
         let spans = &lines[0].spans;
-        let red_span = spans.iter().find(|s| s.content == "error").expect("error span");
+        let red_span = spans
+            .iter()
+            .find(|s| s.content == "error")
+            .expect("error span");
         assert_eq!(red_span.style.fg, Some(Color::Red));
     }
 
@@ -331,7 +331,11 @@ mod tests {
         let lines = parse("\x1b[1mbold\x1b[22mnormal");
         let bold = lines[0].spans.iter().find(|s| s.content == "bold").unwrap();
         assert!(bold.style.add_modifier.contains(Modifier::BOLD));
-        let plain = lines[0].spans.iter().find(|s| s.content == "normal").unwrap();
+        let plain = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == "normal")
+            .unwrap();
         assert!(!plain.style.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -371,7 +375,11 @@ mod tests {
     #[test]
     fn reset_clears_attributes() {
         let lines = parse("\x1b[1;31mbold red\x1b[0mplain");
-        let plain = lines[0].spans.iter().find(|s| s.content == "plain").unwrap();
+        let plain = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content == "plain")
+            .unwrap();
         assert_eq!(plain.style.fg, None);
         assert!(!plain.style.add_modifier.contains(Modifier::BOLD));
     }

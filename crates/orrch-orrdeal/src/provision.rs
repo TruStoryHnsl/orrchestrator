@@ -20,7 +20,10 @@ fn module_dir() -> PathBuf {
 }
 
 async fn run_checked(mut cmd: Command, what: &str) -> anyhow::Result<std::process::Output> {
-    let out = cmd.output().await.with_context(|| format!("spawning {what}"))?;
+    let out = cmd
+        .output()
+        .await
+        .with_context(|| format!("spawning {what}"))?;
     if !out.status.success() {
         return Err(anyhow!(
             "{what} failed:\n{}",
@@ -59,8 +62,14 @@ async fn terraform_apply(cfg: &ProxmoxConfig) -> anyhow::Result<(String, String)
                 .arg(format!("-var=cores={}", cfg.cores))
                 .arg(format!("-var=memory_mb={}", cfg.memory_mb))
                 .arg(format!("-var=ssh_user={}", cfg.ssh_user))
-                .arg(format!("-var=ssh_public_key_path={}", cfg.ssh_public_key_path))
-                .arg(format!("-var=ssh_private_key_path={}", cfg.ssh_private_key_path));
+                .arg(format!(
+                    "-var=ssh_public_key_path={}",
+                    cfg.ssh_public_key_path
+                ))
+                .arg(format!(
+                    "-var=ssh_private_key_path={}",
+                    cfg.ssh_private_key_path
+                ));
             c
         },
         "terraform apply",
@@ -150,8 +159,11 @@ async fn kubectl_probe(kubeconfig: &str) -> anyhow::Result<String> {
         {
             let mut c = Command::new("kubectl");
             c.args([
-                "--kubeconfig", kubeconfig,
-                "wait", "--for=condition=complete", "job/orrdeal-probe",
+                "--kubeconfig",
+                kubeconfig,
+                "wait",
+                "--for=condition=complete",
+                "job/orrdeal-probe",
                 "--timeout=120s",
             ]);
             c
@@ -174,18 +186,21 @@ async fn kubectl_probe(kubeconfig: &str) -> anyhow::Result<String> {
 
 /// Run the provision arm. Always returns a Target.
 pub async fn run(cfg: &ProxmoxConfig) -> Target {
-    let make = |status: TargetStatus, note: String, os: String, arch: String, caps: CapabilityFlags| Target {
-        id: "ephemeral:proxmox-k3s".into(),
-        source: TargetSource::Ephemeral,
-        ui_surface: UiSurface::Desktop,                  // source default — refined later
-        capabilities: caps,
-        input: InputModality::Pointer,                   // source default — refined later
-        arch,
-        os,
-        reach: Reach::Pod("default/orrdeal-probe".into()),
-        status,
-        note,
-    };
+    let make =
+        |status: TargetStatus, note: String, os: String, arch: String, caps: CapabilityFlags| {
+            Target {
+                id: "ephemeral:proxmox-k3s".into(),
+                source: TargetSource::Ephemeral,
+                ui_surface: UiSurface::Desktop, // source default — refined later
+                capabilities: caps,
+                input: InputModality::Pointer, // source default — refined later
+                arch,
+                os,
+                reach: Reach::Pod("default/orrdeal-probe".into()),
+                status,
+                note,
+            }
+        };
 
     let kubeconfig = match terraform_apply(cfg).await {
         Ok((_ip, kc)) => kc,
@@ -244,8 +259,14 @@ pub async fn destroy(cfg: &ProxmoxConfig) -> anyhow::Result<()> {
                 .arg(format!("-var=cores={}", cfg.cores))
                 .arg(format!("-var=memory_mb={}", cfg.memory_mb))
                 .arg(format!("-var=ssh_user={}", cfg.ssh_user))
-                .arg(format!("-var=ssh_public_key_path={}", cfg.ssh_public_key_path))
-                .arg(format!("-var=ssh_private_key_path={}", cfg.ssh_private_key_path));
+                .arg(format!(
+                    "-var=ssh_public_key_path={}",
+                    cfg.ssh_public_key_path
+                ))
+                .arg(format!(
+                    "-var=ssh_private_key_path={}",
+                    cfg.ssh_private_key_path
+                ));
             c
         },
         "terraform destroy",

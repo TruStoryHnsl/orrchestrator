@@ -7,7 +7,9 @@ use crate::provider::{ProviderConfig, ProviderKind};
 /// Supported AI backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum BackendKind {
+    #[default]
     Claude,
     Codex,
     Gemini,
@@ -49,7 +51,10 @@ impl BackendKind {
 
     /// Whether this backend uses a CLI/PTY transport.
     pub fn is_cli(&self) -> bool {
-        matches!(self, Self::Claude | Self::Codex | Self::Gemini | Self::Crush | Self::OpenCode | Self::Pi)
+        matches!(
+            self,
+            Self::Claude | Self::Codex | Self::Gemini | Self::Crush | Self::OpenCode | Self::Pi
+        )
     }
 
     /// Whether this backend uses a direct HTTP API transport.
@@ -140,20 +145,14 @@ impl BackendKind {
             | BackendKind::OpenCode
             | BackendKind::Pi => harness.to_provider(config),
             BackendKind::AnthropicApi | BackendKind::OpenAiApi => {
-                let base_url = engine
-                    .base_url
-                    .clone()
-                    .unwrap_or_else(|| match harness {
-                        BackendKind::OpenAiApi => "https://api.openai.com".to_string(),
-                        _ => "https://api.anthropic.com".to_string(),
-                    });
-                let api_key_env = engine
-                    .api_key_env
-                    .clone()
-                    .unwrap_or_else(|| match harness {
-                        BackendKind::OpenAiApi => "OPENAI_API_KEY".to_string(),
-                        _ => "ANTHROPIC_API_KEY".to_string(),
-                    });
+                let base_url = engine.base_url.clone().unwrap_or_else(|| match harness {
+                    BackendKind::OpenAiApi => "https://api.openai.com".to_string(),
+                    _ => "https://api.anthropic.com".to_string(),
+                });
+                let api_key_env = engine.api_key_env.clone().unwrap_or_else(|| match harness {
+                    BackendKind::OpenAiApi => "OPENAI_API_KEY".to_string(),
+                    _ => "ANTHROPIC_API_KEY".to_string(),
+                });
                 ProviderConfig {
                     name: harness.label().to_string(),
                     kind: ProviderKind::ApiHttp {
@@ -185,13 +184,14 @@ impl BackendKind {
 
     /// Only CLI-based backends (for PTY spawning).
     pub fn cli_backends() -> &'static [BackendKind] {
-        &[Self::Claude, Self::Codex, Self::Gemini, Self::Crush, Self::OpenCode, Self::Pi]
-    }
-}
-
-impl Default for BackendKind {
-    fn default() -> Self {
-        Self::Claude
+        &[
+            Self::Claude,
+            Self::Codex,
+            Self::Gemini,
+            Self::Crush,
+            Self::OpenCode,
+            Self::Pi,
+        ]
     }
 }
 
@@ -273,16 +273,15 @@ impl BackendsConfig {
     /// Load config from `~/.config/orrchestrator/backends.yaml`, or use defaults.
     pub fn load() -> Self {
         let path = config_path();
-        if path.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&path) {
-                if let Ok(mut cfg) = serde_yaml_or_json(&contents) {
-                    for (kind, default_cfg) in Self::default().backends {
-                        cfg.backends.entry(kind).or_insert(default_cfg);
-                    }
-                    cfg.detect_availability();
-                    return cfg;
-                }
+        if path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&path)
+            && let Ok(mut cfg) = serde_yaml_or_json(&contents)
+        {
+            for (kind, default_cfg) in Self::default().backends {
+                cfg.backends.entry(kind).or_insert(default_cfg);
             }
+            cfg.detect_availability();
+            return cfg;
         }
         let mut cfg = Self::default();
         cfg.detect_availability();
@@ -325,7 +324,11 @@ impl BackendsConfig {
 ///
 /// CLI backends require their binary to be present on PATH (detected via `which`).
 /// API backends require their API key env var to be set.
-pub fn is_provider_available(backends: &BackendsConfig, kind: BackendKind, valve_blocked: bool) -> (bool, &'static str) {
+pub fn is_provider_available(
+    backends: &BackendsConfig,
+    kind: BackendKind,
+    valve_blocked: bool,
+) -> (bool, &'static str) {
     if valve_blocked {
         return (false, "provider valve is closed");
     }
@@ -349,7 +352,7 @@ pub fn is_provider_available(backends: &BackendsConfig, kind: BackendKind, valve
 }
 
 fn config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home)
         .join(".config")
         .join("orrchestrator")
@@ -444,13 +447,17 @@ fn send_anthropic(base_url: &str, model_id: &str, prompt: &str) -> anyhow::Resul
     let text = json
         .get("content")
         .and_then(|c| c.as_array())
-        .and_then(|arr| arr.iter().find_map(|item| {
-            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                item.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
-            } else {
-                None
-            }
-        }))
+        .and_then(|arr| {
+            arr.iter().find_map(|item| {
+                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    item.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+        })
         .ok_or_else(|| anyhow::anyhow!("anthropic response missing text content"))?;
     Ok(text)
 }
@@ -533,7 +540,10 @@ mod tests {
             codex_cfg.flags,
             vec!["--dangerously-bypass-approvals-and-sandbox".to_string()]
         );
-        assert!(!codex_cfg.available, "default should be unavailable until detection runs");
+        assert!(
+            !codex_cfg.available,
+            "default should be unavailable until detection runs"
+        );
     }
 
     #[test]
@@ -542,7 +552,10 @@ mod tests {
         let crush_cfg = cfg.backends.get(&BackendKind::Crush).expect("crush entry");
         assert_eq!(crush_cfg.command, "crush");
         assert!(crush_cfg.flags.is_empty());
-        assert!(!crush_cfg.available, "default should be unavailable until detection runs");
+        assert!(
+            !crush_cfg.available,
+            "default should be unavailable until detection runs"
+        );
     }
 
     #[test]
@@ -555,7 +568,10 @@ mod tests {
         }
         cfg.detect_availability();
         let crush_cfg = cfg.backends.get(&BackendKind::Crush).unwrap();
-        assert!(!crush_cfg.available, "bogus binary must not be detected as available");
+        assert!(
+            !crush_cfg.available,
+            "bogus binary must not be detected as available"
+        );
 
         // is_provider_available should report the binary as missing
         let (avail, reason) = is_provider_available(&cfg, BackendKind::Crush, false);
@@ -624,7 +640,11 @@ mod tests {
         let cfg = BackendsConfig::default();
         for kind in BackendKind::all() {
             let (avail, reason) = is_provider_available(&cfg, *kind, true);
-            assert!(!avail, "{} must be unavailable when valve closed", kind.label());
+            assert!(
+                !avail,
+                "{} must be unavailable when valve closed",
+                kind.label()
+            );
             assert_eq!(reason, "provider valve is closed");
         }
     }
@@ -656,7 +676,10 @@ mod tests {
             std::env::set_var("ANTHROPIC_API_KEY", "test-anthropic-key");
         }
         let (avail, reason) = is_provider_available(&cfg, BackendKind::AnthropicApi, false);
-        assert!(avail, "AnthropicApi should be available when ANTHROPIC_API_KEY is set");
+        assert!(
+            avail,
+            "AnthropicApi should be available when ANTHROPIC_API_KEY is set"
+        );
         assert_eq!(reason, "");
         let (avail, _) = is_provider_available(&cfg, BackendKind::OpenAiApi, false);
         assert!(!avail);
@@ -666,7 +689,10 @@ mod tests {
             std::env::set_var("OPENAI_API_KEY", "test-openai-key");
         }
         let (avail, reason) = is_provider_available(&cfg, BackendKind::OpenAiApi, false);
-        assert!(avail, "OpenAiApi should be available when OPENAI_API_KEY is set");
+        assert!(
+            avail,
+            "OpenAiApi should be available when OPENAI_API_KEY is set"
+        );
         assert_eq!(reason, "");
 
         // --- valve closed still wins even with keys set ---

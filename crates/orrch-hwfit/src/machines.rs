@@ -199,13 +199,13 @@ mod tests {
         // localhost name with an ssh_host still rejected (reserved name)
         assert!(!reg.upsert(Machine {
             name: "localhost".into(),
-            ssh_host: Some("user@x".into()),
+            ssh_host: Some("dev@x".into()),
             ssh_port: None,
             platform: None,
         }));
         // missing ssh_host rejected
         assert!(!reg.upsert(Machine {
-            name: "orrion".into(),
+            name: "node-a".into(),
             ssh_host: None,
             ssh_port: None,
             platform: None,
@@ -217,21 +217,21 @@ mod tests {
     fn upsert_inserts_then_replaces_by_name() {
         let mut reg = MachineRegistry::default();
         assert!(reg.upsert(Machine {
-            name: "orrion".into(),
-            ssh_host: Some("user@192.168.1.10".into()),
+            name: "node-a".into(),
+            ssh_host: Some("dev@node-a".into()),
             ssh_port: None,
             platform: Some("linux".into()),
         }));
         assert_eq!(reg.machines.len(), 1);
         // replace (same name): updated in place, no duplicate
         assert!(reg.upsert(Machine {
-            name: "orrion".into(),
-            ssh_host: Some("user@orrion".into()),
+            name: "node-a".into(),
+            ssh_host: Some("dev@node-a".into()),
             ssh_port: Some("2222".into()),
             platform: Some("linux".into()),
         }));
         assert_eq!(reg.machines.len(), 1);
-        assert_eq!(reg.machines[0].ssh_host.as_deref(), Some("user@orrion"));
+        assert_eq!(reg.machines[0].ssh_host.as_deref(), Some("dev@node-a"));
         assert_eq!(reg.machines[0].ssh_port.as_deref(), Some("2222"));
     }
 
@@ -265,14 +265,14 @@ mod tests {
 
         let mut reg = MachineRegistry::default();
         reg.upsert(Machine {
-            name: "orrion".into(),
-            ssh_host: Some("user@192.168.1.10".into()),
+            name: "node-a".into(),
+            ssh_host: Some("dev@node-a".into()),
             ssh_port: Some("22".into()),
             platform: Some("linux".into()),
         });
         reg.upsert(Machine {
-            name: "mbp15".into(),
-            ssh_host: Some("user@192.168.1.10".into()),
+            name: "node-b".into(),
+            ssh_host: Some("dev@node-b".into()),
             ssh_port: None,
             platform: Some("linux".into()),
         });
@@ -281,7 +281,7 @@ mod tests {
         // On-disk JSON excludes localhost.
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("localhost"));
-        assert!(raw.contains("orrion"));
+        assert!(raw.contains("node-a"));
 
         let loaded = MachineRegistry::load_from(&path);
         assert_eq!(loaded.machines, reg.machines);
@@ -290,8 +290,8 @@ mod tests {
         let all = loaded.all();
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].name, "localhost");
-        assert_eq!(all[1].name, "orrion");
-        assert_eq!(all[2].name, "mbp15");
+        assert_eq!(all[1].name, "node-a");
+        assert_eq!(all[2].name, "node-b");
     }
 
     #[test]

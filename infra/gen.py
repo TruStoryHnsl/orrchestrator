@@ -20,7 +20,11 @@ except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
 HERE = pathlib.Path(__file__).resolve().parent
+# Prefer the operator's real topology.toml; fall back to the committed
+# example so a fresh clone can generate + self-test out of the box.
 TOPO = HERE / "topology.toml"
+if not TOPO.exists():
+    TOPO = HERE / "topology.example.toml"
 OUT = HERE / "generated"
 
 

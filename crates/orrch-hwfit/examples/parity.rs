@@ -4,7 +4,7 @@
 // the odysseus python reference. NOT written by the crate author.
 
 use orrch_hwfit::{
-    analyze_model, estimate_memory_gb, load_catalog, models::default_catalog_path, SystemInfo,
+    SystemInfo, analyze_model, estimate_memory_gb, load_catalog, models::default_catalog_path,
 };
 
 fn fixture() -> SystemInfo {
@@ -55,7 +55,16 @@ fn main() {
             Some(r) => {
                 println!(
                     "{{\"name\": {:?}, \"est_native_q\": {:.4}, \"run_mode\": {:?}, \"fit_level\": {:?}, \"required_gb\": {:.4}, \"quant\": {:?}, \"context\": {}, \"params_b\": {:.4}, \"speed_tps\": {:.4}, \"score\": {:.4}}}",
-                    r.name, est, r.run_mode, r.fit_level, r.required_gb, r.quant, r.context, r.params_b, r.speed_tps, r.score
+                    r.name,
+                    est,
+                    r.run_mode,
+                    r.fit_level,
+                    r.required_gb,
+                    r.quant,
+                    r.context,
+                    r.params_b,
+                    r.speed_tps,
+                    r.score
                 );
             }
             None => {

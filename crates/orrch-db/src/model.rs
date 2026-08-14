@@ -105,8 +105,14 @@ mod tests {
 
     #[test]
     fn event_kind_parses_known_and_rejects_unknown() {
-        assert_eq!(EventKind::from_str("bug_opened"), Some(EventKind::BugOpened));
-        assert_eq!(EventKind::from_str("bug_resolved"), Some(EventKind::BugResolved));
+        assert_eq!(
+            EventKind::from_str("bug_opened"),
+            Some(EventKind::BugOpened)
+        );
+        assert_eq!(
+            EventKind::from_str("bug_resolved"),
+            Some(EventKind::BugResolved)
+        );
         assert_eq!(EventKind::from_str(" audit "), Some(EventKind::Audit));
         assert_eq!(EventKind::from_str("nonsense"), None);
     }

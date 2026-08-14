@@ -65,6 +65,9 @@ mod tests {
     fn test_item_kind_labels() {
         assert_eq!(ItemKind::Agent.label(), "Agent");
         assert_eq!(ItemKind::McpServer.label(), "MCP Server");
-        assert_eq!(ItemKind::WorkforceTemplate.directory(), "workforce_templates");
+        assert_eq!(
+            ItemKind::WorkforceTemplate.directory(),
+            "workforce_templates"
+        );
     }
 }

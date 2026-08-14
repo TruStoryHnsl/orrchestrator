@@ -20,9 +20,9 @@ impl DeviceClass {
 }
 
 /// Detect device class by comparing current hostname to the configured primary hostname.
-/// Defaults to "orrion" if not configured.
+/// Defaults to the local hostname if not configured.
 pub fn device_class(primary_hostname: Option<&str>) -> DeviceClass {
-    let primary = primary_hostname.unwrap_or("orrion");
+    let primary = primary_hostname.unwrap_or("localhost");
     let hostname = std::fs::read_to_string("/etc/hostname")
         .unwrap_or_default()
         .trim()
@@ -150,7 +150,7 @@ impl ExternalSession {
             .unwrap_or("unknown")
     }
 
-    /// Returns a host badge like "@orrpheus" for remote sessions, empty for local.
+    /// Returns a host badge like "@buildbox" for remote sessions, empty for local.
     pub fn host_badge(&self) -> String {
         if self.host.is_empty() {
             String::new()
@@ -162,6 +162,31 @@ impl ExternalSession {
     pub fn is_remote(&self) -> bool {
         !self.host.is_empty()
     }
+}
+
+/// Read the session name from Claude's session file (~/.claude/sessions/<PID>.json).
+pub fn read_session_name(pid: u32) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = std::path::Path::new(&home)
+        .join(".claude")
+        .join("sessions")
+        .join(format!("{pid}.json"));
+
+    if let Ok(contents) = std::fs::read_to_string(path) {
+        // Simple JSON extraction without a full parser — find "name":"..."
+        if let Some(pos) = contents.find("\"name\"") {
+            let rest = &contents[pos..];
+            if let Some(colon) = rest.find(':') {
+                let after_colon = rest[colon + 1..].trim_start();
+                if let Some(inner) = after_colon.strip_prefix('"')
+                    && let Some(end) = inner.find('"')
+                {
+                    return inner[..end].to_string();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -184,34 +209,11 @@ mod tests {
             );
             assert_eq!(session.backend, *kind);
             assert_eq!(session.state, SessionState::Working);
-            assert_eq!(session.goal_display(), &format!("goal for {}", kind.label()));
+            assert_eq!(
+                session.goal_display(),
+                &format!("goal for {}", kind.label())
+            );
             assert_eq!(session.display_name(), "orrch-test-project");
         }
     }
-}
-
-/// Read the session name from Claude's session file (~/.claude/sessions/<PID>.json).
-pub fn read_session_name(pid: u32) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = std::path::Path::new(&home)
-        .join(".claude")
-        .join("sessions")
-        .join(format!("{pid}.json"));
-
-    if let Ok(contents) = std::fs::read_to_string(path) {
-        // Simple JSON extraction without a full parser — find "name":"..."
-        if let Some(pos) = contents.find("\"name\"") {
-            let rest = &contents[pos..];
-            if let Some(colon) = rest.find(':') {
-                let after_colon = rest[colon + 1..].trim_start();
-                if after_colon.starts_with('"') {
-                    let inner = &after_colon[1..];
-                    if let Some(end) = inner.find('"') {
-                        return inner[..end].to_string();
-                    }
-                }
-            }
-        }
-    }
-    String::new()
 }

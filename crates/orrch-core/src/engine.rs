@@ -51,18 +51,33 @@ pub enum EngineSource {
 /// shipped default model file). Never reads disk, never panics.
 pub fn resolve_engine_id(layers: &EngineLayers, fallback: &str) -> ResolvedEngineId {
     if let Some(id) = &layers.session_pick {
-        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::Session };
+        return ResolvedEngineId {
+            engine_id: id.clone(),
+            source: EngineSource::Session,
+        };
     }
     if let Some(id) = &layers.agent_role {
-        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::AgentRole };
+        return ResolvedEngineId {
+            engine_id: id.clone(),
+            source: EngineSource::AgentRole,
+        };
     }
     if let Some(id) = &layers.project_default {
-        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::ProjectDefault };
+        return ResolvedEngineId {
+            engine_id: id.clone(),
+            source: EngineSource::ProjectDefault,
+        };
     }
     if let Some(id) = &layers.global_default {
-        return ResolvedEngineId { engine_id: id.clone(), source: EngineSource::GlobalDefault };
+        return ResolvedEngineId {
+            engine_id: id.clone(),
+            source: EngineSource::GlobalDefault,
+        };
     }
-    ResolvedEngineId { engine_id: fallback.to_string(), source: EngineSource::Builtin }
+    ResolvedEngineId {
+        engine_id: fallback.to_string(),
+        source: EngineSource::Builtin,
+    }
 }
 
 /// Convenience: resolve the id, then look the `ModelEntry` up in a loaded slice
@@ -133,10 +148,10 @@ pub fn resolve_loop_engine_id(
 /// drove the agent layer, and a one-line human rationale shown at spawn time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineDecision {
-    pub engine_id: String,    // "" when no layer named an engine (legacy no-engine path)
+    pub engine_id: String, // "" when no layer named an engine (legacy no-engine path)
     pub source: EngineSource, // which precedence layer won
     pub importance: Importance, // the importance that drove the agent layer
-    pub rationale: String,    // one-line human explanation, shown at spawn
+    pub rationale: String, // one-line human explanation, shown at spawn
 }
 
 /// ENG-009. PURE given the collected layer strings. Builds the agent layer from
@@ -162,10 +177,16 @@ pub fn decide_engine(
     };
     let r = resolve_engine_id(&layers, fallback);
     let rationale = match r.source {
-        EngineSource::Session => format!("user-picked '{}' (overrides computed default)", r.engine_id),
+        EngineSource::Session => {
+            format!("user-picked '{}' (overrides computed default)", r.engine_id)
+        }
         EngineSource::AgentRole => format!(
             "agent's {} engine '{}' for a {:?} task",
-            if importance.wants_optimal() { "optimal" } else { "standard" },
+            if importance.wants_optimal() {
+                "optimal"
+            } else {
+                "standard"
+            },
             r.engine_id,
             importance
         ),
@@ -175,7 +196,12 @@ pub fn decide_engine(
             "no engine declared at any layer — harness uses its own default".into()
         }
     };
-    EngineDecision { engine_id: r.engine_id, source: r.source, importance, rationale }
+    EngineDecision {
+        engine_id: r.engine_id,
+        source: r.source,
+        importance,
+        rationale,
+    }
 }
 
 // ─── ENG-007: task importance dimension (PURE) ──────────────────────────────
@@ -185,7 +211,7 @@ pub fn decide_engine(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Importance {
     #[default]
-    Routine,   // standard_engine
+    Routine, // standard_engine
     Important, // optimal_engine
     Critical,  // optimal_engine
 }
@@ -226,7 +252,9 @@ pub fn agent_role_engine(agent_md: &Path) -> Option<String> {
 /// legacy `engine:` field used as the standard fallback. Either side `None` when
 /// absent. Used by callers that pass both ids into `decide_engine`.
 pub fn agent_engine_pair(agent_md: &Path) -> (Option<String>, Option<String>) {
-    let Ok(content) = std::fs::read_to_string(agent_md) else { return (None, None) };
+    let Ok(content) = std::fs::read_to_string(agent_md) else {
+        return (None, None);
+    };
     let Some((fm, _b)) = orrch_library::store::parse_frontmatter_pub(&content) else {
         return (None, None);
     };
@@ -261,10 +289,10 @@ pub fn project_default_engine(project_dir: &Path) -> Option<String> {
     // 2. `engine:` key inside a `.orrch/config.*`
     for cfg_name in ["config.json", "config.yaml", "config.yml", "config.toml"] {
         let cfg_path = orrch_dir.join(cfg_name);
-        if let Ok(s) = std::fs::read_to_string(&cfg_path) {
-            if let Some(id) = extract_engine_key(&s) {
-                return Some(id);
-            }
+        if let Ok(s) = std::fs::read_to_string(&cfg_path)
+            && let Some(id) = extract_engine_key(&s)
+        {
+            return Some(id);
         }
     }
     None
@@ -377,7 +405,10 @@ pub fn engine_env(
         // claude code speaks Anthropic format
         BackendKind::Claude => {
             if !has(ApiFormat::Anthropic) {
-                anyhow::bail!("engine '{}' does not speak Anthropic format (claude harness)", engine.name);
+                anyhow::bail!(
+                    "engine '{}' does not speak Anthropic format (claude harness)",
+                    engine.name
+                );
             }
             let mut v = vec![("ANTHROPIC_MODEL".into(), model)];
             if let Some(b) = base {
@@ -420,7 +451,11 @@ pub fn engine_env(
             if engine.api_format == vec![ApiFormat::Cli] {
                 Ok(vec![])
             } else {
-                anyhow::bail!("{} harness has no engine binding for '{}'", harness.label(), engine.name)
+                anyhow::bail!(
+                    "{} harness has no engine binding for '{}'",
+                    harness.label(),
+                    engine.name
+                )
             }
         }
     }
@@ -527,25 +562,56 @@ mod tests {
             global_default: Some("glob".into()),
             ..Default::default()
         };
-        assert_eq!(resolve_engine_id(&layers, "fb").source, EngineSource::ProjectDefault);
-        let layers2 = EngineLayers { global_default: Some("glob".into()), ..Default::default() };
-        assert_eq!(resolve_engine_id(&layers2, "fb").source, EngineSource::GlobalDefault);
+        assert_eq!(
+            resolve_engine_id(&layers, "fb").source,
+            EngineSource::ProjectDefault
+        );
+        let layers2 = EngineLayers {
+            global_default: Some("glob".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_engine_id(&layers2, "fb").source,
+            EngineSource::GlobalDefault
+        );
     }
 
     #[test]
     fn test_resolve_engine_finds_entry() {
         let models = vec![
-            mk_engine("a", "Anthropic", "claude-x", None, None, vec![ApiFormat::Cli], EngineLocation::Cloud),
-            mk_engine("deepseek-v4-flash", "DeepSeek", "deepseek-v4-flash", Some("https://api.deepseek.com"), Some("DEEPSEEK_API_KEY"), vec![ApiFormat::Anthropic, ApiFormat::OpenAI], EngineLocation::Cloud),
+            mk_engine(
+                "a",
+                "Anthropic",
+                "claude-x",
+                None,
+                None,
+                vec![ApiFormat::Cli],
+                EngineLocation::Cloud,
+            ),
+            mk_engine(
+                "deepseek-v4-flash",
+                "DeepSeek",
+                "deepseek-v4-flash",
+                Some("https://api.deepseek.com"),
+                Some("DEEPSEEK_API_KEY"),
+                vec![ApiFormat::Anthropic, ApiFormat::OpenAI],
+                EngineLocation::Cloud,
+            ),
         ];
-        let layers = EngineLayers { session_pick: Some("deepseek-v4-flash".into()), ..Default::default() };
+        let layers = EngineLayers {
+            session_pick: Some("deepseek-v4-flash".into()),
+            ..Default::default()
+        };
         let (resolved, entry) = resolve_engine(&layers, &models, "a");
         assert_eq!(resolved.engine_id, "deepseek-v4-flash");
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().model_id, "deepseek-v4-flash");
 
         // unknown id → None entry but resolved id preserved
-        let layers2 = EngineLayers { session_pick: Some("nope".into()), ..Default::default() };
+        let layers2 = EngineLayers {
+            session_pick: Some("nope".into()),
+            ..Default::default()
+        };
         let (_r, e) = resolve_engine(&layers2, &models, "a");
         assert!(e.is_none());
     }
@@ -564,13 +630,26 @@ mod tests {
             EngineLocation::Cloud,
         );
         let stub = |var: &str| {
-            if var == "DEEPSEEK_API_KEY" { Some("sk-test".to_string()) } else { None }
+            if var == "DEEPSEEK_API_KEY" {
+                Some("sk-test".to_string())
+            } else {
+                None
+            }
         };
         let env = engine_env(BackendKind::Claude, &engine, stub).expect("compatible");
         let map: std::collections::HashMap<_, _> = env.into_iter().collect();
-        assert_eq!(map.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("https://api.deepseek.com"));
-        assert_eq!(map.get("ANTHROPIC_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
-        assert_eq!(map.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str), Some("sk-test"));
+        assert_eq!(
+            map.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("https://api.deepseek.com")
+        );
+        assert_eq!(
+            map.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("deepseek-v4-flash")
+        );
+        assert_eq!(
+            map.get("ANTHROPIC_AUTH_TOKEN").map(String::as_str),
+            Some("sk-test")
+        );
     }
 
     #[test]
@@ -587,9 +666,18 @@ mod tests {
         let stub = |_: &str| Some("sk-test".to_string());
         let env = engine_env(BackendKind::OpenCode, &engine, stub).expect("compatible");
         let map: std::collections::HashMap<_, _> = env.into_iter().collect();
-        assert_eq!(map.get("OPENAI_BASE_URL").map(String::as_str), Some("https://api.deepseek.com"));
-        assert_eq!(map.get("OPENAI_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
-        assert_eq!(map.get("OPENAI_API_KEY").map(String::as_str), Some("sk-test"));
+        assert_eq!(
+            map.get("OPENAI_BASE_URL").map(String::as_str),
+            Some("https://api.deepseek.com")
+        );
+        assert_eq!(
+            map.get("OPENAI_MODEL").map(String::as_str),
+            Some("deepseek-v4-flash")
+        );
+        assert_eq!(
+            map.get("OPENAI_API_KEY").map(String::as_str),
+            Some("sk-test")
+        );
     }
 
     // ── ENG-009 engine↔harness routing policy ───────────────────────────────
@@ -666,10 +754,17 @@ mod tests {
     #[test]
     fn test_engine_env_blocks_claude_via_anthropic_api() {
         // integration: the gate fires inside engine_env, closing the token-billing leak.
-        let err = engine_env(BackendKind::AnthropicApi, &mk_claude_engine(), |_| Some("k".into()));
+        let err = engine_env(BackendKind::AnthropicApi, &mk_claude_engine(), |_| {
+            Some("k".into())
+        });
         assert!(err.is_err());
-        let err = engine_env(BackendKind::OpenCode, &mk_claude_engine(), |_| Some("k".into()));
-        assert!(err.is_err(), "Claude model must not bind to a non-Claude harness");
+        let err = engine_env(BackendKind::OpenCode, &mk_claude_engine(), |_| {
+            Some("k".into())
+        });
+        assert!(
+            err.is_err(),
+            "Claude model must not bind to a non-Claude harness"
+        );
     }
 
     #[test]
@@ -685,7 +780,10 @@ mod tests {
         );
         let stub = |_: &str| Some("x".to_string());
         let err = engine_env(BackendKind::Claude, &engine, stub);
-        assert!(err.is_err(), "claude + OpenAI-only engine must be incompatible");
+        assert!(
+            err.is_err(),
+            "claude + OpenAI-only engine must be incompatible"
+        );
     }
 
     #[test]
@@ -701,36 +799,83 @@ mod tests {
             EngineLocation::Local,
         );
         let stub = |_: &str| None;
-        let env = engine_env(BackendKind::Claude, &engine, stub).expect("local engine, no key, no err");
+        let env =
+            engine_env(BackendKind::Claude, &engine, stub).expect("local engine, no key, no err");
         let map: std::collections::HashMap<_, _> = env.into_iter().collect();
-        assert!(map.get("ANTHROPIC_AUTH_TOKEN").is_none(), "no key → no AUTH_TOKEN pair");
-        assert_eq!(map.get("ANTHROPIC_BASE_URL").map(String::as_str), Some("http://localhost:11434"));
-        assert_eq!(map.get("ANTHROPIC_MODEL").map(String::as_str), Some("deepseek-v4-flash"));
+        assert!(
+            map.get("ANTHROPIC_AUTH_TOKEN").is_none(),
+            "no key → no AUTH_TOKEN pair"
+        );
+        assert_eq!(
+            map.get("ANTHROPIC_BASE_URL").map(String::as_str),
+            Some("http://localhost:11434")
+        );
+        assert_eq!(
+            map.get("ANTHROPIC_MODEL").map(String::as_str),
+            Some("deepseek-v4-flash")
+        );
     }
 
     #[test]
     fn test_engine_env_pi_is_noop() {
-        let engine = mk_engine("any", "Multi", "x", Some("https://h"), Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
+        let engine = mk_engine(
+            "any",
+            "Multi",
+            "x",
+            Some("https://h"),
+            Some("K"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
         let env = engine_env(BackendKind::Pi, &engine, |_| Some("k".into())).unwrap();
         assert!(env.is_empty());
     }
 
     #[test]
     fn test_engine_env_codex_rejects_non_cli_engine() {
-        let engine = mk_engine("gpt", "OpenAI", "gpt-4o", Some("https://h"), Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
+        let engine = mk_engine(
+            "gpt",
+            "OpenAI",
+            "gpt-4o",
+            Some("https://h"),
+            Some("K"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
         assert!(engine_env(BackendKind::Codex, &engine, |_| Some("k".into())).is_err());
         // native cli-default engine is accepted as no-op
-        let cli_engine = mk_engine("codex-native", "OpenAI", "gpt-5-codex", None, None, vec![ApiFormat::Cli], EngineLocation::Cloud);
-        assert!(engine_env(BackendKind::Codex, &cli_engine, |_| None).unwrap().is_empty());
+        let cli_engine = mk_engine(
+            "codex-native",
+            "OpenAI",
+            "gpt-5-codex",
+            None,
+            None,
+            vec![ApiFormat::Cli],
+            EngineLocation::Cloud,
+        );
+        assert!(
+            engine_env(BackendKind::Codex, &cli_engine, |_| None)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // ── URL composition ──────────────────────────────────────────────────
 
     #[test]
     fn test_url_composition() {
-        assert_eq!(anthropic_url("https://api.deepseek.com"), "https://api.deepseek.com/v1/messages");
-        assert_eq!(anthropic_url("https://api.anthropic.com/"), "https://api.anthropic.com/v1/messages");
-        assert_eq!(openai_url("https://api.openai.com"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(
+            anthropic_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/v1/messages"
+        );
+        assert_eq!(
+            anthropic_url("https://api.anthropic.com/"),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            openai_url("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
     }
 
     // ── valve gating ─────────────────────────────────────────────────────
@@ -740,10 +885,25 @@ mod tests {
         let mut valves = ValveStore::default();
         valves.valves.insert(
             "Ollama".into(),
-            orrch_library::Valve { closed: true, reopen_at: None, reason: "off".into() },
+            orrch_library::Valve {
+                closed: true,
+                reopen_at: None,
+                reason: "off".into(),
+            },
         );
-        let local = mk_engine("o", "Ollama", "x", None, None, vec![ApiFormat::Cli], EngineLocation::Local);
-        assert!(engine_selectable(&local, &valves), "local engine never gated even with closed valve");
+        let local = mk_engine(
+            "o",
+            "Ollama",
+            "x",
+            None,
+            None,
+            vec![ApiFormat::Cli],
+            EngineLocation::Local,
+        );
+        assert!(
+            engine_selectable(&local, &valves),
+            "local engine never gated even with closed valve"
+        );
     }
 
     #[test]
@@ -751,10 +911,25 @@ mod tests {
         let mut valves = ValveStore::default();
         valves.valves.insert(
             "DeepSeek".into(),
-            orrch_library::Valve { closed: true, reopen_at: None, reason: "off".into() },
+            orrch_library::Valve {
+                closed: true,
+                reopen_at: None,
+                reason: "off".into(),
+            },
         );
-        let cloud = mk_engine("d", "DeepSeek", "x", None, Some("K"), vec![ApiFormat::OpenAI], EngineLocation::Cloud);
-        assert!(!engine_selectable(&cloud, &valves), "closed valve hides cloud engine");
+        let cloud = mk_engine(
+            "d",
+            "DeepSeek",
+            "x",
+            None,
+            Some("K"),
+            vec![ApiFormat::OpenAI],
+            EngineLocation::Cloud,
+        );
+        assert!(
+            !engine_selectable(&cloud, &valves),
+            "closed valve hides cloud engine"
+        );
         // open valve → selectable (mutate map directly, avoid disk save())
         valves.valves.remove("DeepSeek");
         assert!(engine_selectable(&cloud, &valves));
@@ -801,8 +976,7 @@ mod tests {
     fn test_importance_integration_with_precedence() {
         // Critical-resolved agent id populates the agent layer and wins over
         // project/global, picking the OPTIMAL id.
-        let agent_role =
-            agent_layer_engine(Some("sonnet"), Some("opus"), Importance::Critical);
+        let agent_role = agent_layer_engine(Some("sonnet"), Some("opus"), Importance::Critical);
         let layers = EngineLayers {
             session_pick: None,
             agent_role: agent_role.clone(),
@@ -814,7 +988,10 @@ mod tests {
         assert_eq!(r.engine_id, "opus");
 
         // a session pick still overrides the importance-driven agent layer.
-        let layers2 = EngineLayers { session_pick: Some("user-pick".into()), ..layers };
+        let layers2 = EngineLayers {
+            session_pick: Some("user-pick".into()),
+            ..layers
+        };
         let r2 = resolve_engine_id(&layers2, "fb");
         assert_eq!(r2.source, EngineSource::Session);
         assert_eq!(r2.engine_id, "user-pick");
@@ -824,10 +1001,22 @@ mod tests {
 
     #[test]
     fn test_decide_engine_routine_standard_agent() {
-        let d = decide_engine(None, Some("sonnet"), None, None, None, Importance::Routine, "");
+        let d = decide_engine(
+            None,
+            Some("sonnet"),
+            None,
+            None,
+            None,
+            Importance::Routine,
+            "",
+        );
         assert_eq!(d.source, EngineSource::AgentRole);
         assert_eq!(d.engine_id, "sonnet");
-        assert!(d.rationale.contains("standard"), "rationale: {}", d.rationale);
+        assert!(
+            d.rationale.contains("standard"),
+            "rationale: {}",
+            d.rationale
+        );
     }
 
     #[test]
@@ -843,7 +1032,11 @@ mod tests {
         );
         assert_eq!(d.source, EngineSource::AgentRole);
         assert_eq!(d.engine_id, "opus");
-        assert!(d.rationale.contains("optimal"), "rationale: {}", d.rationale);
+        assert!(
+            d.rationale.contains("optimal"),
+            "rationale: {}",
+            d.rationale
+        );
     }
 
     #[test]
@@ -859,7 +1052,11 @@ mod tests {
         );
         assert_eq!(d.source, EngineSource::Session);
         assert_eq!(d.engine_id, "user-pick");
-        assert!(d.rationale.contains("overrides"), "rationale: {}", d.rationale);
+        assert!(
+            d.rationale.contains("overrides"),
+            "rationale: {}",
+            d.rationale
+        );
     }
 
     // ── LOOP-012: class → default engine ─────────────────────────────────
@@ -867,11 +1064,26 @@ mod tests {
     #[test]
     fn test_class_default_engine_support_is_gpt() {
         use crate::loops::{LoopClass, SupportKind};
-        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Planning)), "GPT-4o");
-        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Analysis)), "GPT-4o");
-        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Testing)), "GPT-4o");
-        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Research)), "GPT-4o");
-        assert_eq!(class_default_engine(LoopClass::Support(SupportKind::Critique)), "GPT-4o");
+        assert_eq!(
+            class_default_engine(LoopClass::Support(SupportKind::Planning)),
+            "GPT-4o"
+        );
+        assert_eq!(
+            class_default_engine(LoopClass::Support(SupportKind::Analysis)),
+            "GPT-4o"
+        );
+        assert_eq!(
+            class_default_engine(LoopClass::Support(SupportKind::Testing)),
+            "GPT-4o"
+        );
+        assert_eq!(
+            class_default_engine(LoopClass::Support(SupportKind::Research)),
+            "GPT-4o"
+        );
+        assert_eq!(
+            class_default_engine(LoopClass::Support(SupportKind::Critique)),
+            "GPT-4o"
+        );
         // GPT engine id
         assert!(class_default_engine(LoopClass::Support(SupportKind::Planning)).contains("GPT"));
     }
@@ -890,7 +1102,12 @@ mod tests {
         // the project slot (source ProjectDefault).
         let r = resolve_loop_engine_id(
             LoopClass::Support(SupportKind::Planning),
-            None, None, None, None, None, "fb",
+            None,
+            None,
+            None,
+            None,
+            None,
+            "fb",
         );
         assert_eq!(r.engine_id, "GPT-4o");
         assert_eq!(r.source, EngineSource::ProjectDefault);

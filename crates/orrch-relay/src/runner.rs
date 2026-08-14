@@ -28,13 +28,19 @@ impl RunnerConfig {
     /// The argv `llama-server` is launched with (order-stable for testing).
     pub fn argv(&self) -> Vec<String> {
         vec![
-            "-m".into(), self.gguf_path.clone(),
-            "--n-gpu-layers".into(), self.gpu_layers.to_string(),
-            "--n-cpu-moe".into(), self.n_cpu_moe.to_string(),
-            "--ctx-size".into(), self.ctx_size.to_string(),
+            "-m".into(),
+            self.gguf_path.clone(),
+            "--n-gpu-layers".into(),
+            self.gpu_layers.to_string(),
+            "--n-cpu-moe".into(),
+            self.n_cpu_moe.to_string(),
+            "--ctx-size".into(),
+            self.ctx_size.to_string(),
             "--mmap".into(),
-            "--host".into(), "127.0.0.1".into(),
-            "--port".into(), self.port.to_string(),
+            "--host".into(),
+            "127.0.0.1".into(),
+            "--port".into(),
+            self.port.to_string(),
         ]
     }
 
@@ -75,8 +81,13 @@ mod tests {
         let argv = cfg.argv();
         assert!(argv.windows(2).any(|w| w == ["--n-cpu-moe", "999"]));
         assert!(argv.contains(&"--mmap".to_string()));
-        assert!(argv.windows(2).any(|w| w == ["--ctx-size", "8192"]),
-            "operating context, not the model's 1M max");
-        assert!(argv.windows(2).any(|w| w[0] == "-m" && w[1].ends_with(".gguf")));
+        assert!(
+            argv.windows(2).any(|w| w == ["--ctx-size", "8192"]),
+            "operating context, not the model's 1M max"
+        );
+        assert!(
+            argv.windows(2)
+                .any(|w| w[0] == "-m" && w[1].ends_with(".gguf"))
+        );
     }
 }

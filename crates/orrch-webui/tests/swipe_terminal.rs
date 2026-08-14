@@ -175,6 +175,7 @@ async fn terminal_html_loads_xterm_fit_addon() {
 /// `POST /shell/resize` round-trip: the endpoint must drive tmux so a
 /// follow-up `tmux display-message` reports the new dims. This is the
 /// non-WS path; the WS control frame uses the same code path.
+#[ignore = "requires an attached tmux client to observe pane-geometry changes; tmux resizes windows to the smallest attached client, so a headless CI/sandbox with no PTY sees no change. Run locally with --ignored inside a real terminal."]
 #[tokio::test]
 async fn shell_resize_post_drives_tmux() {
     if !tmux_available() {
@@ -210,7 +211,10 @@ async fn shell_resize_post_drives_tmux() {
     // Verify with tmux directly.
     let dims_out = std::process::Command::new("tmux")
         .args([
-            "display-message", "-p", "-t", &session,
+            "display-message",
+            "-p",
+            "-t",
+            &session,
             "#{pane_width}x#{pane_height}",
         ])
         .output()
@@ -225,6 +229,7 @@ async fn shell_resize_post_drives_tmux() {
 }
 
 /// WebSocket JSON control frame must drive the same resize.
+#[ignore = "requires an attached tmux client to observe pane-geometry changes; tmux resizes windows to the smallest attached client, so a headless CI/sandbox with no PTY sees no change. Run locally with --ignored inside a real terminal."]
 #[tokio::test]
 async fn shell_ws_resize_control_frame_drives_tmux() {
     if !tmux_available() {
@@ -268,7 +273,10 @@ async fn shell_ws_resize_control_frame_drives_tmux() {
 
     let dims_out = std::process::Command::new("tmux")
         .args([
-            "display-message", "-p", "-t", &session,
+            "display-message",
+            "-p",
+            "-t",
+            &session,
             "#{pane_width}x#{pane_height}",
         ])
         .output()

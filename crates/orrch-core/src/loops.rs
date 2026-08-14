@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::context_location::{artifact_path, Artifact};
+use crate::context_location::{Artifact, artifact_path};
 
 /// LOOP-011 — the destructiveness class of a loop. Two top-level kinds; Support
 /// carries a sub-kind purely for UI/diagnostics (it does NOT change the policy —

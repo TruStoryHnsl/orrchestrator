@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// A configured MCP server connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,10 +45,10 @@ pub fn load_mcp_servers(dir: &Path) -> Vec<McpServerEntry> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(server) = parse_mcp_file(&path) {
-                    servers.push(server);
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(server) = parse_mcp_file(&path)
+            {
+                servers.push(server);
             }
         }
     }
@@ -77,7 +77,9 @@ fn parse_mcp_file(path: &Path) -> Option<McpServerEntry> {
         name: extract(&fm, "name")?,
         description: extract(&fm, "description").unwrap_or_default(),
         transport,
-        enabled: extract(&fm, "enabled").map(|s| s != "false").unwrap_or(true),
+        enabled: extract(&fm, "enabled")
+            .map(|s| s != "false")
+            .unwrap_or(true),
         assigned_roles: extract_list(&fm, "assigned_roles"),
         notes: body.trim().to_string(),
         path: path.to_path_buf(),
@@ -107,7 +109,11 @@ pub fn save_mcp_server(dir: &Path, entry: &McpServerEntry) -> std::io::Result<Pa
     content.push_str(&format!("description: {}\n", entry.description));
 
     match &entry.transport {
-        McpTransport::Stdio { command, args, env: _ } => {
+        McpTransport::Stdio {
+            command,
+            args,
+            env: _,
+        } => {
             content.push_str("transport: stdio\n");
             content.push_str(&format!("command: {}\n", command));
             if !args.is_empty() {
@@ -153,7 +159,7 @@ pub fn save_mcp_server(dir: &Path, entry: &McpServerEntry) -> std::io::Result<Pa
 ///
 /// Servers from later files override earlier ones (by name).
 pub fn load_mcp_servers_from_claude_configs(project_root: Option<&Path>) -> Vec<McpServerEntry> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let home_path = Path::new(&home);
 
     let mut paths = vec![
@@ -167,14 +173,13 @@ pub fn load_mcp_servers_from_claude_configs(project_root: Option<&Path>) -> Vec<
     let mut servers = std::collections::HashMap::<String, McpServerEntry>::new();
 
     for config_path in &paths {
-        if let Ok(content) = std::fs::read_to_string(config_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(mcp_servers) = json.get("mcpServers").and_then(|v| v.as_object()) {
-                    for (name, cfg) in mcp_servers {
-                        if let Some(entry) = parse_claude_mcp_entry(name, cfg, config_path) {
-                            servers.insert(name.clone(), entry);
-                        }
-                    }
+        if let Ok(content) = std::fs::read_to_string(config_path)
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&content)
+            && let Some(mcp_servers) = json.get("mcpServers").and_then(|v| v.as_object())
+        {
+            for (name, cfg) in mcp_servers {
+                if let Some(entry) = parse_claude_mcp_entry(name, cfg, config_path) {
+                    servers.insert(name.clone(), entry);
                 }
             }
         }
@@ -195,14 +200,26 @@ fn parse_claude_mcp_entry(
 
     let transport = if transport_type == "sse" {
         let url = cfg.get("url").and_then(|v| v.as_str()).unwrap_or_default();
-        McpTransport::Sse { url: url.to_string() }
+        McpTransport::Sse {
+            url: url.to_string(),
+        }
     } else {
-        let command = cfg.get("command").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let args = cfg.get("args")
+        let command = cfg
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let args = cfg
+            .get("args")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        let env = cfg.get("env")
+        let env = cfg
+            .get("env")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
@@ -243,7 +260,10 @@ fn parse_claude_mcp_entry(
 
 /// Load all MCP servers from both library .md files and Claude JSON configs,
 /// merged and deduplicated by name (library entries take precedence).
-pub fn load_all_mcp_servers(library_dir: &Path, project_root: Option<&Path>) -> Vec<McpServerEntry> {
+pub fn load_all_mcp_servers(
+    library_dir: &Path,
+    project_root: Option<&Path>,
+) -> Vec<McpServerEntry> {
     let mut by_name = std::collections::HashMap::<String, McpServerEntry>::new();
 
     // Load from Claude configs first (lower precedence)

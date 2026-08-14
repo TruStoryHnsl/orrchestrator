@@ -14,7 +14,10 @@ impl orrch_relay::affinity::Embedder for DeadEmbedder {
 async fn dead_embedder_yields_none_affinity_not_error() {
     let req = CompletionRequest {
         model: "m".into(),
-        messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: "hi".into(),
+        }],
         stream: false,
         affinity_hint: None,
         extra: serde_json::Map::new(),

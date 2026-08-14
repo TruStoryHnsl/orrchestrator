@@ -102,7 +102,15 @@ impl ProcessManager {
         // Open PTY pair via libc
         let mut master_fd: RawFd = -1;
         let mut slave_fd: RawFd = -1;
-        let rc = unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+        let rc = unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         if rc != 0 {
             anyhow::bail!("openpty failed");
         }
@@ -152,9 +160,8 @@ impl ProcessManager {
                 if slave_fd > 2 {
                     libc::close(slave_fd);
                 }
-                let dir_cstr = std::ffi::CString::new(
-                    project_dir_owned.to_string_lossy().as_bytes(),
-                ).unwrap();
+                let dir_cstr =
+                    std::ffi::CString::new(project_dir_owned.to_string_lossy().as_bytes()).unwrap();
                 libc::chdir(dir_cstr.as_ptr());
 
                 // ENG-004: inject engine env vars into the child's environment
@@ -189,7 +196,14 @@ impl ProcessManager {
 
         let nix_pid = Pid::from_raw(pid);
         let goal = prompt.map(|s| s.to_string());
-        let session = Session::new(sid.clone(), project_dir.to_path_buf(), nix_pid, master_fd, backend, goal);
+        let session = Session::new(
+            sid.clone(),
+            project_dir.to_path_buf(),
+            nix_pid,
+            master_fd,
+            backend,
+            goal,
+        );
         self.sessions.insert(sid.clone(), session);
 
         // Spawn async reader task
@@ -213,10 +227,15 @@ impl ProcessManager {
         prompt: Option<&str>,
     ) -> anyhow::Result<String> {
         if !provider.available {
-            anyhow::bail!("{} backend not available — api key env var not set", backend.label());
+            anyhow::bail!(
+                "{} backend not available — api key env var not set",
+                backend.label()
+            );
         }
         let (base_url, model_id) = match &provider.kind {
-            ProviderKind::ApiHttp { base_url, model_id, .. } => (base_url.clone(), model_id.clone()),
+            ProviderKind::ApiHttp {
+                base_url, model_id, ..
+            } => (base_url.clone(), model_id.clone()),
             _ => anyhow::bail!("{} is not an http api provider", backend.label()),
         };
         let prompt = prompt.unwrap_or("").to_string();
@@ -232,7 +251,10 @@ impl ProcessManager {
                 Ok(text) => text.into_bytes(),
                 Err(e) => format!("[error] {e}").into_bytes(),
             };
-            let _ = tx.send(SessionEvent::Output { sid: sid_clone.clone(), data: payload });
+            let _ = tx.send(SessionEvent::Output {
+                sid: sid_clone.clone(),
+                data: payload,
+            });
             let _ = tx.send(SessionEvent::Died { sid: sid_clone });
         });
 
@@ -241,26 +263,26 @@ impl ProcessManager {
 
     /// Send input bytes to a session's PTY.
     pub fn write_to_session(&self, sid: &str, data: &[u8]) -> anyhow::Result<()> {
-        if let Some(session) = self.sessions.get(sid) {
-            if session.state != SessionState::Dead {
-                unsafe { libc::write(session.master_fd, data.as_ptr() as *const _, data.len()) };
-            }
+        if let Some(session) = self.sessions.get(sid)
+            && session.state != SessionState::Dead
+        {
+            unsafe { libc::write(session.master_fd, data.as_ptr() as *const _, data.len()) };
         }
         Ok(())
     }
 
     /// Resize a session's PTY.
     pub fn resize_session(&self, sid: &str, rows: u16, cols: u16) {
-        if let Some(session) = self.sessions.get(sid) {
-            if session.state != SessionState::Dead {
-                let winsize = libc::winsize {
-                    ws_row: rows,
-                    ws_col: cols,
-                    ws_xpixel: 0,
-                    ws_ypixel: 0,
-                };
-                unsafe { libc::ioctl(session.master_fd, libc::TIOCSWINSZ, &winsize) };
-            }
+        if let Some(session) = self.sessions.get(sid)
+            && session.state != SessionState::Dead
+        {
+            let winsize = libc::winsize {
+                ws_row: rows,
+                ws_col: cols,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            };
+            unsafe { libc::ioctl(session.master_fd, libc::TIOCSWINSZ, &winsize) };
         }
     }
 
@@ -315,11 +337,8 @@ impl ProcessManager {
             .output()
             .await?;
 
-        let managed_pids: std::collections::HashSet<i32> = self
-            .sessions
-            .values()
-            .map(|s| s.pid.as_raw())
-            .collect();
+        let managed_pids: std::collections::HashSet<i32> =
+            self.sessions.values().map(|s| s.pid.as_raw()).collect();
 
         let own_pid = std::process::id();
 
@@ -335,9 +354,13 @@ impl ProcessManager {
             let cmdline = parts.next().unwrap_or("").to_string();
 
             // Skip ourselves
-            if pid == own_pid { continue; }
+            if pid == own_pid {
+                continue;
+            }
             // Skip managed sessions
-            if managed_pids.contains(&(pid as i32)) { continue; }
+            if managed_pids.contains(&(pid as i32)) {
+                continue;
+            }
             // Must be an actual supported agent binary, not a shell wrapper or pgrep itself
             let is_agent = cmdline.contains("/claude")
                 || cmdline.starts_with("claude")
@@ -345,18 +368,33 @@ impl ProcessManager {
                 || cmdline.starts_with("codex")
                 || cmdline.contains("/gemini")
                 || cmdline.starts_with("gemini");
-            if !is_agent { continue; }
+            if !is_agent {
+                continue;
+            }
             // Skip shell wrappers (zsh -c, bash -c, etc.)
-            if cmdline.contains("zsh -c") || cmdline.contains("bash -c") || cmdline.contains("sh -c") { continue; }
+            if cmdline.contains("zsh -c")
+                || cmdline.contains("bash -c")
+                || cmdline.contains("sh -c")
+            {
+                continue;
+            }
             // Skip pgrep itself
-            if cmdline.contains("pgrep") { continue; }
+            if cmdline.contains("pgrep") {
+                continue;
+            }
 
             let cwd = std::fs::read_link(format!("/proc/{pid}/cwd"))
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
 
             let session_name = crate::session::read_session_name(pid);
-            external.push(ExternalSession { pid, project_dir: cwd, cmdline, session_name, host: String::new() });
+            external.push(ExternalSession {
+                pid,
+                project_dir: cwd,
+                cmdline,
+                session_name,
+                host: String::new(),
+            });
         }
 
         self.external = external;
@@ -394,13 +432,14 @@ async fn read_pty_loop(fd: RawFd, sid: String, tx: mpsc::UnboundedSender<Session
         };
 
         match ready.try_io(|inner| {
-            let n = unsafe {
-                libc::read(inner.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len())
-            };
+            let n = unsafe { libc::read(inner.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len()) };
             if n > 0 {
                 Ok(n as usize)
             } else if n == 0 {
-                Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EOF"))
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "EOF",
+                ))
             } else {
                 Err(std::io::Error::last_os_error())
             }
@@ -435,31 +474,31 @@ mod tests {
     fn test_external_session_display() {
         let ext = ExternalSession {
             pid: 12345,
-            project_dir: "/home/user/projects/orrapus".into(),
+            project_dir: "/home/dev/projects/webapp".into(),
             cmdline: "claude --dangerously-skip-permissions".into(),
             session_name: String::new(),
             host: String::new(),
         };
-        assert_eq!(ext.display_name(), "orrapus");
+        assert_eq!(ext.display_name(), "webapp");
         assert!(!ext.is_remote());
 
         let named = ExternalSession {
             pid: 999,
-            project_dir: "/home/user/projects/concord".into(),
+            project_dir: "/home/dev/projects/api".into(),
             cmdline: "claude".into(),
-            session_name: "concord - main".into(),
+            session_name: "api - main".into(),
             host: String::new(),
         };
-        assert_eq!(named.display_name(), "concord - main");
+        assert_eq!(named.display_name(), "api - main");
 
         let remote = ExternalSession {
             pid: 46206,
-            project_dir: "/Users/user/projects/concord".into(),
+            project_dir: "/Users/dev/projects/api".into(),
             cmdline: "claude --dangerously-skip-permissions".into(),
             session_name: String::new(),
-            host: "orrpheus".into(),
+            host: "buildbox".into(),
         };
-        assert_eq!(remote.host_badge(), "@orrpheus");
+        assert_eq!(remote.host_badge(), "@buildbox");
         assert!(remote.is_remote());
     }
 }

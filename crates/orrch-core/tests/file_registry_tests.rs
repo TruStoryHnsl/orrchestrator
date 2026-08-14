@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use orrch_core::file_registry::{
-    AgentId, ChangeSpec, Clock, EditStatus, FileRegistry, ManualClock, RegistryError,
-    DEFAULT_AUDIT_LOG, DEFAULT_REGISTRY_PATH,
+    AgentId, ChangeSpec, Clock, DEFAULT_AUDIT_LOG, DEFAULT_REGISTRY_PATH, EditStatus, FileRegistry,
+    ManualClock, RegistryError,
 };
 
 use tempfile::TempDir;
@@ -270,11 +270,8 @@ fn persistence_roundtrip() {
         agent("Developer:1:c3:0004"),
         agent("UI_Designer:1:c4:0005"),
     ];
-    let mut reg = FileRegistry::load_or_init_with_clock(
-        dir.path(),
-        clock.clone() as Arc<dyn Clock>,
-    )
-    .unwrap();
+    let mut reg =
+        FileRegistry::load_or_init_with_clock(dir.path(), clock.clone() as Arc<dyn Clock>).unwrap();
     for (f, a) in files.iter().zip(agents.iter()) {
         let p = dir.path().join(f);
         std::fs::write(&p, format!("contents of {f}")).unwrap();
@@ -284,11 +281,8 @@ fn persistence_roundtrip() {
     drop(reg);
 
     // Reconstruct from disk.
-    let reg2 = FileRegistry::load_or_init_with_clock(
-        dir.path(),
-        clock.clone() as Arc<dyn Clock>,
-    )
-    .unwrap();
+    let reg2 =
+        FileRegistry::load_or_init_with_clock(dir.path(), clock.clone() as Arc<dyn Clock>).unwrap();
     let listing_after = reg2.list_owners();
     assert_eq!(listing_before.len(), listing_after.len());
     for ((p1, a1, t1), (p2, a2, t2)) in listing_before.iter().zip(listing_after.iter()) {

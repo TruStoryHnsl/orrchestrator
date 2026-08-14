@@ -257,17 +257,19 @@ impl FileRegistry {
         let audit_path = project_root.join(DEFAULT_AUDIT_LOG);
 
         let snapshot = match fs::read(&state_path) {
-            Ok(bytes) if !bytes.is_empty() => match serde_json::from_slice::<RegistrySnapshot>(&bytes) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(
-                        "file_registry: malformed state at {} ({}); starting fresh",
-                        state_path.display(),
-                        e
-                    );
-                    RegistrySnapshot::default()
+            Ok(bytes) if !bytes.is_empty() => {
+                match serde_json::from_slice::<RegistrySnapshot>(&bytes) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(
+                            "file_registry: malformed state at {} ({}); starting fresh",
+                            state_path.display(),
+                            e
+                        );
+                        RegistrySnapshot::default()
+                    }
                 }
-            },
+            }
             Ok(_) => RegistrySnapshot::default(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => RegistrySnapshot::default(),
             Err(e) => return Err(e.into()),
@@ -332,7 +334,13 @@ impl FileRegistry {
         Ok(())
     }
 
-    fn audit(&self, verdict: &str, attempting_agent: &AgentId, path: &Path, current_owner: Option<&AgentId>) {
+    fn audit(
+        &self,
+        verdict: &str,
+        attempting_agent: &AgentId,
+        path: &Path,
+        current_owner: Option<&AgentId>,
+    ) {
         let ts = self
             .clock
             .now()
@@ -385,7 +393,8 @@ impl FileRegistry {
             out = c;
         }
         // Verify it lives under project_root (canonicalize project_root too if exists).
-        let root = fs::canonicalize(&self.project_root).unwrap_or_else(|_| self.project_root.clone());
+        let root =
+            fs::canonicalize(&self.project_root).unwrap_or_else(|_| self.project_root.clone());
         if !out.starts_with(&root) {
             return Err(RegistryError::PathEscape(path.to_path_buf()));
         }
@@ -397,7 +406,11 @@ impl FileRegistry {
             Ok(bytes) => {
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
-                let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+                let hex: String = hasher
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
                 (bytes.len() as u64, hex)
             }
             Err(_) => (0, String::new()),
@@ -599,7 +612,9 @@ impl FileRegistry {
             .owners
             .get(&cpath)
             .map(|o| o.owner.clone())
-            .ok_or_else(|| RegistryError::NotOwned { path: cpath.clone() })?;
+            .ok_or_else(|| RegistryError::NotOwned {
+                path: cpath.clone(),
+            })?;
         let now = self.clock.now();
         let id = self.next_id();
         let handle = EditHandle {
@@ -642,7 +657,11 @@ impl FileRegistry {
         Ok(())
     }
 
-    pub fn reject_edit(&mut self, handle: &EditHandle, reason: String) -> Result<(), RegistryError> {
+    pub fn reject_edit(
+        &mut self,
+        handle: &EditHandle,
+        reason: String,
+    ) -> Result<(), RegistryError> {
         let id = handle.id.clone();
         let pos = self
             .pending_edits
@@ -737,7 +756,7 @@ impl FileRegistry {
             .min_by(|a, b| {
                 a.1.cmp(&b.1)
                     .then_with(|| role_priority(a.0.role()).cmp(&role_priority(b.0.role())))
-                    .then_with(|| a.0 .0.cmp(&b.0 .0))
+                    .then_with(|| a.0.0.cmp(&b.0.0))
             })
             .map(|(a, _)| a.clone())
     }

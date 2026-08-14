@@ -42,7 +42,10 @@ pub fn migrate_errors_jsonl(project_dir: &Path) -> anyhow::Result<usize> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let fp = v.get("fingerprint").and_then(|x| x.as_str()).unwrap_or("nofp");
+        let fp = v
+            .get("fingerprint")
+            .and_then(|x| x.as_str())
+            .unwrap_or("nofp");
         let ts_secs = v.get("timestamp").and_then(|x| x.as_f64()).unwrap_or(0.0) as i64;
         let short = &fp[..fp.len().min(6)];
         let fname = format!("legacy-{ts_secs}-{short}.md");
@@ -51,8 +54,15 @@ pub fn migrate_errors_jsonl(project_dir: &Path) -> anyhow::Result<usize> {
             continue;
         }
         let resolved = v.get("resolved").and_then(|x| x.as_bool()).unwrap_or(false);
-        let kind = if resolved { "bug_resolved" } else { "bug_opened" };
-        let category = v.get("category").and_then(|x| x.as_str()).unwrap_or("Unknown");
+        let kind = if resolved {
+            "bug_resolved"
+        } else {
+            "bug_opened"
+        };
+        let category = v
+            .get("category")
+            .and_then(|x| x.as_str())
+            .unwrap_or("Unknown");
         let raw = v.get("raw_context").and_then(|x| x.as_str()).unwrap_or("");
         let resolution = v.get("resolution").and_then(|x| x.as_str()).unwrap_or("");
         // Lexical RFC3339-ish ts is not reconstructable from epoch secs without a

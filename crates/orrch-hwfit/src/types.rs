@@ -16,13 +16,13 @@ use serde::{Deserialize, Serialize};
 pub struct CatalogModel {
     pub name: String,
     pub provider: String,
-    pub parameter_count: String,        // e.g. "7B", "355", "80K"  (may be empty)
-    pub parameters_raw: Option<u64>,    // raw param count when present (>0 wins over parameter_count)
+    pub parameter_count: String, // e.g. "7B", "355", "80K"  (may be empty)
+    pub parameters_raw: Option<u64>, // raw param count when present (>0 wins over parameter_count)
     pub min_ram_gb: f64,
-    pub recommended_ram_gb: Option<f64>,// None → analyze falls back to required_gb
+    pub recommended_ram_gb: Option<f64>, // None → analyze falls back to required_gb
     pub min_vram_gb: f64,
-    pub quantization: String,           // native quant label; "" when absent
-    pub context_length: Option<u64>,    // None/0 → treated as 4096 by callers
+    pub quantization: String,        // native quant label; "" when absent
+    pub context_length: Option<u64>, // None/0 → treated as 4096 by callers
     pub use_case: String,
     pub capabilities: Vec<String>,
     pub pipeline_tag: String,
@@ -50,10 +50,10 @@ pub struct Gpu {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GpuGroup {
     pub name: String,
-    pub vram_each: f64,     // round(vram_gb,1) of one card
+    pub vram_each: f64, // round(vram_gb,1) of one card
     pub count: u32,
     pub indices: Vec<Option<u32>>,
-    pub vram_total: f64,    // round(vram_each*count,1)
+    pub vram_total: f64, // round(vram_each*count,1)
 }
 
 /// Detected (or SSH-probed) system hardware. Carries exactly the fields the
@@ -70,18 +70,18 @@ pub struct SystemInfo {
     pub gpu_count: u32,
     pub gpus: Vec<Gpu>,
     pub gpu_groups: Vec<GpuGroup>,
-    pub backend: String,                 // "cuda" | "rocm" | "cpu_x86" | "cpu_arm"
+    pub backend: String, // "cuda" | "rocm" | "cpu_x86" | "cpu_arm"
     // ── optional/diagnostic fields (Python carried these on the dict) ──
     #[serde(default)]
-    pub homogeneous: bool,               // gpu_groups.len() <= 1
+    pub homogeneous: bool, // gpu_groups.len() <= 1
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unified_memory: Option<bool>,    // AMD APU UMA flag
+    pub unified_memory: Option<bool>, // AMD APU UMA flag
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gpu_error: Option<String>,       // nvidia-smi present but driver error
+    pub gpu_error: Option<String>, // nvidia-smi present but driver error
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,           // "Cannot connect to <host>"
+    pub error: Option<String>, // "Cannot connect to <host>"
     #[serde(default)]
-    pub gpu_only: bool,                   // user picked explicit GPU config → no RAM offload
+    pub gpu_only: bool, // user picked explicit GPU config → no RAM offload
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage_rand_read_gbps: Option<f64>, // conservative random-read GB/s for disk-backed MoE
 }
@@ -101,16 +101,16 @@ pub struct FitResult {
     pub name: String,
     pub provider: String,
     pub parameter_count: String,
-    pub params_b: f64,                 // round(pb,1)
+    pub params_b: f64, // round(pb,1)
     pub is_moe: bool,
     pub use_case: String,
-    pub fit_level: String,             // "perfect"|"good"|"marginal"|"too_tight"
-    pub run_mode: String,              // "gpu"|"moe_offload"|"cpu_offload"|"cpu_only"|"disk_stream"|"no_fit"
+    pub fit_level: String, // "perfect"|"good"|"marginal"|"too_tight"
+    pub run_mode: String,  // "gpu"|"moe_offload"|"cpu_offload"|"cpu_only"|"disk_stream"|"no_fit"
     pub quant: String,
     pub context: u64,
-    pub required_gb: f64,              // round(...,1)
-    pub speed_tps: f64,               // round(...,1)
-    pub score: f64,                   // round(composite,1)
+    pub required_gb: f64, // round(...,1)
+    pub speed_tps: f64,   // round(...,1)
+    pub score: f64,       // round(composite,1)
     pub scores: FitScores,
     pub gguf_sources: Vec<serde_json::Value>,
     pub context_length: u64,

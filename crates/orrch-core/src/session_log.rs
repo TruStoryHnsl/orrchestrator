@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 /// A conversation message from a Claude session log.
 #[derive(Debug, Clone)]
 pub struct LogMessage {
-    pub role: String,  // "human" or "assistant"
+    pub role: String, // "human" or "assistant"
     pub text: String,
 }
 
@@ -33,10 +33,17 @@ pub fn format_session_log(pid: u32, max_messages: usize) -> String {
         let session_file = format!("{home}/.claude/sessions/{pid}.json");
         let session_exists = std::path::Path::new(&session_file).exists();
         let (cwd, sid) = session_info(pid).unwrap_or_default();
-        let log_file = if !sid.is_empty() { find_log_file(&cwd, &sid) } else { None };
+        let log_file = if !sid.is_empty() {
+            find_log_file(&cwd, &sid)
+        } else {
+            None
+        };
         let log_info = match &log_file {
-            Some(p) => format!("Log file: {} ({} bytes)", p.display(),
-                std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)),
+            Some(p) => format!(
+                "Log file: {} ({} bytes)",
+                p.display(),
+                std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+            ),
             None => "Log file: NOT FOUND".into(),
         };
 
@@ -53,7 +60,11 @@ pub fn format_session_log(pid: u32, max_messages: usize) -> String {
 
     let mut output = String::new();
     for msg in &messages {
-        let prefix = if msg.role == "user" { "▶ You" } else { "◀ Claude" };
+        let prefix = if msg.role == "user" {
+            "▶ You"
+        } else {
+            "◀ Claude"
+        };
         output.push_str(&format!("─── {prefix} ───\n"));
         output.push_str(&msg.text);
         output.push_str("\n\n");
@@ -81,8 +92,11 @@ fn find_log_file(project_dir: &str, session_id: &str) -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let projects_base = Path::new(&home).join(".claude").join("projects");
 
-    // Claude uses path-hash for project dirs: /home/user/projects/concord -> -home-corr-projects-concord
-    let path_hash = project_dir.replace('/', "-").trim_start_matches('-').to_string();
+    // Claude uses path-hash for project dirs: /home/user/projects/app -> -home-user-projects-app
+    let path_hash = project_dir
+        .replace('/', "-")
+        .trim_start_matches('-')
+        .to_string();
 
     let project_log_dir = projects_base.join(&path_hash);
     let log_file = project_log_dir.join(format!("{session_id}.jsonl"));
@@ -92,7 +106,9 @@ fn find_log_file(project_dir: &str, session_id: &str) -> Option<PathBuf> {
     }
 
     // Try with leading dash
-    let log_file = projects_base.join(format!("-{path_hash}")).join(format!("{session_id}.jsonl"));
+    let log_file = projects_base
+        .join(format!("-{path_hash}"))
+        .join(format!("{session_id}.jsonl"));
     if log_file.exists() {
         return Some(log_file);
     }
@@ -127,10 +143,15 @@ fn parse_jsonl_log(path: &Path, max_messages: usize) -> Vec<LogMessage> {
         }
 
         // Simple JSON parsing for role and text content
-        let role = if line.contains("\"type\":\"user\"") || line.contains("\"type\": \"user\"")
-            || line.contains("\"type\":\"human\"") || line.contains("\"type\": \"human\"") {
+        let role = if line.contains("\"type\":\"user\"")
+            || line.contains("\"type\": \"user\"")
+            || line.contains("\"type\":\"human\"")
+            || line.contains("\"type\": \"human\"")
+        {
             "user"
-        } else if line.contains("\"type\":\"assistant\"") || line.contains("\"type\": \"assistant\"") {
+        } else if line.contains("\"type\":\"assistant\"")
+            || line.contains("\"type\": \"assistant\"")
+        {
             "assistant"
         } else {
             continue;
@@ -167,10 +188,10 @@ fn extract_message_text(json_line: &str) -> String {
     if let Some(arr) = content.as_array() {
         let mut texts = Vec::new();
         for block in arr {
-            if block["type"].as_str() == Some("text") {
-                if let Some(t) = block["text"].as_str() {
-                    texts.push(t.to_string());
-                }
+            if block["type"].as_str() == Some("text")
+                && let Some(t) = block["text"].as_str()
+            {
+                texts.push(t.to_string());
             }
         }
         return texts.join("\n");

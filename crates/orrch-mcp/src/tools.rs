@@ -11,10 +11,12 @@ use crate::server::OrrchMcpServer;
 /// standard sources. In-memory avoids file-system races between concurrent
 /// MCP calls. Each call gets its own fresh DB.
 fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
-    use orrch_db::{rebuild_all, RebuildSources};
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    use orrch_db::{RebuildSources, rebuild_all};
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let library_root = std::path::PathBuf::from(&home)
-        .join(".config").join("orrchestrator").join("library");
+        .join(".config")
+        .join("orrchestrator")
+        .join("library");
     let projects_root = std::path::PathBuf::from(&home).join("projects");
     let project_dirs = std::fs::read_dir(&projects_root)
         .map(|rd| {
@@ -28,7 +30,13 @@ fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
     // silently, which is correct. Connection::open(":memory:") gives a fresh
     // in-memory SQLite database.
     let db_path = std::path::PathBuf::from(":memory:");
-    rebuild_all(&db_path, &RebuildSources { project_dirs, library_root })
+    rebuild_all(
+        &db_path,
+        &RebuildSources {
+            project_dirs,
+            library_root,
+        },
+    )
 }
 
 /// Map the `library_search` tool schema `kind` enum value (plural, matches
@@ -40,8 +48,8 @@ fn orrch_db_conn() -> anyhow::Result<rusqlite::Connection> {
 /// items).
 fn schema_kind_to_db_kind(schema_kind: &str) -> Option<&'static str> {
     match schema_kind {
-        "skills"      => Some("skill"),
-        "tools"       => Some("tool"),
+        "skills" => Some("skill"),
+        "tools" => Some("tool"),
         "mcp_servers" => Some("mcp_server"),
         // "models" and "harnesses" are library subdirs but not DB-ingested kinds.
         _ => None,
@@ -347,7 +355,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         serde_json::json!({
             "name": "remote_list_hosts",
-            "description": "List all known remote hosts (orrion, orrgate, orrpheus, …) with SSH target, reachability status, and probed capabilities (OS, session multiplexer, claude CLI presence, codex CLI presence, gemini CLI presence, projects_dir, hostname). Runs the orrch-agent `check` subcommand over SSH for every non-local host. Robust to shell color noise — tolerates themed fish/zsh prompts that emit ANSI/OSC escape sequences on the first line.",
+            "description": "List all known remote hosts (from the ORRCH_REMOTE_HOSTS env var) with SSH target, reachability status, and probed capabilities (OS, session multiplexer, claude CLI presence, codex CLI presence, gemini CLI presence, projects_dir, hostname). Runs the orrch-agent `check` subcommand over SSH for every non-local host. Robust to shell color noise — tolerates themed fish/zsh prompts that emit ANSI/OSC escape sequences on the first line.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -361,7 +369,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "host": {
                         "type": "string",
-                        "description": "Host name from `remote_list_hosts` (e.g. 'orrpheus', 'orrgate', 'orrion')"
+                        "description": "Host name from `remote_list_hosts`"
                     }
                 },
                 "required": ["host"]
@@ -423,7 +431,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     },
                     "session_name": {
                         "type": "string",
-                        "description": "Session name to kill (e.g. 'orrch-concord')"
+                        "description": "Session name to kill (e.g. 'orrch-myproject')"
                     }
                 },
                 "required": ["host", "session_name"]
@@ -585,11 +593,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "service": {
                         "type": "string",
-                        "description": "Service name as keyed in topology.toml (e.g. 'concord', 'orrapus', 'plex')"
+                        "description": "Service name as keyed in topology.toml (e.g. 'webapp', 'database')"
                     },
                     "host": {
                         "type": "string",
-                        "description": "Target host name (e.g. 'orrgate', 'orrion', 'orrigins')"
+                        "description": "Target host name as declared in topology.toml (e.g. 'app-1')"
                     },
                     "mode": {
                         "type": "string",
@@ -630,7 +638,8 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
                         } else {
                             hits.iter()
                                 .map(|h| format!("- [{}] {} — {}", h.kind, h.name, h.description))
-                                .collect::<Vec<_>>().join("\n")
+                                .collect::<Vec<_>>()
+                                .join("\n")
                         }
                     }
                     Err(e) => format!("library_search error: {e}"),
@@ -639,18 +648,18 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
             }
         }
         "library_get" => library_get(server, args),
-        "list_agents" => {
-            match orrch_db_conn() {
-                Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "agent") {
-                    Ok(items) if items.is_empty() => "No agent profiles found.".into(),
-                    Ok(items) => items.iter()
-                        .map(|i| format!("- {} — {}", i.name, i.description))
-                        .collect::<Vec<_>>().join("\n"),
-                    Err(e) => format!("list_agents error: {e}"),
-                },
+        "list_agents" => match orrch_db_conn() {
+            Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "agent") {
+                Ok(items) if items.is_empty() => "No agent profiles found.".into(),
+                Ok(items) => items
+                    .iter()
+                    .map(|i| format!("- {} — {}", i.name, i.description))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 Err(e) => format!("list_agents error: {e}"),
-            }
-        }
+            },
+            Err(e) => format!("list_agents error: {e}"),
+        },
         "list_skills" => {
             match orrch_db_conn() {
                 Ok(conn) => match orrch_db::query::library_items_by_kind(&conn, "skill") {
@@ -659,15 +668,18 @@ pub async fn dispatch(server: &OrrchMcpServer, name: &str, args: &Value) -> Stri
                         // list_skills file-scanner. Exclude items whose name matches
                         // is_internal_skill_stem (agent-*, develop-feature, develop-aio)
                         // — these are harness-internal skills, not user-facing menu items.
-                        let visible: Vec<_> = items.iter()
+                        let visible: Vec<_> = items
+                            .iter()
                             .filter(|i| !is_internal_skill_stem(&i.name))
                             .collect();
                         if visible.is_empty() {
                             "No skill files found.".into()
                         } else {
-                            visible.iter()
+                            visible
+                                .iter()
                                 .map(|i| format!("- {} — {}", i.name, i.description))
-                                .collect::<Vec<_>>().join("\n")
+                                .collect::<Vec<_>>()
+                                .join("\n")
                         }
                     }
                     Err(e) => format!("list_skills error: {e}"),
@@ -741,15 +753,20 @@ fn voice_listen(args: &Value) -> String {
         .unwrap_or(30_000);
     // Read timeout = request timeout + 2 s buffer so the socket can't hang forever.
     let read_timeout = std::time::Duration::from_millis(timeout_ms + 2_000);
-    match voice_request(args, orrch_voice::protocol::VoiceRequest::NextUtterance { timeout_ms }, read_timeout) {
+    match voice_request(
+        args,
+        orrch_voice::protocol::VoiceRequest::NextUtterance { timeout_ms },
+        read_timeout,
+    ) {
         Ok(orrch_voice::protocol::VoiceResponse::Utterance(Some(utterance))) => utterance.text,
         Ok(orrch_voice::protocol::VoiceResponse::Utterance(None)) => {
             "No voice utterance received before timeout.".into()
         }
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
-        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
-            || err.kind() == std::io::ErrorKind::TimedOut =>
+        Err(err)
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut =>
         {
             "voice service timed out".into()
         }
@@ -774,8 +791,9 @@ fn voice_status(args: &Value) -> String {
         ),
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
-        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
-            || err.kind() == std::io::ErrorKind::TimedOut =>
+        Err(err)
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut =>
         {
             "voice service timed out".into()
         }
@@ -792,8 +810,9 @@ fn voice_toggle(args: &Value) -> String {
         Ok(orrch_voice::protocol::VoiceResponse::Ok) => "voice toggle: ok".into(),
         Ok(orrch_voice::protocol::VoiceResponse::Error(err)) => format!("voice error: {err}"),
         Ok(other) => format!("unexpected voice response: {other:?}"),
-        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock
-            || err.kind() == std::io::ErrorKind::TimedOut =>
+        Err(err)
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut =>
         {
             "voice service timed out".into()
         }
@@ -813,7 +832,11 @@ fn voice_request(
         .get("socket_path")
         .and_then(|v| v.as_str())
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var("ORRCH_VOICE_SOCKET").ok().map(std::path::PathBuf::from))
+        .or_else(|| {
+            std::env::var("ORRCH_VOICE_SOCKET")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
         .unwrap_or_else(orrch_voice::protocol::default_socket_path);
     let mut stream = UnixStream::connect(socket_path)?;
     // Prevent an infinite hang if the voice service accepts but never replies.
@@ -827,7 +850,10 @@ fn voice_request(
     // On Linux, SO_RCVTIMEO expiry manifests as Ok(0) rather than Err(WouldBlock/TimedOut).
     // An empty line here means the read deadline fired; treat it as a timeout.
     if line.is_empty() {
-        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "read timed out"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "read timed out",
+        ));
     }
     serde_json::from_str(&line)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))
@@ -838,9 +864,7 @@ fn voice_request(
 /// remain reachable via skill_invoke / develop_feature / team_call /
 /// workflow_call etc.
 pub fn is_internal_skill_stem(stem: &str) -> bool {
-    stem.starts_with("agent-")
-        || stem == "develop-feature"
-        || stem == "develop-aio"
+    stem.starts_with("agent-") || stem == "develop-feature" || stem == "develop-aio"
 }
 
 fn develop_feature(server: &OrrchMcpServer, args: &Value) -> String {
@@ -858,16 +882,20 @@ fn develop_feature(server: &OrrchMcpServer, args: &Value) -> String {
 
 /// Load the legacy AIO skill and return its content with the goal preamble.
 fn develop_aio(server: &OrrchMcpServer, args: &Value) -> String {
-    let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("continue development");
-    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+    let goal = args
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or("continue development");
+    let project_dir = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let skill_path = server.skills_dir.join("develop-aio.md");
     let body = match std::fs::read_to_string(&skill_path) {
         Ok(c) => c,
         Err(e) => return format!("Error: cannot read develop-aio.md: {e}"),
     };
-    format!(
-        "## Goal\n\n{goal}\n\n## Project\n\n{project_dir}\n\n---\n\n{body}",
-    )
+    format!("## Goal\n\n{goal}\n\n## Project\n\n{project_dir}\n\n---\n\n{body}",)
 }
 
 /// Compile the named team's markdown and return the deterministic dispatch
@@ -878,7 +906,10 @@ fn team_call(server: &OrrchMcpServer, args: &Value) -> String {
         None => return "Error: 'team' parameter is required".into(),
     };
     let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+    let project_dir = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
 
     let teams = orrch_workforce::load_teams(&server.teams_dir);
     let team = match teams.iter().find(|t| {
@@ -890,8 +921,12 @@ fn team_call(server: &OrrchMcpServer, args: &Value) -> String {
             return format!(
                 "Error: team '{team_name}' not found in {}. Available: {}",
                 server.teams_dir.display(),
-                teams.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")
-            )
+                teams
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     };
 
@@ -919,7 +954,10 @@ fn workflow_call(server: &OrrchMcpServer, args: &Value) -> String {
         None => return "Error: 'workflow' parameter is required".into(),
     };
     let goal = args.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let project_dir = args.get("project_dir").and_then(|v| v.as_str()).unwrap_or(".");
+    let project_dir = args
+        .get("project_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
 
     let workforces = orrch_workforce::load_workforces(&server.workforces_dir);
     let workforce = match workforces.iter().find(|w| {
@@ -931,8 +969,12 @@ fn workflow_call(server: &OrrchMcpServer, args: &Value) -> String {
             return format!(
                 "Error: workflow '{workflow_name}' not found in {}. Available: {}",
                 server.workforces_dir.display(),
-                workforces.iter().map(|w| w.name.as_str()).collect::<Vec<_>>().join(", ")
-            )
+                workforces
+                    .iter()
+                    .map(|w| w.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     };
 
@@ -982,7 +1024,10 @@ fn team_list(server: &OrrchMcpServer) -> String {
 fn workflow_list(server: &OrrchMcpServer) -> String {
     let workforces = orrch_workforce::load_workforces(&server.workforces_dir);
     if workforces.is_empty() {
-        return format!("No workforces found in {}.", server.workforces_dir.display());
+        return format!(
+            "No workforces found in {}.",
+            server.workforces_dir.display()
+        );
     }
     let mut out = format!("Workflows ({} total):\n", workforces.len());
     for w in &workforces {
@@ -1019,12 +1064,18 @@ fn find_topology_path(server: &OrrchMcpServer) -> Option<std::path::PathBuf> {
             return Some(c.clone());
         }
     }
-    // Upward walk from cwd as a last resort.
+    // Upward walk from cwd as a last resort. Prefer a real topology.toml at
+    // each level, then fall back to the committed topology.example.toml so a
+    // fresh clone with no operator manifest still answers against sample data.
     let mut dir = std::env::current_dir().ok();
     while let Some(d) = dir {
-        let cand = d.join("infra").join("topology.toml");
-        if cand.is_file() {
-            return Some(cand);
+        let real = d.join("infra").join("topology.toml");
+        if real.is_file() {
+            return Some(real);
+        }
+        let example = d.join("infra").join("topology.example.toml");
+        if example.is_file() {
+            return Some(example);
         }
         dir = d.parent().map(|p| p.to_path_buf());
     }
@@ -1058,21 +1109,44 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
         Some(h) if !h.is_empty() => h,
         _ => return "Error: 'host' parameter is required".into(),
     };
-    let mode = args.get("mode").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let mode = args
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
 
     let topo_path = match find_topology_path(server) {
         Some(p) => p,
-        None => return "Error: could not locate infra/topology.toml (single source of truth).".into(),
+        None => {
+            return "Error: could not locate infra/topology.toml (single source of truth).".into();
+        }
     };
     let content = match std::fs::read_to_string(&topo_path) {
         Ok(c) => c,
         Err(e) => return format!("Error: cannot read {}: {e}", topo_path.display()),
     };
+    fold_placement(
+        &content,
+        &topo_path.display().to_string(),
+        service,
+        host,
+        mode,
+    )
+}
+
+/// Fold a topology.toml document into an ALLOW/DENY placement verdict.
+/// Split out from `infra_placement` (which does the file I/O) so the folding
+/// logic is testable against inline TOML without touching the filesystem.
+fn fold_placement(
+    content: &str,
+    topo_ref: &str,
+    service: &str,
+    host: &str,
+    mode: Option<&str>,
+) -> String {
     let doc = match content.parse::<toml_edit::DocumentMut>() {
         Ok(d) => d,
-        Err(e) => return format!("Error: cannot parse {}: {e}", topo_path.display()),
+        Err(e) => return format!("Error: cannot parse {topo_ref}: {e}"),
     };
-    let topo_ref = topo_path.display().to_string();
 
     // Known-host sanity note (does not change placement folding, mirrors gen.py
     // which folds "*"/exact matches regardless of host-table membership).
@@ -1098,7 +1172,11 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
              Known services: {}\n\
              Source of truth: {topo_ref}\n\
              Add a `[[services.{service}.allow]]` block there before deploying.",
-            if known.is_empty() { "(none)".into() } else { known.join(", ") }
+            if known.is_empty() {
+                "(none)".into()
+            } else {
+                known.join(", ")
+            }
         );
     }
 
@@ -1107,17 +1185,20 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
     let allow_all = array_of_tables(svc_item.get("allow"));
     let deny_all = array_of_tables(svc_item.get("deny"));
 
-    let allows: Vec<&toml_edit::Table> =
-        allow_all.into_iter().filter(|t| entry_matches_host(t, host)).collect();
-    let denies: Vec<&toml_edit::Table> =
-        deny_all.into_iter().filter(|t| entry_matches_host(t, host)).collect();
+    let allows: Vec<&toml_edit::Table> = allow_all
+        .into_iter()
+        .filter(|t| entry_matches_host(t, host))
+        .collect();
+    let denies: Vec<&toml_edit::Table> = deny_all
+        .into_iter()
+        .filter(|t| entry_matches_host(t, host))
+        .collect();
 
     // allowed_modes / allowed_dirs — sorted + de-duped like gen.py.
     let field = |t: &toml_edit::Table, k: &str| -> Option<String> {
         t.get(k).and_then(|v| v.as_str()).map(|s| s.to_string())
     };
-    let mut allowed_modes: Vec<String> =
-        allows.iter().filter_map(|t| field(t, "mode")).collect();
+    let mut allowed_modes: Vec<String> = allows.iter().filter_map(|t| field(t, "mode")).collect();
     allowed_modes.sort();
     allowed_modes.dedup();
     let mut allowed_dirs: Vec<String> = allows
@@ -1131,8 +1212,7 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
     let fully_forbidden = allows.is_empty();
 
     // forbidden_modes: sorted deny modes; explicit "any" or no allow → ["any"].
-    let mut forbidden_modes: Vec<String> =
-        denies.iter().filter_map(|t| field(t, "mode")).collect();
+    let mut forbidden_modes: Vec<String> = denies.iter().filter_map(|t| field(t, "mode")).collect();
     forbidden_modes.sort();
     forbidden_modes.dedup();
     if fully_forbidden || forbidden_modes.iter().any(|m| m == "any") {
@@ -1166,7 +1246,9 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
 
     // ─── Render ──────────────────────────────────────────────────────────
     let mut out = String::new();
-    out.push_str(&format!("Infra placement — service '{service}' on host '{host}'"));
+    out.push_str(&format!(
+        "Infra placement — service '{service}' on host '{host}'"
+    ));
     if let Some(m) = mode {
         out.push_str(&format!(" (mode '{m}')"));
     }
@@ -1185,7 +1267,9 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
             let allowed = allowed_modes.iter().any(|am| am == m);
             if allowed {
                 out.push_str("VERDICT: ALLOW\n");
-                out.push_str(&format!("  '{service}' may deploy on '{host}' in mode '{m}'.\n"));
+                out.push_str(&format!(
+                    "  '{service}' may deploy on '{host}' in mode '{m}'.\n"
+                ));
                 // Report the sanctioned dir(s) for this mode specifically.
                 let dirs_for_mode: Vec<String> = allows
                     .iter()
@@ -1199,9 +1283,9 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
                 out.push_str("VERDICT: DENY\n");
                 let reason = mode_deny_reason(m)
                     .or_else(|| folded_reason.clone())
-                    .unwrap_or_else(|| format!(
-                        "mode '{m}' is not sanctioned for '{service}' on '{host}'."
-                    ));
+                    .unwrap_or_else(|| {
+                        format!("mode '{m}' is not sanctioned for '{service}' on '{host}'.")
+                    });
                 out.push_str(&format!("  reason: {reason}\n"));
                 if allowed_modes.is_empty() {
                     out.push_str(&format!(
@@ -1219,14 +1303,20 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
             let placeable = !fully_forbidden;
             out.push_str(&format!(
                 "VERDICT: {}\n",
-                if placeable { "PLACEABLE" } else { "NOT PLACEABLE" }
+                if placeable {
+                    "PLACEABLE"
+                } else {
+                    "NOT PLACEABLE"
+                }
             ));
             if placeable {
                 out.push_str(&format!(
                     "  '{service}' is sanctioned on '{host}'. Allowed modes: {}\n",
                     allowed_modes.join(", ")
                 ));
-                out.push_str("  Re-run with a `mode` to get an ALLOW/DENY on a specific deployment mode.\n");
+                out.push_str(
+                    "  Re-run with a `mode` to get an ALLOW/DENY on a specific deployment mode.\n",
+                );
             } else {
                 out.push_str(&format!(
                     "  '{service}' has NO sanctioned placement on '{host}'.\n"
@@ -1240,10 +1330,16 @@ fn infra_placement(server: &OrrchMcpServer, args: &Value) -> String {
 
     // Common context block.
     if !allowed_dirs.is_empty() {
-        out.push_str(&format!("  sanctioned dir(s): {}\n", allowed_dirs.join(", ")));
+        out.push_str(&format!(
+            "  sanctioned dir(s): {}\n",
+            allowed_dirs.join(", ")
+        ));
     }
     if !forbidden_modes.is_empty() {
-        out.push_str(&format!("  forbidden mode(s): {}\n", forbidden_modes.join(", ")));
+        out.push_str(&format!(
+            "  forbidden mode(s): {}\n",
+            forbidden_modes.join(", ")
+        ));
     }
     if !ingress.is_empty() {
         for ing in &ingress {
@@ -1271,9 +1367,14 @@ fn load_agent_profile_bodies(agents_dir: &Path) -> Vec<(String, String)> {
         .collect();
     paths.sort();
     for path in paths {
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         let name = extract_frontmatter_field(&content, "name").unwrap_or_else(|| {
-            path.file_stem().unwrap_or_default().to_string_lossy().into()
+            path.file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into()
         });
         out.push((name, content));
     }
@@ -1283,7 +1384,13 @@ fn load_agent_profile_bodies(agents_dir: &Path) -> Vec<(String, String)> {
 /// Lowercase + non-alnum→underscore + collapse for stem matching.
 fn normalize_stem(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
@@ -1296,10 +1403,7 @@ fn assess_development(server: &OrrchMcpServer, args: &Value) -> String {
         .get("project_dir")
         .and_then(|v| v.as_str())
         .unwrap_or(".");
-    let top_n = args
-        .get("top_n")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(5);
+    let top_n = args.get("top_n").and_then(|v| v.as_u64()).unwrap_or(5);
 
     let orrch_root = match server.library_dir.parent() {
         Some(p) => p,
@@ -1454,12 +1558,18 @@ fn incorporate_inbox(args: &Value) -> String {
     let inbox_path = std::path::Path::new(project_dir).join("instructions_inbox.md");
     let inbox_content = match std::fs::read_to_string(&inbox_path) {
         Ok(c) => c,
-        Err(e) => return format!("Error: cannot read instructions_inbox.md at {}: {e}", inbox_path.display()),
+        Err(e) => {
+            return format!(
+                "Error: cannot read instructions_inbox.md at {}: {e}",
+                inbox_path.display()
+            );
+        }
     };
 
     // Require at least one INS- or OPT- header
     if !inbox_content.contains("### INS-") && !inbox_content.contains("### OPT-") {
-        return "Error: instructions_inbox.md contains no pending ### INS- or ### OPT- items".into();
+        return "Error: instructions_inbox.md contains no pending ### INS- or ### OPT- items"
+            .into();
     }
 
     format!(
@@ -1499,7 +1609,10 @@ fn project_state(server: &OrrchMcpServer, args: &Value) -> String {
 
     let project_dir = server.projects_dir.join(project);
     if !project_dir.is_dir() {
-        return format!("Error: project directory '{}' not found", project_dir.display());
+        return format!(
+            "Error: project directory '{}' not found",
+            project_dir.display()
+        );
     }
 
     let mut output = format!("# Project: {project}\n\n");
@@ -1547,7 +1660,10 @@ fn inbox_append(server: &OrrchMcpServer, args: &Value) -> String {
 
     let project_dir = server.projects_dir.join(project);
     if !project_dir.is_dir() {
-        return format!("Error: project directory '{}' not found", project_dir.display());
+        return format!(
+            "Error: project directory '{}' not found",
+            project_dir.display()
+        );
     }
 
     let inbox_path = project_dir.join("instructions_inbox.md");
@@ -1558,7 +1674,11 @@ fn inbox_append(server: &OrrchMcpServer, args: &Value) -> String {
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    match OpenOptions::new().create(true).append(true).open(&inbox_path) {
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&inbox_path)
+    {
         Ok(mut file) => match file.write_all(entry.as_bytes()) {
             Ok(()) => format!("Appended to {}", inbox_path.display()),
             Err(e) => format!("Error: write failed: {e}"),
@@ -1569,7 +1689,9 @@ fn inbox_append(server: &OrrchMcpServer, args: &Value) -> String {
 
 fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
     use orrch_agents::{AgentProfile, AgentRunner, load_project_core_context};
-    use orrch_workforce::{ResolvedStep, load_operations, load_workforces, resolve_step_for_dispatch};
+    use orrch_workforce::{
+        ResolvedStep, load_operations, load_workforces, resolve_step_for_dispatch,
+    };
 
     let agent_name = match args.get("agent").and_then(|v| v.as_str()) {
         Some(a) => a,
@@ -1599,10 +1721,7 @@ fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
             let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
-                    return format!(
-                        "Error: cannot read agent profile '{}': {e}",
-                        path.display()
-                    );
+                    return format!("Error: cannot read agent profile '{}': {e}", path.display());
                 }
             };
             AgentProfile {
@@ -1665,12 +1784,9 @@ fn agent_invoke(server: &OrrchMcpServer, args: &Value) -> String {
     });
 
     match resolved {
-        Some(r) => AgentRunner::build_prompt_for_resolved_step(
-            &profile,
-            task,
-            core_context.as_deref(),
-            &r,
-        ),
+        Some(r) => {
+            AgentRunner::build_prompt_for_resolved_step(&profile, task, core_context.as_deref(), &r)
+        }
         None => AgentRunner::build_prompt(&profile, task, core_context.as_deref()),
     }
 }
@@ -1722,7 +1838,10 @@ fn codebase_brief(server: &OrrchMcpServer, args: &Value) -> String {
 
     let project_dir = server.projects_dir.join(project);
     if !project_dir.is_dir() {
-        return format!("Error: project directory '{}' not found", project_dir.display());
+        return format!(
+            "Error: project directory '{}' not found",
+            project_dir.display()
+        );
     }
 
     let crates_dir = project_dir.join("crates");
@@ -1768,11 +1887,7 @@ fn codebase_brief(server: &OrrchMcpServer, args: &Value) -> String {
         let mut rs_files: Vec<_> = match std::fs::read_dir(&src_dir) {
             Ok(rd) => rd
                 .flatten()
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .is_some_and(|ext| ext == "rs")
-                })
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
                 .map(|e| e.path())
                 .collect(),
             Err(_) => Vec::new(),
@@ -1796,7 +1911,9 @@ fn codebase_brief(server: &OrrchMcpServer, args: &Value) -> String {
 
             let api = extract_pub_api(&content);
 
-            output.push_str(&format!("\n### {crate_name}::{module_name} ({line_count} lines)\n"));
+            output.push_str(&format!(
+                "\n### {crate_name}::{module_name} ({line_count} lines)\n"
+            ));
             output.push_str(&api);
             output.push('\n');
 
@@ -1856,9 +1973,11 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
     let branch_warning = if git_branch != "main" && git_branch != "master" {
-        format!("\n⚠ WARNING: Not on main branch (on '{git_branch}'). \
+        format!(
+            "\n⚠ WARNING: Not on main branch (on '{git_branch}'). \
                  Worktree agents will branch from this commit, not main HEAD. \
-                 Run `git checkout main` first to avoid merge conflicts.\n")
+                 Run `git checkout main` first to avoid merge conflicts.\n"
+        )
     } else {
         String::new()
     };
@@ -2038,7 +2157,9 @@ fn workflow_init(server: &OrrchMcpServer, args: &Value) -> String {
          ## Inbox Stragglers\n\
          {stragglers}\n\n\
          {next_step}",
-        stragglers_summary = if stragglers == "none" { "none".to_string() } else {
+        stragglers_summary = if stragglers == "none" {
+            "none".to_string()
+        } else {
             format!("{} item(s)", stragglers.lines().count())
         },
     )
@@ -2161,7 +2282,7 @@ fn skill_invoke(server: &OrrchMcpServer, args: &Value) -> String {
 // Thin wrappers over `orrch_core::remote`. Each tool probes or acts on
 // a known host via SSH + the embedded `orrch-agent.sh` script. Host
 // names are resolved through `known_hosts()`; callers pass the short
-// name (`orrpheus`, `orrgate`, `orrion`) rather than an SSH target.
+// name (as declared in ORRCH_REMOTE_HOSTS) rather than an SSH target.
 
 fn resolve_host(name: &str) -> Result<orrch_core::remote::RemoteHost, String> {
     orrch_core::remote::known_hosts()
@@ -2323,9 +2444,7 @@ async fn remote_kill_session(args: &Value) -> String {
 
 /// Strip markdown formatting: **bold**, `backticks`, leading #, bullet markers.
 fn strip_md(s: &str) -> String {
-    s.replace("**", "")
-        .replace('`', "")
-        .replace("\\*", "*")
+    s.replace("**", "").replace('`', "").replace("\\*", "*")
 }
 
 /// Extract file paths from a line. Matches crates/…, src/…, library/…, agents/…, etc.
@@ -2351,7 +2470,10 @@ fn compress_agent_output(output: &str) -> String {
     // Pattern: lines containing a file path followed by a separator and description
     // Matches: "- path/file.rs — Added foo()", "path/file.rs: description", "Modified: path"
     for line in &lines {
-        let trimmed = line.trim().trim_start_matches("- ").trim_start_matches("* ");
+        let trimmed = line
+            .trim()
+            .trim_start_matches("- ")
+            .trim_start_matches("* ");
         let paths = extract_paths(trimmed);
         if paths.is_empty() {
             continue;
@@ -2364,16 +2486,26 @@ fn compress_agent_output(output: &str) -> String {
 
             // Try to extract description after the path
             let desc = if let Some(after) = trimmed.split(path).nth(1) {
-                let after = after.trim().trim_start_matches("—").trim_start_matches("--")
-                    .trim_start_matches(':').trim_start_matches(',').trim();
-                if after.is_empty() { String::new() } else { after.to_string() }
+                let after = after
+                    .trim()
+                    .trim_start_matches("—")
+                    .trim_start_matches("--")
+                    .trim_start_matches(':')
+                    .trim_start_matches(',')
+                    .trim();
+                if after.is_empty() {
+                    String::new()
+                } else {
+                    after.to_string()
+                }
             } else {
                 String::new()
             };
 
             // Classify as Created or Modified
             let lower = trimmed.to_lowercase();
-            let verb = if lower.contains("creat") || lower.contains("new file")
+            let verb = if lower.contains("creat")
+                || lower.contains("new file")
                 || lower.contains("added file")
             {
                 "Created"
@@ -2389,19 +2521,55 @@ fn compress_agent_output(output: &str) -> String {
     // ── 2. Extract change descriptions ──────────────────────────────
     // Lines that describe what was done, not just file paths
     let change_verbs = [
-        "add", "implement", "introduc", "creat", "wire", "hook", "bind",
-        "extend", "expand", "replac", "refactor", "renam", "remov", "delet",
-        "updat", "convert", "migrat", "integrat", "support", "enabl", "show",
-        "render", "display", "handl", "track", "persist", "configur", "spawn",
-        "dispatch", "inject", "pars", "extract", "validat", "check", "block",
-        "reject", "auto-clos", "auto-reopen", "throttl",
+        "add",
+        "implement",
+        "introduc",
+        "creat",
+        "wire",
+        "hook",
+        "bind",
+        "extend",
+        "expand",
+        "replac",
+        "refactor",
+        "renam",
+        "remov",
+        "delet",
+        "updat",
+        "convert",
+        "migrat",
+        "integrat",
+        "support",
+        "enabl",
+        "show",
+        "render",
+        "display",
+        "handl",
+        "track",
+        "persist",
+        "configur",
+        "spawn",
+        "dispatch",
+        "inject",
+        "pars",
+        "extract",
+        "validat",
+        "check",
+        "block",
+        "reject",
+        "auto-clos",
+        "auto-reopen",
+        "throttl",
     ];
 
     let mut changes: Vec<String> = Vec::new();
     for line in &lines {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("```")
-            || trimmed.starts_with("---") || trimmed.starts_with('|')
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with("```")
+            || trimmed.starts_with("---")
+            || trimmed.starts_with('|')
         {
             continue;
         }
@@ -2409,7 +2577,7 @@ fn compress_agent_output(output: &str) -> String {
         let lower = trimmed.to_lowercase();
 
         // Skip lines that are just file paths with no description
-        if extract_paths(trimmed).len() > 0 && trimmed.len() < 60 {
+        if !extract_paths(trimmed).is_empty() && trimmed.len() < 60 {
             continue;
         }
 
@@ -2420,13 +2588,18 @@ fn compress_agent_output(output: &str) -> String {
         }
 
         // Skip lines that are clearly section headers or noise
-        if lower.starts_with("files") || lower.starts_with("status")
-            || lower.starts_with("build") || lower.starts_with("test")
+        if lower.starts_with("files")
+            || lower.starts_with("status")
+            || lower.starts_with("build")
+            || lower.starts_with("test")
         {
             continue;
         }
 
-        let entry = trimmed.trim_start_matches("- ").trim_start_matches("* ").to_string();
+        let entry = trimmed
+            .trim_start_matches("- ")
+            .trim_start_matches("* ")
+            .to_string();
         if entry.len() > 15 && entry.len() < 300 && !changes.contains(&entry) {
             changes.push(entry);
         }
@@ -2439,14 +2612,18 @@ fn compress_agent_output(output: &str) -> String {
     let test_status = extract_test_status(&lines);
 
     // ── 4. Extract issues/concerns ──────────────────────────────────
-    let issue_keywords = ["concern", "warning:", "issue:", "bug:", "blocker",
-        "todo:", "fixme:", "note:", "error:", "panic", "unwrap"];
+    let issue_keywords = [
+        "concern", "warning:", "issue:", "bug:", "blocker", "todo:", "fixme:", "note:", "error:",
+        "panic", "unwrap",
+    ];
     let mut issues: Vec<String> = Vec::new();
     for line in &lines {
         let lower = line.to_lowercase();
         // Skip code lines
-        if line.trim().starts_with("//") || line.trim().starts_with("use ")
-            || line.trim().starts_with("mod ") || line.trim().starts_with("#[")
+        if line.trim().starts_with("//")
+            || line.trim().starts_with("use ")
+            || line.trim().starts_with("mod ")
+            || line.trim().starts_with("#[")
         {
             continue;
         }
@@ -2508,19 +2685,27 @@ fn extract_build_status(lines: &[&str]) -> String {
     // Look for cargo build output or narrative statements
     for line in lines.iter().rev() {
         let lower = line.to_lowercase();
-        if lower.contains("error[e") || lower.contains("error:") && lower.contains("could not compile") {
+        if lower.contains("error[e")
+            || lower.contains("error:") && lower.contains("could not compile")
+        {
             return format!("FAIL — {}", line.trim());
         }
     }
     for line in lines.iter().rev() {
         let lower = line.to_lowercase();
-        if lower.contains("finished") && (lower.contains("dev") || lower.contains("release") || lower.contains("test")) {
+        if lower.contains("finished")
+            && (lower.contains("dev") || lower.contains("release") || lower.contains("test"))
+        {
             return "pass".into();
         }
-        if lower.contains("build") && (lower.contains("pass") || lower.contains("succeed") || lower.contains("clean")) {
+        if lower.contains("build")
+            && (lower.contains("pass") || lower.contains("succeed") || lower.contains("clean"))
+        {
             return "pass".into();
         }
-        if lower.contains("compil") && (lower.contains("clean") || lower.contains("succeed") || lower.contains("success")) {
+        if lower.contains("compil")
+            && (lower.contains("clean") || lower.contains("succeed") || lower.contains("success"))
+        {
             return "pass".into();
         }
     }
@@ -2549,9 +2734,7 @@ fn extract_test_status(lines: &[&str]) -> String {
     // Narrative fallback: "All tests pass", "138 tests pass", "Tests: 90 pass"
     for line in lines.iter().rev() {
         let lower = line.to_lowercase();
-        if (lower.contains("test") && lower.contains("pass"))
-            || lower.contains("test result")
-        {
+        if (lower.contains("test") && lower.contains("pass")) || lower.contains("test result") {
             return line.trim().to_string();
         }
     }
@@ -2574,15 +2757,11 @@ fn extract_pub_api(content: &str) -> String {
     let pub_item = PUB_ITEM.get_or_init(|| {
         Regex::new(r"^\s*pub\s+(fn|struct|enum|const|static|type|mod|trait)\s+(\w+)").unwrap()
     });
-    let field_line = FIELD_LINE.get_or_init(|| {
-        Regex::new(r"^\s+pub\s+(\w+)\s*:").unwrap()
-    });
-    let variant_line = VARIANT_LINE.get_or_init(|| {
-        Regex::new(r"^\s+([A-Z][A-Za-z0-9_]*)\s*[,\{(]?$").unwrap()
-    });
-    let color_rgb = COLOR_RGB.get_or_init(|| {
-        Regex::new(r"(?:const\s+\w+.*Rgb|Color::Rgb\s*\()").unwrap()
-    });
+    let field_line = FIELD_LINE.get_or_init(|| Regex::new(r"^\s+pub\s+(\w+)\s*:").unwrap());
+    let variant_line =
+        VARIANT_LINE.get_or_init(|| Regex::new(r"^\s+([A-Z][A-Za-z0-9_]*)\s*[,\{(]?$").unwrap());
+    let color_rgb =
+        COLOR_RGB.get_or_init(|| Regex::new(r"(?:const\s+\w+.*Rgb|Color::Rgb\s*\()").unwrap());
 
     let lines: Vec<&str> = content.lines().collect();
     let n = lines.len();
@@ -2658,9 +2837,7 @@ fn extract_pub_api(content: &str) -> String {
                                 break;
                             }
                             if let Some(fcap) = field_line.captures(cont) {
-                                fields.push(
-                                    fcap.get(1).map_or("", |m| m.as_str()).to_string(),
-                                );
+                                fields.push(fcap.get(1).map_or("", |m| m.as_str()).to_string());
                             }
                             j += 1;
                         }
@@ -2668,10 +2845,8 @@ fn extract_pub_api(content: &str) -> String {
                             structs.push(format!("struct {name} {{ ... }}"));
                         } else if fields.len() > 8 {
                             let preview: Vec<_> = fields[..6].to_vec();
-                            structs.push(format!(
-                                "struct {name} {{ {}, ... }}",
-                                preview.join(", ")
-                            ));
+                            structs
+                                .push(format!("struct {name} {{ {}, ... }}", preview.join(", ")));
                         } else {
                             structs.push(format!("struct {name} {{ {} }}", fields.join(", ")));
                         }
@@ -2687,9 +2862,7 @@ fn extract_pub_api(content: &str) -> String {
                             break;
                         }
                         if let Some(vcap) = variant_line.captures(cont) {
-                            variants.push(
-                                vcap.get(1).map_or("", |m| m.as_str()).to_string(),
-                            );
+                            variants.push(vcap.get(1).map_or("", |m| m.as_str()).to_string());
                         }
                         j += 1;
                     }
@@ -2802,14 +2975,12 @@ fn extract_cargo_deps(toml_content: &str) -> Vec<String> {
         if trimmed.starts_with('[') {
             in_deps = false;
         }
-        if in_deps {
-            if let Some(raw_key) = trimmed.split('=').next() {
-                // Strip workspace-style suffix: "tokio.workspace" → "tokio"
-                let key = raw_key.trim().trim_matches('"');
-                let key = key.split('.').next().unwrap_or(key).trim();
-                if !key.is_empty() && !key.starts_with('#') {
-                    deps.push(key.to_string());
-                }
+        if in_deps && let Some(raw_key) = trimmed.split('=').next() {
+            // Strip workspace-style suffix: "tokio.workspace" → "tokio"
+            let key = raw_key.trim().trim_matches('"');
+            let key = key.split('.').next().unwrap_or(key).trim();
+            if !key.is_empty() && !key.starts_with('#') {
+                deps.push(key.to_string());
             }
         }
     }
@@ -2911,7 +3082,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 // ─── Library creation tools ─────────────────────────────────────────────────
@@ -2930,20 +3101,29 @@ fn create_library_entry(server: &OrrchMcpServer, args: &Value, kind: &str) -> St
         Some(n) if !n.is_empty() => n,
         _ => return "Error: 'name' parameter is required".into(),
     };
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Sanitize name for use as a filename stem.
     let safe_name: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     let (template, subdir): (&str, &str) = match kind {
-        "agent"    => (CRT_AGENT_TEMPLATE, "agents"),
-        "skill"    => (CRT_SKILL_TEMPLATE, "library/skills"),
-        "tool"     => (CRT_TOOL_TEMPLATE, "library/tools"),
+        "agent" => (CRT_AGENT_TEMPLATE, "agents"),
+        "skill" => (CRT_SKILL_TEMPLATE, "library/skills"),
+        "tool" => (CRT_TOOL_TEMPLATE, "library/tools"),
         "workflow" => (CRT_WORKFORCE_TEMPLATE, "workforces"),
-        other      => return format!("Error: unknown kind '{other}'"),
+        other => return format!("Error: unknown kind '{other}'"),
     };
 
     // Inject name and optional description into the template. Templates
@@ -2962,7 +3142,9 @@ fn create_library_entry(server: &OrrchMcpServer, args: &Value, kind: &str) -> St
         }
     }
 
-    let dir = server.agents_dir.parent()
+    let dir = server
+        .agents_dir
+        .parent()
         .unwrap_or(&server.agents_dir)
         .join(subdir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -3001,7 +3183,8 @@ mod tests {
 
     #[test]
     fn test_extract_frontmatter_field_folded() {
-        let content = "---\ndescription: >\n  This is a long\n  description text\nrole: Test\n---\n\nBody";
+        let content =
+            "---\ndescription: >\n  This is a long\n  description text\nrole: Test\n---\n\nBody";
         assert_eq!(
             extract_frontmatter_field(content, "description"),
             Some("This is a long description text".into())
@@ -3086,7 +3269,10 @@ mod tests {
         let server = OrrchMcpServer::from_defaults();
         let args = serde_json::json!({"name": "../../../etc/passwd"});
         let result = skill_invoke(&server, &args);
-        assert!(result.starts_with("Error:"), "should reject traversal: {result}");
+        assert!(
+            result.starts_with("Error:"),
+            "should reject traversal: {result}"
+        );
     }
 
     #[test]
@@ -3120,16 +3306,31 @@ mod tests {
 
     #[test]
     fn test_resolve_host_known() {
-        // Should find orrpheus (defined in orrch_core::remote::known_hosts).
-        let host = resolve_host("orrpheus").expect("orrpheus in known_hosts");
-        assert_eq!(host.name, "orrpheus");
+        // known_hosts() reads ORRCH_REMOTE_HOSTS; seed it for this test.
+        // SAFETY: single-threaded test; restore the prior value after.
+        let prev = std::env::var("ORRCH_REMOTE_HOSTS").ok();
+        unsafe {
+            std::env::set_var("ORRCH_REMOTE_HOSTS", "buildbox=me@buildbox.local");
+        }
+        let host = resolve_host("buildbox").expect("buildbox in known_hosts");
+        assert_eq!(host.name, "buildbox");
+        assert_eq!(host.ssh_target, "me@buildbox.local");
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("ORRCH_REMOTE_HOSTS", v),
+                None => std::env::remove_var("ORRCH_REMOTE_HOSTS"),
+            }
+        }
     }
 
     #[test]
     fn test_tool_definitions_have_schemas() {
         for tool in tool_definitions() {
             assert!(tool.get("name").is_some(), "tool missing name");
-            assert!(tool.get("description").is_some(), "tool missing description");
+            assert!(
+                tool.get("description").is_some(),
+                "tool missing description"
+            );
             let schema = tool.get("inputSchema").expect("tool missing inputSchema");
             assert_eq!(schema["type"], "object");
         }
@@ -3276,7 +3477,9 @@ mod tests {
         });
 
         // Wait until the server is bound and listening before connecting.
-        ready_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("server did not become ready");
+        ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("server did not become ready");
 
         // timeout_ms=0 → client read_timeout = 2 s. The call blocks ~2 s then
         // unblocks with the graceful message.
@@ -3298,11 +3501,21 @@ mod tests {
         // Case 1: query field absent.
         let result = rt.block_on(dispatch(&server, "library_search", &serde_json::json!({})));
         assert!(result.starts_with("Error:"), "missing query: {result}");
-        assert!(result.contains("'query'"), "should mention param name: {result}");
+        assert!(
+            result.contains("'query'"),
+            "should mention param name: {result}"
+        );
         // Case 2: query field present but empty string.
-        let result2 = rt.block_on(dispatch(&server, "library_search", &serde_json::json!({"query": ""})));
+        let result2 = rt.block_on(dispatch(
+            &server,
+            "library_search",
+            &serde_json::json!({"query": ""}),
+        ));
         assert!(result2.starts_with("Error:"), "empty query: {result2}");
-        assert!(result2.contains("'query'"), "should mention param name: {result2}");
+        assert!(
+            result2.contains("'query'"),
+            "should mention param name: {result2}"
+        );
     }
 
     #[test]
@@ -3330,7 +3543,8 @@ mod tests {
     #[test]
     fn test_inbox_append_missing_project() {
         let server = OrrchMcpServer::from_defaults();
-        let args = serde_json::json!({"project": "nonexistent_project_xyz_123", "instructions": "test"});
+        let args =
+            serde_json::json!({"project": "nonexistent_project_xyz_123", "instructions": "test"});
         let result = inbox_append(&server, &args);
         assert!(result.starts_with("Error:"));
     }
@@ -3406,7 +3620,10 @@ pub mod inner;
 "#;
         let api = extract_pub_api(src);
         assert!(api.contains("struct Foo"), "missing struct Foo: {api}");
-        assert!(api.contains("name") || api.contains("count"), "missing fields: {api}");
+        assert!(
+            api.contains("name") || api.contains("count"),
+            "missing fields: {api}"
+        );
         assert!(api.contains("enum Bar"), "missing enum Bar: {api}");
         assert!(api.contains("Alpha"), "missing variant Alpha: {api}");
         assert!(api.contains("do_thing"), "missing fn: {api}");
@@ -3444,26 +3661,52 @@ pub mod inner;
 "#;
         let result = compress_agent_output(input);
         // Should detect files
-        assert!(result.contains("crates/orrch-library/src/model.rs"), "missing model.rs: {result}");
-        assert!(result.contains("crates/orrch-core/src/backend.rs"), "missing backend.rs: {result}");
-        assert!(result.contains("crates/orrch-core/src/usage.rs"), "missing usage.rs: {result}");
-        assert!(result.contains("crates/orrch-tui/src/app.rs"), "missing app.rs: {result}");
+        assert!(
+            result.contains("crates/orrch-library/src/model.rs"),
+            "missing model.rs: {result}"
+        );
+        assert!(
+            result.contains("crates/orrch-core/src/backend.rs"),
+            "missing backend.rs: {result}"
+        );
+        assert!(
+            result.contains("crates/orrch-core/src/usage.rs"),
+            "missing usage.rs: {result}"
+        );
+        assert!(
+            result.contains("crates/orrch-tui/src/app.rs"),
+            "missing app.rs: {result}"
+        );
         // Should have descriptions
         assert!(result.contains("Added"), "missing change verb: {result}");
         // Should detect created file
-        assert!(result.contains("Created") && result.contains("usage.rs"),
-            "should detect new file: {result}");
+        assert!(
+            result.contains("Created") && result.contains("usage.rs"),
+            "should detect new file: {result}"
+        );
         // Should extract test status
-        assert!(result.contains("90") || result.contains("pass"), "missing test status: {result}");
+        assert!(
+            result.contains("90") || result.contains("pass"),
+            "missing test status: {result}"
+        );
         // Changes section should not be empty
-        assert!(!result.contains("### Changes\n(none detected)"), "changes should not be empty: {result}");
+        assert!(
+            !result.contains("### Changes\n(none detected)"),
+            "changes should not be empty: {result}"
+        );
     }
 
     #[test]
     fn test_compress_minimal_input() {
         let result = compress_agent_output("Just some text with no structured content.");
-        assert!(result.contains("## Compressed Output"), "missing header: {result}");
-        assert!(result.contains("(none detected)"), "should have none detected: {result}");
+        assert!(
+            result.contains("## Compressed Output"),
+            "missing header: {result}"
+        );
+        assert!(
+            result.contains("(none detected)"),
+            "should have none detected: {result}"
+        );
     }
 
     #[test]
@@ -3475,11 +3718,23 @@ pub mod inner;
             Build: passes. Tests: 138 pass.\n";
         let result = compress_agent_output(input);
         // Should capture per-file descriptions
-        assert!(result.contains("plan_parser.rs"), "missing plan_parser.rs: {result}");
-        assert!(result.contains("MoveDirection"), "missing description: {result}");
-        assert!(result.contains("draw_add_feature"), "missing ui desc: {result}");
+        assert!(
+            result.contains("plan_parser.rs"),
+            "missing plan_parser.rs: {result}"
+        );
+        assert!(
+            result.contains("MoveDirection"),
+            "missing description: {result}"
+        );
+        assert!(
+            result.contains("draw_add_feature"),
+            "missing ui desc: {result}"
+        );
         // Should find test status
-        assert!(result.contains("138") || result.contains("pass"), "missing tests: {result}");
+        assert!(
+            result.contains("138") || result.contains("pass"),
+            "missing tests: {result}"
+        );
     }
 
     #[test]
@@ -3521,10 +3776,14 @@ pub mod inner;
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         let cases = [
-            ("create_agent",    "my_agent",    "agents/my_agent.md"),
-            ("create_skill",    "my_skill",    "library/skills/my_skill.md"),
-            ("create_tool",     "my_tool",     "library/tools/my_tool.md"),
-            ("create_workflow", "my_workflow", "workforces/my_workflow.md"),
+            ("create_agent", "my_agent", "agents/my_agent.md"),
+            ("create_skill", "my_skill", "library/skills/my_skill.md"),
+            ("create_tool", "my_tool", "library/tools/my_tool.md"),
+            (
+                "create_workflow",
+                "my_workflow",
+                "workforces/my_workflow.md",
+            ),
         ];
 
         for (tool, name, rel) in cases {
@@ -3536,8 +3795,14 @@ pub mod inner;
             assert!(path.exists(), "{tool}: expected file {}", path.display());
             let content = std::fs::read_to_string(&path).unwrap();
             assert!(content.starts_with("---\n"), "{tool}: missing frontmatter");
-            assert!(content.contains(&format!("name: {name}")), "{tool}: name not injected: {content}");
-            assert!(content.contains("description: test desc"), "{tool}: description not injected: {content}");
+            assert!(
+                content.contains(&format!("name: {name}")),
+                "{tool}: name not injected: {content}"
+            );
+            assert!(
+                content.contains("description: test desc"),
+                "{tool}: description not injected: {content}"
+            );
         }
 
         let _ = std::fs::remove_dir_all(&root);
@@ -3581,7 +3846,10 @@ pub mod inner;
         let first = create_library_entry(&server, &args, "tool");
         assert!(first.starts_with("Created:"), "first: {first}");
         let second = create_library_entry(&server, &args, "tool");
-        assert!(second.starts_with("Error:"), "second should refuse overwrite: {second}");
+        assert!(
+            second.starts_with("Error:"),
+            "second should refuse overwrite: {second}"
+        );
         assert!(second.contains("already exists"), "second: {second}");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3602,7 +3870,12 @@ pub mod inner;
             .iter()
             .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
             .collect();
-        for expected in ["create_agent", "create_skill", "create_tool", "create_workflow"] {
+        for expected in [
+            "create_agent",
+            "create_skill",
+            "create_tool",
+            "create_workflow",
+        ] {
             assert!(
                 names.iter().any(|n| n == expected),
                 "missing tool '{expected}' in {names:?}"
@@ -3616,37 +3889,87 @@ pub mod inner;
             .iter()
             .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))
             .collect();
-        assert!(names.iter().any(|n| n == "infra_placement"),
-            "missing infra_placement in {names:?}");
+        assert!(
+            names.iter().any(|n| n == "infra_placement"),
+            "missing infra_placement in {names:?}"
+        );
     }
 
+    // Self-contained placement folding — inline TOML, no filesystem, no real
+    // fleet. Mirrors the allow/deny shape in infra/topology.example.toml.
+    const SAMPLE_TOPOLOGY: &str = r#"
+schema_version = 1
+
+[hosts.app-1]
+role = "Primary application host."
+
+[hosts.storage-1]
+role = "NAS / data bank. Storage only."
+
+[[services.webapp.allow]]
+host = "app-1"
+mode = "docker-image"
+dir  = "/opt/stacks/webapp"
+
+[[services.webapp.deny]]
+host   = "app-1"
+mode   = "source-build"
+reason = "Compiled target/ trees would fill app-1's shared root volume."
+
+[[services.webapp.deny]]
+host   = "storage-1"
+mode   = "any"
+reason = "storage-1 is a NAS, never a compute host."
+"#;
+
     #[test]
-    fn test_infra_placement_concord_orrgate() {
-        // Requires the real infra/topology.toml under ~/projects/orrchestrator.
-        let server = OrrchMcpServer::from_defaults();
-        if find_topology_path(&server).is_none() {
-            eprintln!("skipping: topology.toml not found in this environment");
-            return;
-        }
+    fn test_infra_placement_folding() {
+        // source-build on app-1 → DENY with the disk-fill reason.
+        let deny = fold_placement(
+            SAMPLE_TOPOLOGY,
+            "sample",
+            "webapp",
+            "app-1",
+            Some("source-build"),
+        );
+        assert!(
+            deny.contains("VERDICT: DENY"),
+            "expected DENY, got:\n{deny}"
+        );
+        assert!(
+            deny.to_lowercase().contains("root volume") || deny.to_lowercase().contains("target/"),
+            "expected disk-fill reason, got:\n{deny}"
+        );
 
-        // source-build on orrgate → DENY with the disk-fill reason.
-        let deny = infra_placement(&server, &serde_json::json!({
-            "service": "concord", "host": "orrgate", "mode": "source-build"
-        }));
-        assert!(deny.contains("VERDICT: DENY"), "expected DENY, got:\n{deny}");
-        assert!(deny.to_lowercase().contains("disk") || deny.to_lowercase().contains("root lv"),
-            "expected disk-fill reason, got:\n{deny}");
+        // docker-image on app-1 → ALLOW.
+        let allow = fold_placement(
+            SAMPLE_TOPOLOGY,
+            "sample",
+            "webapp",
+            "app-1",
+            Some("docker-image"),
+        );
+        assert!(
+            allow.contains("VERDICT: ALLOW"),
+            "expected ALLOW, got:\n{allow}"
+        );
 
-        // docker-image on orrgate → ALLOW.
-        let allow = infra_placement(&server, &serde_json::json!({
-            "service": "concord", "host": "orrgate", "mode": "docker-image"
-        }));
-        assert!(allow.contains("VERDICT: ALLOW"), "expected ALLOW, got:\n{allow}");
+        // storage-1 (any mode) → NOT PLACEABLE.
+        let storage = fold_placement(SAMPLE_TOPOLOGY, "sample", "webapp", "storage-1", None);
+        assert!(
+            storage.contains("NOT PLACEABLE"),
+            "expected NOT PLACEABLE, got:\n{storage}"
+        );
 
-        // orrigins (storage) → NOT PLACEABLE in any mode.
-        let storage = infra_placement(&server, &serde_json::json!({
-            "service": "concord", "host": "orrigins"
-        }));
-        assert!(storage.contains("NOT PLACEABLE"), "expected NOT PLACEABLE, got:\n{storage}");
+        // Unknown service → lists known services.
+        let unknown = fold_placement(SAMPLE_TOPOLOGY, "sample", "nope", "app-1", None);
+        assert!(
+            unknown.contains("NOT FOUND"),
+            "expected NOT FOUND, got:\n{unknown}"
+        );
+        assert!(
+            unknown.contains("webapp"),
+            "should list known service webapp, got:\n{unknown}"
+        );
     }
 }

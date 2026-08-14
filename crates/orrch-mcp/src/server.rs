@@ -23,7 +23,7 @@ pub struct OrrchMcpServer {
 impl OrrchMcpServer {
     /// Build from conventional default paths.
     pub fn from_defaults() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         let projects_dir = PathBuf::from(&home).join("projects");
         let orrch_dir = projects_dir.join("orrchestrator");
         let library_dir = orrch_dir.join("library");

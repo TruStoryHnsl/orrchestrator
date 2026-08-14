@@ -1,6 +1,5 @@
 # Rust
 /target/
-Cargo.lock
 
 # Python prototype (archived)
 python-prototype/venv/
@@ -65,3 +64,15 @@ plans/*.rescued.*
 .session-logs/
 .superpowers/
 docs/superpowers/
+
+# Local-only infra manifest + generated guard data (see infra/topology.example.toml)
+/infra/topology.toml
+/infra/generated/
+
+# Local .cargo/config.toml (copy from .cargo/config.toml.example to enable mold/clang)
+/.cargo/config.toml
+
+# Runtime / scratch process artifacts (never in the public repo)
+.playwright-mcp/
+.superpowers/
+plans/

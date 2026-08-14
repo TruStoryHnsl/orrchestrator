@@ -1,0 +1,98 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  INFRA TOPOLOGY — SINGLE SOURCE OF TRUTH for machine + service placement
+# ═══════════════════════════════════════════════════════════════════════════
+#
+#  Copy this file to `topology.toml` and edit it to describe YOUR fleet:
+#
+#      cp topology.example.toml topology.toml
+#
+#  `topology.toml` is authoritative and gitignored (it describes your real
+#  hosts). Everything that encodes "what runs where" is GENERATED from it and
+#  must never be hand-edited:
+#
+#     topology.toml  (you edit here)
+#        │  infra/gen.py --all  ▼
+#        ├─ infra/generated/<host>.placement.json   per-host guard data
+#        └─ the PreToolUse hook (infra/placement-guard.py) reads the host file
+#           and HARD-BLOCKS a deploy that violates a rule.
+#
+#  Query it live:  MCP tool  mcp__orrchestrator__infra_placement
+#                  { "service": "webapp", "host": "app-1", "mode": "docker-image" }
+#
+#  Why this exists: ad-hoc hard-blockers (scattered `.no-<svc>` marker files,
+#  hardcoded forbidden-host arrays, out-of-date docs) proliferate because the
+#  policy is duplicated in many places, and agents only trip over it at deploy
+#  time. One manifest → one truth → generated guards that cannot drift.
+
+schema_version = 1
+
+# ─── Machines ──────────────────────────────────────────────────────────────
+# Describe each host you deploy to. `lan_ip` / `vpn_ip` are optional and only
+# used so the guard can resolve `ssh <ip>` targets back to a host name.
+
+[hosts.app-1]
+hostname     = "app-1"
+lan_ip       = "10.0.0.11"
+role         = "Primary application host — runs the web app + API as containers."
+public_edge  = true
+edge         = "reverse-proxy"          # owns :80/:443, terminates TLS, routes by hostname
+root_lv_note = "Root volume is shared with the database — a disk-fill here takes down production. Image deploys only for heavy services."
+
+[hosts.build-1]
+hostname     = "build-1"
+lan_ip       = "10.0.0.21"
+role         = "Build/dev box — compiles release artifacts. Not a production host."
+public_edge  = false
+
+[hosts.storage-1]
+hostname     = "storage-1"
+lan_ip       = "10.0.0.31"
+role         = "NAS / data bank. Storage only — never a compute host."
+public_edge  = false
+
+# ─── Services ──────────────────────────────────────────────────────────────
+# For each service:
+#   [[services.<name>.allow]]  — a sanctioned placement (host + mode + dir + ingress)
+#   [[services.<name>.deny]]   — an explicit forbidden (host + mode + reason)
+# Any (host, mode) not in `allow` is DENIED by default. `deny` entries exist to
+# carry a specific human reason for the common wrong moves.
+#
+# modes: docker-image (load a prebuilt image + data, no build)
+#        source-build  (git checkout + compile in place — heavy: large target/ trees)
+#        source-dev    (dev checkout, run from source)
+
+[[services.webapp.allow]]
+host    = "app-1"
+mode    = "docker-image"
+dir     = "/opt/stacks/webapp"
+ingress = "reverse-proxy host -> https://10.0.0.11:8443; public hostname via DNS."
+note    = "Production. Ship a prebuilt image; never build here."
+
+[[services.webapp.allow]]
+host    = "build-1"
+mode    = "source-dev"
+dir     = "~/projects/webapp"
+ingress = "local dev on :8080, no TLS."
+note    = "Development only — builds happen here."
+
+[[services.webapp.deny]]
+host   = "app-1"
+mode   = "source-build"
+reason = "Compiled target/ trees can reach several GB across cross-targets and would fill app-1's shared root volume — the exact failure that took production down before. docker-image mode IS allowed here; source builds are NOT. Build on build-1, ship the image."
+
+[[services.webapp.deny]]
+host   = "storage-1"
+mode   = "any"
+reason = "storage-1 is a NAS, never a compute host."
+
+[[services.database.allow]]
+host    = "app-1"
+mode    = "docker-image"
+dir     = "/opt/stacks/database"
+ingress = "internal only — not exposed through the edge."
+note    = "Managed data volume; back up before any recreate."
+
+[[services.database.deny]]
+host   = "build-1"
+mode   = "any"
+reason = "The database is production state and must not run on the ephemeral build box."

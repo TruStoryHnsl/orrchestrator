@@ -366,10 +366,11 @@ pub fn lint_plan(content: &str) -> Vec<String> {
         }
 
         if region != RoadmapRegion::Outside {
-            if current_phase.is_some() && try_parse_feature_line(trimmed).is_some() {
-                if let Some((_, count)) = current_phase.as_mut() {
-                    *count += 1;
-                }
+            if current_phase.is_some()
+                && try_parse_feature_line(trimmed).is_some()
+                && let Some((_, count)) = current_phase.as_mut()
+            {
+                *count += 1;
             }
         } else if is_numbered_list_line(trimmed) {
             let heading = non_roadmap_heading.as_deref().unwrap_or("document");
@@ -391,10 +392,10 @@ pub fn lint_plan(content: &str) -> Vec<String> {
 }
 
 fn flush_lint_phase(warnings: &mut Vec<String>, current_phase: &mut Option<(String, usize)>) {
-    if let Some((phase_name, feature_count)) = current_phase.take() {
-        if feature_count == 0 {
-            warnings.push(format!("phase '{phase_name}' has 0 features"));
-        }
+    if let Some((phase_name, feature_count)) = current_phase.take()
+        && feature_count == 0
+    {
+        warnings.push(format!("phase '{phase_name}' has 0 features"));
     }
 }
 
@@ -414,10 +415,10 @@ enum RoadmapRegion {
 }
 
 fn flush_phase(phases: &mut Vec<PlanPhase>, current_phase: &mut Option<PlanPhase>) {
-    if let Some(p) = current_phase.take() {
-        if !p.features.is_empty() {
-            phases.push(p);
-        }
+    if let Some(p) = current_phase.take()
+        && !p.features.is_empty()
+    {
+        phases.push(p);
     }
 }
 
@@ -593,13 +594,12 @@ fn try_parse_feature_line(line: &str) -> Option<PlanFeature> {
     }
 
     // Override status for deprecated/deferred items (text-based detection)
-    if status == FeatureStatus::Planned {
-        if description.to_uppercase().contains("DEPRECATED")
+    if status == FeatureStatus::Planned
+        && (description.to_uppercase().contains("DEPRECATED")
             || description.contains("MOVED")
-            || title.to_uppercase().contains("DEPRECATED")
-        {
-            status = FeatureStatus::Deprecated;
-        }
+            || title.to_uppercase().contains("DEPRECATED"))
+    {
+        status = FeatureStatus::Deprecated;
     }
 
     // `[v]` is the only parser path that produces Verified, so any Verified
@@ -723,16 +723,15 @@ fn strip_feature_prefix(line: &str) -> Option<(Option<u32>, &str)> {
 
 /// Parse "**Title** — description" or "**Title** description" patterns.
 fn parse_title_description(text: &str) -> (String, String) {
-    if text.starts_with("**") {
-        let after_open = &text[2..];
-        if let Some(close_pos) = after_open.find("**") {
-            let title = after_open[..close_pos].to_string();
-            let desc = after_open[close_pos + 2..]
-                .trim_start_matches(|c: char| c == ' ' || c == '—' || c == '-' || c == '–')
-                .trim()
-                .to_string();
-            return (title, desc);
-        }
+    if let Some(after_open) = text.strip_prefix("**")
+        && let Some(close_pos) = after_open.find("**")
+    {
+        let title = after_open[..close_pos].to_string();
+        let desc = after_open[close_pos + 2..]
+            .trim_start_matches([' ', '—', '-', '–'])
+            .trim()
+            .to_string();
+        return (title, desc);
     }
 
     // Fallback: split on em-dash
@@ -1171,10 +1170,12 @@ mod tests {
             .find(|p| p.name.contains("Shell"))
             .expect("Phase 1 not found");
         assert_eq!(phase1.features.len(), 3);
-        assert!(phase1
-            .features
-            .iter()
-            .all(|f| f.status == FeatureStatus::Planned));
+        assert!(
+            phase1
+                .features
+                .iter()
+                .all(|f| f.status == FeatureStatus::Planned)
+        );
     }
 
     #[test]
@@ -1311,9 +1312,11 @@ mod tests {
 "#,
         );
 
-        assert!(warnings
-            .iter()
-            .any(|warning| warning == "no roadmap region found"));
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "no roadmap region found")
+        );
         assert!(warnings.iter().any(|warning| warning.contains(
             "numbered list under non-roadmap heading 'Native UI Rebuild Decisions' ignored"
         )));
@@ -1331,16 +1334,20 @@ mod tests {
 "#,
         );
 
-        assert!(warnings
-            .iter()
-            .any(|warning| warning == "phase 'Empty' has 0 features"));
-        assert!(!warnings
-            .iter()
-            .any(|warning| warning == "phase 'Work' has 0 features"));
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning == "phase 'Empty' has 0 features")
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|warning| warning == "phase 'Work' has 0 features")
+        );
     }
 
     #[test]
-    fn fixture_concord_open_conflicts_not_scooped() {
+    fn fixture_chatapp_open_conflicts_not_scooped() {
         let open_conflicts = r#"# Concord — Master Development Plan
 
 ## Open Conflicts
@@ -1367,14 +1374,16 @@ mod tests {
         let phases = parse_plan(&format!("{open_conflicts}\n{roadmap}"));
         assert_eq!(phases.len(), 1);
         assert_eq!(feature_count(&phases), 3);
-        assert!(!phases[0]
-            .features
-            .iter()
-            .any(|feature| feature.title.contains("Toolkit selection")));
+        assert!(
+            !phases[0]
+                .features
+                .iter()
+                .any(|feature| feature.title.contains("Toolkit selection"))
+        );
     }
 
     #[test]
-    fn fixture_orrapus_done_and_planned_are_phases() {
+    fn fixture_sampleapp_done_and_planned_are_phases() {
         let content = r#"## Feature Roadmap
 
 ### Done
@@ -1384,11 +1393,11 @@ mod tests {
 
 ### Planned
 
-#### INS-001: Create omnipus repo for parallel development
-- [x] Create a separate private GitHub repo for omnipus (`TruStoryHnsl/omnipus`)
-- [x] No changes land on orrapus main until GLSR is proven stable and cbsr is fully replaceable
-- [x] omnipus is its own independent application (Rust successor), not a fork — integration points wired in omnipus repo directly
-- [x] GLSR code and cbsr replacement live in omnipus repo
+#### INS-001: Create nextapp repo for parallel development
+- [x] Create a separate private GitHub repo for nextapp (`example-org/nextapp`)
+- [x] No changes land on sampleapp main until feature-g is proven stable and recorder is fully replaceable
+- [x] nextapp is its own independent application (Rust successor), not a fork — integration points wired in nextapp repo directly
+- [x] feature-g code and recorder replacement live in nextapp repo
 "#;
         let phases = parse_plan(content);
         assert_eq!(phases.len(), 2);
@@ -1399,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    fn fixture_porrtfolio_fr_headings_are_phases() {
+    fn fixture_portfolio_fr_headings_are_phases() {
         let content = r#"## Feature Roadmap
 
 Build order is: bug fix first → schema refactor (foundation for everything
@@ -1409,7 +1418,7 @@ else) → individual entry types in dependency order → project workflow
 ### FR-001 — Fix de-dup merge 500
 - Status: `[x] done` (commit `9768ba1`, 2026-05-05)
 - Diagnose root cause via server logs, fix the merge handler in
-  `porrtfolio/web/routes.py` (and helpers), add a regression test that
+  `portfolio/web/routes.py` (and helpers), add a regression test that
   exercises the merge endpoint end-to-end and asserts non-500.
 - Source: INS-001.
 
@@ -1464,14 +1473,16 @@ New authenticated API at `/api/image/` for headless image generation:
         let phases = parse_plan(content);
         assert_eq!(phases.len(), 2);
         assert_eq!(feature_count(&phases), 9);
-        assert!(!phases
-            .iter()
-            .flat_map(|phase| phase.features.iter())
-            .any(|feature| feature.title.contains("POST /api/image/generate")));
+        assert!(
+            !phases
+                .iter()
+                .flat_map(|phase| phase.features.iter())
+                .any(|feature| feature.title.contains("POST /api/image/generate"))
+        );
     }
 
     #[test]
-    fn fixture_omnipus_tables_parse_without_architecture_leak() {
+    fn fixture_nextapp_tables_parse_without_architecture_leak() {
         let content = r#"## Architecture
 
 ### Key Design Decisions
@@ -1501,10 +1512,12 @@ The existing `.scope` file contains `public`. INS-001 explicitly requests `comme
         assert_eq!(phases.len(), 1);
         assert_eq!(phases[0].number, Some(1));
         assert_eq!(phases[0].features.len(), 3);
-        assert!(!phases[0]
-            .features
-            .iter()
-            .any(|feature| feature.title.contains("One library crate")));
+        assert!(
+            !phases[0]
+                .features
+                .iter()
+                .any(|feature| feature.title.contains("One library crate"))
+        );
     }
 
     #[test]
@@ -1537,7 +1550,8 @@ orrgent/
         // Em-dash is the title separator; a colon inside "(target: ...)" must not
         // be mistaken for it. Regression for orrgent phases like
         // "Phase 6 — Orrchestrator absorption (target: ongoing)".
-        let p = try_parse_phase_header("### Phase 6 — Orrchestrator absorption (target: ongoing)").unwrap();
+        let p = try_parse_phase_header("### Phase 6 — Orrchestrator absorption (target: ongoing)")
+            .unwrap();
         assert_eq!(p.name, "Orrchestrator absorption (target: ongoing)");
         assert_eq!(p.number, Some(6));
         // And a colon-style heading still works:

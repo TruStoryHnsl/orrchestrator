@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test + clippy + fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System deps (tmux for orrch-webui integration tests)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: cargo fmt --all --check
+      # Non-blocking: ~60 pre-existing clippy style lints remain after the
+      # auto-fixable ones were cleared. Flip to `-D warnings` (blocking)
+      # once that debt is paid down.
+      - run: cargo clippy --workspace --all-targets
+        continue-on-error: true
+      - run: cargo test --workspace
+      - name: Python infra guard self-test
+        run: |
+          cp infra/topology.example.toml infra/topology.toml
+          python3 infra/gen.py --all
+          python3 infra/test_guard.py
+
+  secret-scan:
+    name: gitleaks — full history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

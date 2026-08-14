@@ -1,8 +1,8 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 use crate::backend::BackendsConfig;
 use crate::project::Scope;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 /// Top-level orrchestrator configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub struct Config {
     #[serde(default = "default_projects_dir")]
     pub projects_dir: PathBuf,
     /// Hostname of the primary workstation. Sessions on this host show [P] badge; others show [C].
-    /// Defaults to "orrion" if not set.
+    /// Defaults to the local hostname if not set.
     #[serde(default)]
     pub primary_hostname: Option<String>,
     /// VIS-001: scopes whose projects are hidden from the Oversee project list.
@@ -59,13 +59,12 @@ impl Config {
         let config_path = config_dir().join("config.json");
 
         // Try new unified config
-        if config_path.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&config_path) {
-                if let Ok(mut cfg) = serde_json::from_str::<Config>(&contents) {
-                    cfg.backends.detect_availability();
-                    return cfg;
-                }
-            }
+        if config_path.exists()
+            && let Ok(contents) = std::fs::read_to_string(&config_path)
+            && let Ok(mut cfg) = serde_json::from_str::<Config>(&contents)
+        {
+            cfg.backends.detect_availability();
+            return cfg;
         }
 
         // Fall back to legacy backends.yaml
@@ -79,23 +78,25 @@ impl Config {
         let dir = config_dir();
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("config.json");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 }
 
 /// Configuration directory: ~/.config/orrchestrator/
 pub fn config_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join(".config").join("orrchestrator")
 }
 
 /// App-data root: ~/.local/share/orrchestrator/ — mutable derived state/backups
 /// (shadow repos), NOT under `.config`.
 pub fn data_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
-    PathBuf::from(home).join(".local").join("share").join("orrchestrator")
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("orrchestrator")
 }
 
 fn default_agents_dir() -> PathBuf {
@@ -112,7 +113,7 @@ fn default_library_dir() -> PathBuf {
 }
 
 fn default_projects_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join("projects")
 }
 

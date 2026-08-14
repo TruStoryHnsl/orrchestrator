@@ -31,8 +31,16 @@ struct Ctx {
 impl Ctx {
     fn new(host: &str, ssh_port: &str) -> Self {
         Ctx {
-            remote_host: if host.is_empty() { None } else { Some(host.to_string()) },
-            remote_port: if ssh_port.is_empty() { None } else { Some(ssh_port.to_string()) },
+            remote_host: if host.is_empty() {
+                None
+            } else {
+                Some(host.to_string())
+            },
+            remote_port: if ssh_port.is_empty() {
+                None
+            } else {
+                Some(ssh_port.to_string())
+            },
             last_gpu_error: None,
         }
     }
@@ -50,10 +58,7 @@ impl Ctx {
             self.run_remote(host, &cmd_str)
         } else {
             let (prog, rest) = args.split_first()?;
-            let out = Command::new(prog)
-                .args(rest)
-                .output()
-                .ok()?;
+            let out = Command::new(prog).args(rest).output().ok()?;
             if out.status.success() {
                 Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
             } else {
@@ -77,11 +82,11 @@ impl Ctx {
             "-o".into(),
             "StrictHostKeyChecking=no".into(),
         ];
-        if let Some(port) = &self.remote_port {
-            if port != "22" {
-                ssh.push("-p".into());
-                ssh.push(port.clone());
-            }
+        if let Some(port) = &self.remote_port
+            && port != "22"
+        {
+            ssh.push("-p".into());
+            ssh.push(port.clone());
         }
         ssh.push(host.to_string());
         ssh.push(cmd_str.to_string());
@@ -188,10 +193,9 @@ fn resolve_base_blocks(ctx: &Ctx, name: &str, depth: u8) -> Vec<String> {
     if ctx
         .read_file(&format!("/sys/class/block/{name}/partition"))
         .is_some()
+        && let Some(parent) = partition_parent(name)
     {
-        if let Some(parent) = partition_parent(name) {
-            return resolve_base_blocks(ctx, &parent, depth + 1);
-        }
+        return resolve_base_blocks(ctx, &parent, depth + 1);
     }
 
     vec![name.to_string()]
@@ -375,16 +379,16 @@ fn detect_nvidia(ctx: &mut Ctx) -> Option<GpuDetect> {
     let mut gpus: Vec<Gpu> = Vec::new();
     for (idx, line) in out.trim().split('\n').enumerate() {
         let parts: Vec<&str> = line.split(',').map(|p| p.trim()).collect();
-        if parts.len() >= 2 {
-            if let Ok(vram_mb) = parts[0].parse::<f64>() {
-                gpus.push(Gpu {
-                    index: Some(idx as u32),
-                    name: parts[1].to_string(),
-                    vram_gb: vram_mb / 1024.0,
-                });
-            }
-            // ValueError → skip (continue)
+        if parts.len() >= 2
+            && let Ok(vram_mb) = parts[0].parse::<f64>()
+        {
+            gpus.push(Gpu {
+                index: Some(idx as u32),
+                name: parts[1].to_string(),
+                vram_gb: vram_mb / 1024.0,
+            });
         }
+        // ValueError → skip (continue)
     }
 
     if gpus.is_empty() {
@@ -416,7 +420,9 @@ fn detect_amd(ctx: &Ctx) -> Option<GpuDetect> {
                 if t.is_empty() { None } else { Some(t) }
             })
         } else {
-            std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+            std::fs::read_to_string(path)
+                .ok()
+                .map(|s| s.trim().to_string())
         }
     };
 
@@ -479,8 +485,8 @@ fn detect_amd(ctx: &Ctx) -> Option<GpuDetect> {
         if vram_bytes == 0 {
             continue;
         }
-        let name = read(&format!("{base}/product_name"))
-            .unwrap_or_else(|| format!("AMD GPU ({entry})"));
+        let name =
+            read(&format!("{base}/product_name")).unwrap_or_else(|| format!("AMD GPU ({entry})"));
         cards.push(Gpu {
             index: Some(cidx as u32),
             name,
@@ -510,13 +516,13 @@ pub(crate) fn parse_meminfo(text: &str) -> HashMap<String, u64> {
     let mut result = HashMap::new();
     for line in text.split('\n') {
         if let Some((key, val)) = line.split_once(':') {
-            let mut parts = val.trim().split_whitespace();
-            if let Some(first) = parts.next() {
-                if let Ok(n) = first.parse::<u64>() {
-                    result.insert(key.trim().to_string(), n);
-                }
-                // ValueError → skip
+            let mut parts = val.split_whitespace();
+            if let Some(first) = parts.next()
+                && let Ok(n) = first.parse::<u64>()
+            {
+                result.insert(key.trim().to_string(), n);
             }
+            // ValueError → skip
         }
     }
     result
@@ -578,10 +584,10 @@ fn get_available_ram_gb(ctx: &Ctx) -> f64 {
 fn get_cpu_name(ctx: &Ctx) -> String {
     if let Some(text) = ctx.read_file("/proc/cpuinfo") {
         for line in text.split('\n') {
-            if line.starts_with("model name") {
-                if let Some((_, v)) = line.split_once(':') {
-                    return v.trim().to_string();
-                }
+            if line.starts_with("model name")
+                && let Some((_, v)) = line.split_once(':')
+            {
+                return v.trim().to_string();
             }
         }
     }
@@ -596,10 +602,10 @@ fn get_cpu_name(ctx: &Ctx) -> String {
 /// CPU logical-core count. Port of `_get_cpu_count`.
 fn get_cpu_count(ctx: &Ctx) -> u32 {
     if ctx.is_remote() {
-        if let Some(out) = ctx.run(&["nproc"]) {
-            if let Ok(n) = out.trim().parse::<u32>() {
-                return n;
-            }
+        if let Some(out) = ctx.run(&["nproc"])
+            && let Ok(n) = out.trim().parse::<u32>()
+        {
+            return n;
         }
         // fallback: count "processor" lines in /proc/cpuinfo
         if let Some(text) = ctx.read_file("/proc/cpuinfo") {
@@ -640,16 +646,18 @@ fn cache() -> &'static Mutex<HashMap<String, (Instant, SystemInfo)>> {
 /// host="user@server" → SSH. plat ∈ {"", "linux", "windows", "termux"}.
 /// fresh=true bypasses the 1800s per-host cache.
 pub fn detect_system(host: &str, ssh_port: &str, plat: &str, fresh: bool) -> SystemInfo {
-    let cache_key = if host.is_empty() { "_local".to_string() } else { host.to_string() };
+    let cache_key = if host.is_empty() {
+        "_local".to_string()
+    } else {
+        host.to_string()
+    };
 
-    if !fresh {
-        if let Ok(map) = cache().lock() {
-            if let Some((ts, cached)) = map.get(&cache_key) {
-                if ts.elapsed() < CACHE_TTL {
-                    return cached.clone();
-                }
-            }
-        }
+    if !fresh
+        && let Ok(map) = cache().lock()
+        && let Some((ts, cached)) = map.get(&cache_key)
+        && ts.elapsed() < CACHE_TTL
+    {
+        return cached.clone();
     }
 
     let mut ctx = Ctx::new(host, ssh_port);
@@ -758,7 +766,8 @@ mod tests {
 
     #[test]
     fn parse_meminfo_extracts_kb() {
-        let txt = "MemTotal:       32791234 kB\nMemAvailable:   16000000 kB\nBad line\nSwapTotal: 0 kB\n";
+        let txt =
+            "MemTotal:       32791234 kB\nMemAvailable:   16000000 kB\nBad line\nSwapTotal: 0 kB\n";
         let m = parse_meminfo(txt);
         assert_eq!(m.get("MemTotal"), Some(&32791234));
         assert_eq!(m.get("MemAvailable"), Some(&16000000));
@@ -769,9 +778,21 @@ mod tests {
     #[test]
     fn group_gpus_buckets_and_sorts() {
         let gpus = vec![
-            Gpu { index: Some(0), name: "RTX 3070".into(), vram_gb: 8.0 },
-            Gpu { index: Some(1), name: "RTX 3090".into(), vram_gb: 24.0 },
-            Gpu { index: Some(2), name: "RTX 3090".into(), vram_gb: 24.0 },
+            Gpu {
+                index: Some(0),
+                name: "RTX 3070".into(),
+                vram_gb: 8.0,
+            },
+            Gpu {
+                index: Some(1),
+                name: "RTX 3090".into(),
+                vram_gb: 24.0,
+            },
+            Gpu {
+                index: Some(2),
+                name: "RTX 3090".into(),
+                vram_gb: 24.0,
+            },
         ];
         let groups = group_gpus(&gpus);
         // Two distinct groups; 3090 pool (48 total) sorts before 3070 pool (8).

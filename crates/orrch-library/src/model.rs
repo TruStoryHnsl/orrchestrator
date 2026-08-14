@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use serde::{Deserialize, Serialize};
 
 /// Capability tier for workforce assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -135,11 +135,17 @@ pub enum PricingModel {
 impl PricingModel {
     pub fn display(&self) -> String {
         match self {
-            Self::PerToken { input_per_million, output_per_million } =>
-                format!("${:.2}/${:.2} per 1M tok (in/out)", input_per_million, output_per_million),
-            Self::Subscription { monthly_cost } =>
-                format!("${:.2}/mo", monthly_cost),
-            Self::Free { requests_per_minute } => match requests_per_minute {
+            Self::PerToken {
+                input_per_million,
+                output_per_million,
+            } => format!(
+                "${:.2}/${:.2} per 1M tok (in/out)",
+                input_per_million, output_per_million
+            ),
+            Self::Subscription { monthly_cost } => format!("${:.2}/mo", monthly_cost),
+            Self::Free {
+                requests_per_minute,
+            } => match requests_per_minute {
                 Some(rpm) => format!("Free ({rpm} req/min)"),
                 None => "Free".into(),
             },
@@ -149,7 +155,7 @@ impl PricingModel {
 }
 
 /// Manual valve state for a provider — user-controlled on/off toggle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Valve {
     /// Whether this provider is currently shut off.
     pub closed: bool,
@@ -157,12 +163,6 @@ pub struct Valve {
     pub reopen_at: Option<u64>,
     /// Reason the valve was closed (user note).
     pub reason: String,
-}
-
-impl Default for Valve {
-    fn default() -> Self {
-        Self { closed: false, reopen_at: None, reason: String::new() }
-    }
 }
 
 impl Valve {
@@ -261,12 +261,22 @@ pub struct ModelEntry {
     pub path: PathBuf,
 }
 
-fn default_api_format() -> Vec<ApiFormat> { vec![ApiFormat::Cli] }
-fn default_location() -> EngineLocation { EngineLocation::Cloud }
+fn default_api_format() -> Vec<ApiFormat> {
+    vec![ApiFormat::Cli]
+}
+fn default_location() -> EngineLocation {
+    EngineLocation::Cloud
+}
 
 impl ModelEntry {
     pub fn summary_line(&self) -> String {
-        format!("{} {} — {} ({})", self.tier.badge(), self.name, self.provider, self.pricing.display())
+        format!(
+            "{} {} — {} ({})",
+            self.tier.badge(),
+            self.name,
+            self.provider,
+            self.pricing.display()
+        )
     }
 }
 
@@ -280,12 +290,11 @@ pub struct ValveStore {
 impl ValveStore {
     pub fn load() -> Self {
         let path = valve_store_path();
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(store) = serde_json::from_str(&content) {
-                    return store;
-                }
-            }
+        if path.exists()
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && let Ok(store) = serde_json::from_str(&content)
+        {
+            return store;
         }
         Self::default()
     }
@@ -295,8 +304,7 @@ impl ValveStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, json)
     }
 
@@ -345,12 +353,7 @@ impl ValveStore {
     ///
     /// The reason string is auto-generated with the computed date so it
     /// always matches the actual `reopen_at` timestamp.
-    pub fn close_until_next_weekday(
-        &mut self,
-        provider: &str,
-        target_weekday: u32,
-        hour_utc: u32,
-    ) {
+    pub fn close_until_next_weekday(&mut self, provider: &str, target_weekday: u32, hour_utc: u32) {
         let reopen_at = next_weekday_epoch(target_weekday, hour_utc);
         let (y, mo, d) = epoch_to_date(reopen_at);
         let wday = day_of_week(reopen_at);
@@ -395,7 +398,7 @@ impl ValveStore {
 }
 
 fn valve_store_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home)
         .join(".config")
         .join("orrchestrator")
@@ -449,8 +452,14 @@ fn weekday_from_epoch(epoch: u64) -> u32 {
 /// Short weekday name.
 fn day_of_week(epoch: u64) -> &'static str {
     match weekday_from_epoch(epoch) {
-        0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
-        4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "???",
+        0 => "Sun",
+        1 => "Mon",
+        2 => "Tue",
+        3 => "Wed",
+        4 => "Thu",
+        5 => "Fri",
+        6 => "Sat",
+        _ => "???",
     }
 }
 
@@ -472,6 +481,106 @@ fn next_weekday_epoch(target_weekday: u32, hour_utc: u32) -> u64 {
     }
 
     today_at_hour + days_ahead * 86400
+}
+
+/// Load model entries from .md files in a directory.
+pub fn load_models(dir: &Path) -> Vec<ModelEntry> {
+    let mut models = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(model) = parse_model_file(&path)
+            {
+                models.push(model);
+            }
+        }
+    }
+    models.sort_by(|a, b| a.tier.label().cmp(b.tier.label()).then(a.name.cmp(&b.name)));
+    models
+}
+
+fn parse_model_file(path: &Path) -> Option<ModelEntry> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let (fm, body) = crate::store::parse_frontmatter_pub(&content)?;
+
+    let tier_str = extract(&fm, "tier").unwrap_or_default();
+    let tier = match tier_str.to_lowercase().as_str() {
+        "enterprise" => ModelTier::Enterprise,
+        "mid-tier" | "midtier" | "mid_tier" => ModelTier::MidTier,
+        "local" | "free" | "local/free" => ModelTier::Local,
+        _ => ModelTier::MidTier,
+    };
+
+    let pricing_str = extract(&fm, "pricing").unwrap_or_default();
+    let pricing = if pricing_str.contains("local") {
+        PricingModel::Local
+    } else if pricing_str.contains("free") {
+        PricingModel::Free {
+            requests_per_minute: None,
+        }
+    } else if pricing_str.contains("subscription") {
+        PricingModel::Subscription { monthly_cost: 0.0 }
+    } else {
+        PricingModel::PerToken {
+            input_per_million: 0.0,
+            output_per_million: 0.0,
+        }
+    };
+
+    let base_url = extract(&fm, "base_url");
+
+    // api_format: frontmatter list like `[anthropic, openai]` OR scalar
+    // `openai`. Empty/absent → default [Cli] (legacy behavior).
+    let mut api_format: Vec<ApiFormat> = extract_list(&fm, "api_format")
+        .iter()
+        .filter_map(|s| ApiFormat::parse(s))
+        .collect();
+    if api_format.is_empty() {
+        // tolerate a scalar `api_format: openai` or inline `[anthropic, openai]`
+        if let Some(raw) = extract(&fm, "api_format") {
+            let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
+            for tok in trimmed.split(',') {
+                if let Some(f) = ApiFormat::parse(tok) {
+                    api_format.push(f);
+                }
+            }
+        }
+    }
+    if api_format.is_empty() {
+        api_format = default_api_format();
+    }
+
+    let location = extract(&fm, "location")
+        .and_then(|s| EngineLocation::parse(&s))
+        .unwrap_or_else(default_location);
+
+    Some(ModelEntry {
+        name: extract(&fm, "name")?,
+        provider: extract(&fm, "provider").unwrap_or_default(),
+        model_id: extract(&fm, "model_id").unwrap_or_default(),
+        tier,
+        pricing,
+        capabilities: extract_list(&fm, "capabilities"),
+        limitations: extract_list(&fm, "limitations"),
+        max_context: extract(&fm, "max_context")
+            .and_then(|s| s.replace(['k', 'K'], "000").parse().ok()),
+        api_key_env: extract(&fm, "api_key_env"),
+        notes: body.trim().to_string(),
+        last_checked: extract(&fm, "last_checked"),
+        base_url,
+        api_format,
+        location,
+        path: path.to_path_buf(),
+    })
+}
+
+fn extract(fm: &str, key: &str) -> Option<String> {
+    crate::store::extract_field_pub(fm, key)
+}
+
+fn extract_list(fm: &str, key: &str) -> Vec<String> {
+    crate::store::extract_list_pub(fm, key)
 }
 
 #[cfg(test)]
@@ -559,11 +668,14 @@ mod tests {
         // Build a store with a valve past its reopen time (no save() call)
         let past = now_epoch().saturating_sub(3600);
         let mut store = ValveStore::default();
-        store.valves.insert("Test".into(), Valve {
-            closed: true,
-            reopen_at: Some(past),
-            reason: "test".into(),
-        });
+        store.valves.insert(
+            "Test".into(),
+            Valve {
+                closed: true,
+                reopen_at: Some(past),
+                reason: "test".into(),
+            },
+        );
         let (blocked, _) = store.check_provider("Test");
         assert!(!blocked, "valve past reopen time should not report blocked");
     }
@@ -572,11 +684,14 @@ mod tests {
     fn test_check_provider_blocks_future_reopen() {
         let future = now_epoch() + 86400;
         let mut store = ValveStore::default();
-        store.valves.insert("Test".into(), Valve {
-            closed: true,
-            reopen_at: Some(future),
-            reason: "test".into(),
-        });
+        store.valves.insert(
+            "Test".into(),
+            Valve {
+                closed: true,
+                reopen_at: Some(future),
+                reason: "test".into(),
+            },
+        );
         let (blocked, _) = store.check_provider("Test");
         assert!(blocked, "valve with future reopen should report blocked");
     }
@@ -585,12 +700,18 @@ mod tests {
     fn test_is_blocked_respects_reopen_time() {
         let past = now_epoch().saturating_sub(60);
         let mut store = ValveStore::default();
-        store.valves.insert("Test".into(), Valve {
-            closed: true,
-            reopen_at: Some(past),
-            reason: "test".into(),
-        });
-        assert!(!store.is_blocked("Test"), "is_blocked should return false after reopen time");
+        store.valves.insert(
+            "Test".into(),
+            Valve {
+                closed: true,
+                reopen_at: Some(past),
+                reason: "test".into(),
+            },
+        );
+        assert!(
+            !store.is_blocked("Test"),
+            "is_blocked should return false after reopen time"
+        );
     }
 
     #[test]
@@ -601,7 +722,10 @@ mod tests {
 
     #[test]
     fn test_pricing_display() {
-        let p = PricingModel::PerToken { input_per_million: 3.0, output_per_million: 15.0 };
+        let p = PricingModel::PerToken {
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+        };
         assert!(p.display().contains("$3.00"));
         assert!(PricingModel::Local.display().contains("no cost"));
     }
@@ -613,7 +737,10 @@ mod tests {
         assert_eq!(ApiFormat::parse("cli"), Some(ApiFormat::Cli));
         assert_eq!(ApiFormat::parse("nope"), None);
         assert_eq!(EngineLocation::parse("Cloud"), Some(EngineLocation::Cloud));
-        assert_eq!(EngineLocation::parse("gateway"), Some(EngineLocation::Gateway));
+        assert_eq!(
+            EngineLocation::parse("gateway"),
+            Some(EngineLocation::Gateway)
+        );
         assert_eq!(EngineLocation::parse("LOCAL"), Some(EngineLocation::Local));
         assert_eq!(EngineLocation::parse("orbit"), None);
     }
@@ -649,7 +776,11 @@ mod tests {
         let md = "---\nname: DeepSeek V4 Flash\nprovider: DeepSeek\nmodel_id: deepseek-v4-flash\ntier: mid-tier\npricing: per_token\nbase_url: https://api.deepseek.com\napi_key_env: DEEPSEEK_API_KEY\nmax_context: 1000000\nlocation: cloud\napi_format:\n- anthropic\n- openai\n---\nFast DeepSeek engine.";
         let m = parse_md(md);
         assert_eq!(m.base_url.as_deref(), Some("https://api.deepseek.com"));
-        assert_eq!(m.api_format, vec![ApiFormat::Anthropic, ApiFormat::OpenAI], "both, in order");
+        assert_eq!(
+            m.api_format,
+            vec![ApiFormat::Anthropic, ApiFormat::OpenAI],
+            "both, in order"
+        );
         assert_eq!(m.location, EngineLocation::Cloud);
         assert_eq!(m.max_context, Some(1_000_000));
     }
@@ -692,96 +823,4 @@ mod tests {
         assert_eq!(m.location, EngineLocation::Cloud);
         assert_eq!(m.base_url, None);
     }
-}
-
-/// Load model entries from .md files in a directory.
-pub fn load_models(dir: &Path) -> Vec<ModelEntry> {
-    let mut models = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(model) = parse_model_file(&path) {
-                    models.push(model);
-                }
-            }
-        }
-    }
-    models.sort_by(|a, b| a.tier.label().cmp(b.tier.label()).then(a.name.cmp(&b.name)));
-    models
-}
-
-fn parse_model_file(path: &Path) -> Option<ModelEntry> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let (fm, body) = crate::store::parse_frontmatter_pub(&content)?;
-
-    let tier_str = extract(&fm, "tier").unwrap_or_default();
-    let tier = match tier_str.to_lowercase().as_str() {
-        "enterprise" => ModelTier::Enterprise,
-        "mid-tier" | "midtier" | "mid_tier" => ModelTier::MidTier,
-        "local" | "free" | "local/free" => ModelTier::Local,
-        _ => ModelTier::MidTier,
-    };
-
-    let pricing_str = extract(&fm, "pricing").unwrap_or_default();
-    let pricing = if pricing_str.contains("local") {
-        PricingModel::Local
-    } else if pricing_str.contains("free") {
-        PricingModel::Free { requests_per_minute: None }
-    } else if pricing_str.contains("subscription") {
-        PricingModel::Subscription { monthly_cost: 0.0 }
-    } else {
-        PricingModel::PerToken { input_per_million: 0.0, output_per_million: 0.0 }
-    };
-
-    let base_url = extract(&fm, "base_url");
-
-    // api_format: frontmatter list like `[anthropic, openai]` OR scalar
-    // `openai`. Empty/absent → default [Cli] (legacy behavior).
-    let mut api_format: Vec<ApiFormat> = extract_list(&fm, "api_format")
-        .iter()
-        .filter_map(|s| ApiFormat::parse(s))
-        .collect();
-    if api_format.is_empty() {
-        // tolerate a scalar `api_format: openai` or inline `[anthropic, openai]`
-        if let Some(raw) = extract(&fm, "api_format") {
-            let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
-            for tok in trimmed.split(',') {
-                if let Some(f) = ApiFormat::parse(tok) {
-                    api_format.push(f);
-                }
-            }
-        }
-    }
-    if api_format.is_empty() { api_format = default_api_format(); }
-
-    let location = extract(&fm, "location")
-        .and_then(|s| EngineLocation::parse(&s))
-        .unwrap_or_else(default_location);
-
-    Some(ModelEntry {
-        name: extract(&fm, "name")?,
-        provider: extract(&fm, "provider").unwrap_or_default(),
-        model_id: extract(&fm, "model_id").unwrap_or_default(),
-        tier,
-        pricing,
-        capabilities: extract_list(&fm, "capabilities"),
-        limitations: extract_list(&fm, "limitations"),
-        max_context: extract(&fm, "max_context").and_then(|s| s.replace(['k', 'K'], "000").parse().ok()),
-        api_key_env: extract(&fm, "api_key_env"),
-        notes: body.trim().to_string(),
-        last_checked: extract(&fm, "last_checked"),
-        base_url,
-        api_format,
-        location,
-        path: path.to_path_buf(),
-    })
-}
-
-fn extract(fm: &str, key: &str) -> Option<String> {
-    crate::store::extract_field_pub(fm, key)
-}
-
-fn extract_list(fm: &str, key: &str) -> Vec<String> {
-    crate::store::extract_list_pub(fm, key)
 }

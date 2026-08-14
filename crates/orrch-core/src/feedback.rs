@@ -41,16 +41,18 @@ pub fn save_and_route_feedback(
         append_to_inbox(feedback_text, projects_dir, &timestamp)?;
     }
 
-    Ok(RoutingResult {
-        routes,
-        saved_path,
-    })
+    Ok(RoutingResult { routes, saved_path })
 }
 
 /// Common English words that happen to be project directory names.
 /// These require stronger context signals to count as a match.
 const AMBIGUOUS_NAMES: &[&str] = &[
-    "notes", "admin", "claude", "oracle", "concord", "scratchpad",
+    "notes",
+    "admin",
+    "claude",
+    "oracle",
+    "concord",
+    "scratchpad",
 ];
 
 /// Identify which projects the feedback is about using word-boundary matching
@@ -83,7 +85,10 @@ fn identify_target_projects(text: &str, projects_dir: &Path) -> Vec<(String, Pat
     }
 
     scored.sort_by(|a, b| b.2.cmp(&a.2));
-    scored.into_iter().map(|(name, path, _)| (name, path)).collect()
+    scored
+        .into_iter()
+        .map(|(name, path, _)| (name, path))
+        .collect()
 }
 
 /// Score how likely a project name mention is intentional (not a false positive).
@@ -119,7 +124,7 @@ fn score_project_mention(text: &str, name: &str) -> i32 {
     }
 
     // Ambiguous common English words need higher threshold
-    if AMBIGUOUS_NAMES.iter().any(|&a| a == name) {
+    if AMBIGUOUS_NAMES.contains(&name) {
         score -= 15; // penalty: needs explicit context to survive
     }
 
@@ -262,10 +267,9 @@ pub fn detect_new_project_directives(text: &str) -> Vec<NewProjectDirective> {
         // Strip leading separators: any mix of whitespace, ASCII hyphen,
         // em-dash, en-dash, colon, or equals sign. What remains is the
         // project name (optionally followed by a summary).
-        let after_punct = after_marker
-            .trim_start_matches(|c: char| {
-                c.is_whitespace() || matches!(c, ':' | '-' | '—' | '–' | '=')
-            });
+        let after_punct = after_marker.trim_start_matches(|c: char| {
+            c.is_whitespace() || matches!(c, ':' | '-' | '—' | '–' | '=')
+        });
 
         if after_punct.is_empty() {
             continue;
@@ -337,7 +341,10 @@ pub fn append_to_inbox(
 
     // Truncate for display if very long
     let display_text = if feedback_text.len() > 2000 {
-        format!("{}...\n(truncated, full text in .feedback/)", &feedback_text[..2000])
+        format!(
+            "{}...\n(truncated, full text in .feedback/)",
+            &feedback_text[..2000]
+        )
     } else {
         feedback_text.to_string()
     };
@@ -394,7 +401,10 @@ pub fn chrono_lite_timestamp() -> String {
 
 /// Format a SystemTime as a human-readable timestamp.
 fn format_system_time(time: std::time::SystemTime) -> String {
-    let secs = time.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let days = secs / 86400;
     let years = 1970 + days / 365;
     let day_of_year = days % 365;
@@ -455,18 +465,19 @@ pub enum FeedbackStatus {
 /// Whether feedback is regular or a planning document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum FeedbackType {
+    #[default]
     Feedback,
     Plan,
 }
 
-impl Default for FeedbackType {
-    fn default() -> Self { Self::Feedback }
-}
-
 impl FeedbackType {
     pub fn label(&self) -> &'static str {
-        match self { Self::Feedback => "feedback", Self::Plan => "plan" }
+        match self {
+            Self::Feedback => "feedback",
+            Self::Plan => "plan",
+        }
     }
 }
 
@@ -542,7 +553,11 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
-                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 // Skip temp processing files — they belong to their parent feedback item
                 if filename.starts_with('.') || filename.starts_with("append-") {
                     continue;
@@ -564,7 +579,7 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
                 let modified = fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .ok()
-                    .map(|t| format_system_time(t))
+                    .map(format_system_time)
                     .unwrap_or_else(|| created.clone());
 
                 let meta = status_map.get(&filename);
@@ -596,10 +611,7 @@ pub fn load_feedback_items(projects_dir: &Path) -> Vec<FeedbackItem> {
 }
 
 /// Submit a draft feedback file: route it to projects and update status.
-pub fn submit_feedback(
-    filename: &str,
-    projects_dir: &Path,
-) -> anyhow::Result<RoutingResult> {
+pub fn submit_feedback(filename: &str, projects_dir: &Path) -> anyhow::Result<RoutingResult> {
     let feedback_dir = projects_dir.join(".feedback");
     let file_path = feedback_dir.join(filename);
     let text = fs::read_to_string(&file_path)?;
@@ -617,13 +629,16 @@ pub fn submit_feedback(
 
     // Update status
     let mut status_map = load_status_map(&feedback_dir);
-    status_map.insert(filename.to_string(), FeedbackMeta {
-        status: FeedbackStatus::Routed,
-        routes: routes.iter().map(|(name, _)| name.clone()).collect(),
-        submitted_at: Some(timestamp),
-        feedback_type: FeedbackType::Feedback,
-        tmux_session: None,
-    });
+    status_map.insert(
+        filename.to_string(),
+        FeedbackMeta {
+            status: FeedbackStatus::Routed,
+            routes: routes.iter().map(|(name, _)| name.clone()).collect(),
+            submitted_at: Some(timestamp),
+            feedback_type: FeedbackType::Feedback,
+            tmux_session: None,
+        },
+    );
     save_status_map(&feedback_dir, &status_map);
 
     Ok(RoutingResult {
@@ -649,9 +664,17 @@ pub fn write_feedback_metadata(
     let routes_yaml = if route_names.is_empty() {
         "  - (workspace level)".to_string()
     } else {
-        route_names.iter().map(|r| format!("  - {r}")).collect::<Vec<_>>().join("\n")
+        route_names
+            .iter()
+            .map(|r| format!("  - {r}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
-    let output_desc = if intended_output.is_empty() { "development feedback" } else { intended_output };
+    let output_desc = if intended_output.is_empty() {
+        "development feedback"
+    } else {
+        intended_output
+    };
 
     let header = format!(
         "---\ntargets:\n{routes_yaml}\noutput: {output_desc}\nsubmitted: {ts}\n---\n\n",
@@ -666,28 +689,39 @@ pub fn write_feedback_metadata(
 pub fn set_feedback_type(filename: &str, projects_dir: &Path, fb_type: FeedbackType) {
     let feedback_dir = projects_dir.join(".feedback");
     let mut status_map = load_status_map(&feedback_dir);
-    let entry = status_map.entry(filename.to_string()).or_insert(FeedbackMeta {
-        status: FeedbackStatus::Draft,
-        routes: Vec::new(),
-        submitted_at: None,
-        feedback_type: FeedbackType::Feedback,
-        tmux_session: None,
-    });
+    let entry = status_map
+        .entry(filename.to_string())
+        .or_insert(FeedbackMeta {
+            status: FeedbackStatus::Draft,
+            routes: Vec::new(),
+            submitted_at: None,
+            feedback_type: FeedbackType::Feedback,
+            tmux_session: None,
+        });
     entry.feedback_type = fb_type;
     save_status_map(&feedback_dir, &status_map);
 }
 
 /// Mark a feedback file as being processed by Claude (Processing state).
-pub fn mark_as_processing(filename: &str, projects_dir: &Path, route_names: &[String], fb_type: FeedbackType, tmux_session: Option<&str>) {
+pub fn mark_as_processing(
+    filename: &str,
+    projects_dir: &Path,
+    route_names: &[String],
+    fb_type: FeedbackType,
+    tmux_session: Option<&str>,
+) {
     let feedback_dir = projects_dir.join(".feedback");
     let mut status_map = load_status_map(&feedback_dir);
-    status_map.insert(filename.to_string(), FeedbackMeta {
-        status: FeedbackStatus::Processing,
-        routes: route_names.to_vec(),
-        submitted_at: Some(chrono_lite_timestamp()),
-        feedback_type: fb_type,
-        tmux_session: tmux_session.map(|s| s.to_string()),
-    });
+    status_map.insert(
+        filename.to_string(),
+        FeedbackMeta {
+            status: FeedbackStatus::Processing,
+            routes: route_names.to_vec(),
+            submitted_at: Some(chrono_lite_timestamp()),
+            feedback_type: fb_type,
+            tmux_session: tmux_session.map(|s| s.to_string()),
+        },
+    );
     save_status_map(&feedback_dir, &status_map);
 }
 
@@ -722,15 +756,20 @@ pub fn tmux_session_status(session_name: &str) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
-    if !output.status.success() { return None; }
+    if !output.status.success() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&output.stdout);
     // Find the last non-empty, non-decoration line
     text.lines()
         .rev()
         .filter(|l| {
             let t = l.trim();
-            !t.is_empty() && !t.starts_with("───") && !t.starts_with("⏵")
-            && !t.starts_with("Esc to") && !t.starts_with("ctrl+")
+            !t.is_empty()
+                && !t.starts_with("───")
+                && !t.starts_with("⏵")
+                && !t.starts_with("Esc to")
+                && !t.starts_with("ctrl+")
         })
         .next()
         .map(|l| l.trim().chars().take(60).collect())
@@ -740,18 +779,18 @@ pub fn tmux_session_status(session_name: &str) -> Option<String> {
 pub fn check_processing_complete(filename: &str, projects_dir: &Path) -> bool {
     let feedback_dir = projects_dir.join(".feedback");
     let status_map = load_status_map(&feedback_dir);
-    if let Some(meta) = status_map.get(filename) {
-        if meta.status == FeedbackStatus::Processing {
-            if let Some(ref session) = meta.tmux_session {
-                // Check if tmux session still exists
-                let exists = std::process::Command::new("tmux")
-                    .args(["has-session", "-t", session])
-                    .output()
-                    .is_ok_and(|o| o.status.success());
-                return !exists; // complete if session is gone
-            }
-            return true; // no session recorded = assume complete
+    if let Some(meta) = status_map.get(filename)
+        && meta.status == FeedbackStatus::Processing
+    {
+        if let Some(ref session) = meta.tmux_session {
+            // Check if tmux session still exists
+            let exists = std::process::Command::new("tmux")
+                .args(["has-session", "-t", session])
+                .output()
+                .is_ok_and(|o| o.status.success());
+            return !exists; // complete if session is gone
         }
+        return true; // no session recorded = assume complete
     }
     false
 }
@@ -793,11 +832,8 @@ pub fn truncate_inbox_if_large(project_dir: &Path, max_bytes: usize) -> anyhow::
         .to_string();
     let timestamp = chrono_lite_timestamp();
     let header = format!("# {project_name} — Instructions Inbox\n");
-    let marker_template = |kept: usize| {
-        format!(
-            "\n<!-- truncated {timestamp}, kept {kept} of {total} entries -->\n"
-        )
-    };
+    let marker_template =
+        |kept: usize| format!("\n<!-- truncated {timestamp}, kept {kept} of {total} entries -->\n");
 
     // Walk newest (last) to oldest (first), accumulating bytes until the next would overflow.
     let mut kept_rev: Vec<&String> = Vec::new();
@@ -812,10 +848,10 @@ pub fn truncate_inbox_if_large(project_dir: &Path, max_bytes: usize) -> anyhow::
     }
 
     // Always keep at least one (the most recent) even if it alone exceeds budget.
-    if kept_rev.is_empty() {
-        if let Some(last) = entries.last() {
-            kept_rev.push(last);
-        }
+    if kept_rev.is_empty()
+        && let Some(last) = entries.last()
+    {
+        kept_rev.push(last);
     }
 
     let kept_count = kept_rev.len();
@@ -1023,11 +1059,18 @@ mod tests {
         fs::create_dir(tmp.path().join("orrapus")).unwrap();
 
         // "concord" is ambiguous but appears with explicit context "in concord"
-        let text = "We need to fix the WebSocket handling in concord and also update orrapus deployment.";
+        let text =
+            "We need to fix the WebSocket handling in concord and also update orrapus deployment.";
         let routes = identify_target_projects(text, tmp.path());
         let names: Vec<&str> = routes.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"orrapus"), "orr-prefixed names should match");
-        assert!(names.contains(&"concord"), "'in concord' provides enough context");
+        assert!(
+            names.contains(&"orrapus"),
+            "orr-prefixed names should match"
+        );
+        assert!(
+            names.contains(&"concord"),
+            "'in concord' provides enough context"
+        );
     }
 
     #[test]
@@ -1052,9 +1095,18 @@ mod tests {
         let routes = identify_target_projects(text, tmp.path());
         let names: Vec<&str> = routes.iter().map(|(n, _)| n.as_str()).collect();
         // All three are ambiguous common words used in non-project context
-        assert!(!names.contains(&"notes"), "false positive: 'notes' as English word");
-        assert!(!names.contains(&"admin"), "false positive: 'admin' as English word");
-        assert!(!names.contains(&"claude"), "false positive: 'claude' as English word");
+        assert!(
+            !names.contains(&"notes"),
+            "false positive: 'notes' as English word"
+        );
+        assert!(
+            !names.contains(&"admin"),
+            "false positive: 'admin' as English word"
+        );
+        assert!(
+            !names.contains(&"claude"),
+            "false positive: 'claude' as English word"
+        );
     }
 
     #[test]
@@ -1082,9 +1134,15 @@ mod tests {
         let routes = identify_target_projects(text, tmp.path());
         let names: Vec<&str> = routes.iter().map(|(n, _)| n.as_str()).collect();
         // "or" appears as English word but is too short (2 chars) → penalty kills it
-        assert!(!names.contains(&"or"), "'or' too short to be a project reference");
+        assert!(
+            !names.contains(&"or"),
+            "'or' too short to be a project reference"
+        );
         // "con" is inside "concord" (no word boundary) → rejected by word_boundary_match
-        assert!(!names.contains(&"con"), "'con' is substring of 'concord', not standalone");
+        assert!(
+            !names.contains(&"con"),
+            "'con' is substring of 'concord', not standalone"
+        );
     }
 
     #[test]
@@ -1096,7 +1154,10 @@ mod tests {
         let text = "We should restructure the notes project to support search.";
         let routes = identify_target_projects(text, tmp.path());
         let names: Vec<&str> = routes.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"notes"), "explicit 'the notes project' should match");
+        assert!(
+            names.contains(&"notes"),
+            "explicit 'the notes project' should match"
+        );
     }
 
     #[test]
@@ -1109,7 +1170,8 @@ mod tests {
         assert_eq!(result.routes[0].0, "testproj");
         assert!(result.saved_path.exists());
 
-        let inbox = fs::read_to_string(tmp.path().join("testproj").join("instructions_inbox.md")).unwrap();
+        let inbox =
+            fs::read_to_string(tmp.path().join("testproj").join("instructions_inbox.md")).unwrap();
         assert!(inbox.contains("Fix testproj auth"));
         assert!(inbox.contains("Executed: pending"));
     }
@@ -1164,7 +1226,8 @@ mod tests {
     #[test]
     fn test_detect_new_project_rejects_false_positives() {
         // "new projections" should NOT match.
-        let text = "We'll need new projections for the quarterly report. Also `new project` as a term.";
+        let text =
+            "We'll need new projections for the quarterly report. Also `new project` as a term.";
         let d = detect_new_project_directives(text);
         // The backtick-fenced `new project` line has no separator and no
         // content after — rejected. "new projections" has no separator after
@@ -1203,7 +1266,12 @@ mod tests {
         // 5 entries of varying sizes (each ~500 bytes of body)
         for i in 1..=5 {
             let body = format!("entry-{i}-").repeat(50);
-            write_entry(&mut contents, &format!("2026-04-08 10:0{i}"), &body, "pending");
+            write_entry(
+                &mut contents,
+                &format!("2026-04-08 10:0{i}"),
+                &body,
+                "pending",
+            );
         }
         fs::write(&inbox, &contents).unwrap();
         let original_len = contents.len();
@@ -1216,15 +1284,30 @@ mod tests {
         assert!(changed, "expected truncation to occur");
 
         let new_contents = fs::read_to_string(&inbox).unwrap();
-        assert!(new_contents.len() <= limit + 200, "truncated output should be near limit");
+        assert!(
+            new_contents.len() <= limit + 200,
+            "truncated output should be near limit"
+        );
         assert!(new_contents.contains("<!-- truncated "), "marker missing");
         assert!(new_contents.contains("kept "), "marker missing kept count");
-        assert!(new_contents.contains("of 5 entries"), "marker should show original total");
+        assert!(
+            new_contents.contains("of 5 entries"),
+            "marker should show original total"
+        );
         // Most recent entry (entry-5) must survive; oldest (entry-1) should be gone.
-        assert!(new_contents.contains("entry-5-"), "newest entry should be kept");
-        assert!(!new_contents.contains("entry-1-"), "oldest entry should be dropped");
+        assert!(
+            new_contents.contains("entry-5-"),
+            "newest entry should be kept"
+        );
+        assert!(
+            !new_contents.contains("entry-1-"),
+            "oldest entry should be dropped"
+        );
         assert!(new_contents.starts_with("# "), "header missing");
-        assert!(new_contents.contains("— Instructions Inbox"), "header missing inbox label");
+        assert!(
+            new_contents.contains("— Instructions Inbox"),
+            "header missing inbox label"
+        );
     }
 
     #[test]
@@ -1234,8 +1317,18 @@ mod tests {
         let inbox = project.join("instructions_inbox.md");
 
         let mut contents = String::from("# test — Instructions Inbox\n");
-        write_entry(&mut contents, "2026-04-08 10:01", "pending-work body", "pending");
-        write_entry(&mut contents, "2026-04-08 10:02", "complete-work body", "complete");
+        write_entry(
+            &mut contents,
+            "2026-04-08 10:01",
+            "pending-work body",
+            "pending",
+        );
+        write_entry(
+            &mut contents,
+            "2026-04-08 10:02",
+            "complete-work body",
+            "complete",
+        );
         write_entry(&mut contents, "2026-04-08 10:03", "done-work body", "done");
         fs::write(&inbox, &contents).unwrap();
 
@@ -1243,10 +1336,22 @@ mod tests {
         assert_eq!(removed, 2, "should remove both complete and done entries");
 
         let new_contents = fs::read_to_string(&inbox).unwrap();
-        assert!(new_contents.contains("pending-work body"), "pending entry should remain");
-        assert!(!new_contents.contains("complete-work body"), "complete entry should be gone");
-        assert!(!new_contents.contains("done-work body"), "done entry should be gone");
-        assert!(new_contents.contains("# test — Instructions Inbox"), "preamble should remain");
+        assert!(
+            new_contents.contains("pending-work body"),
+            "pending entry should remain"
+        );
+        assert!(
+            !new_contents.contains("complete-work body"),
+            "complete entry should be gone"
+        );
+        assert!(
+            !new_contents.contains("done-work body"),
+            "done entry should be gone"
+        );
+        assert!(
+            new_contents.contains("# test — Instructions Inbox"),
+            "preamble should remain"
+        );
     }
 
     #[test]
@@ -1273,7 +1378,12 @@ mod tests {
         let mut a_contents = String::from("# projA — Instructions Inbox\n");
         for i in 1..=5 {
             let body = format!("a-entry-{i}-").repeat(100);
-            write_entry(&mut a_contents, &format!("2026-04-08 11:0{i}"), &body, "pending");
+            write_entry(
+                &mut a_contents,
+                &format!("2026-04-08 11:0{i}"),
+                &body,
+                "pending",
+            );
         }
         fs::write(proj_a.join("instructions_inbox.md"), &a_contents).unwrap();
         assert!(a_contents.len() > 4096, "setup: projA must exceed limit");
@@ -1282,9 +1392,24 @@ mod tests {
         let proj_b = projects_dir.join("projB");
         fs::create_dir(&proj_b).unwrap();
         let mut b_contents = String::from("# projB — Instructions Inbox\n");
-        write_entry(&mut b_contents, "2026-04-08 12:01", "b-pending body", "pending");
-        write_entry(&mut b_contents, "2026-04-08 12:02", "b-done body", "complete");
-        write_entry(&mut b_contents, "2026-04-08 12:03", "b-more body", "pending");
+        write_entry(
+            &mut b_contents,
+            "2026-04-08 12:01",
+            "b-pending body",
+            "pending",
+        );
+        write_entry(
+            &mut b_contents,
+            "2026-04-08 12:02",
+            "b-done body",
+            "complete",
+        );
+        write_entry(
+            &mut b_contents,
+            "2026-04-08 12:03",
+            "b-more body",
+            "pending",
+        );
         fs::write(proj_b.join("instructions_inbox.md"), &b_contents).unwrap();
 
         // projC: no inbox file at all
@@ -1294,7 +1419,11 @@ mod tests {
         // Dotfile dir with an inbox — should be skipped entirely
         let dot_dir = projects_dir.join(".feedback");
         fs::create_dir(&dot_dir).unwrap();
-        fs::write(dot_dir.join("instructions_inbox.md"), "# should be ignored\n").unwrap();
+        fs::write(
+            dot_dir.join("instructions_inbox.md"),
+            "# should be ignored\n",
+        )
+        .unwrap();
 
         let report = maintain_all_project_inboxes(projects_dir, 4096).unwrap();
 
@@ -1313,8 +1442,16 @@ mod tests {
         );
 
         let b_trim = report.trimmed.iter().find(|(p, _)| p == &proj_b);
-        assert!(b_trim.is_some(), "projB should appear in trimmed: {:?}", report.trimmed);
-        assert_eq!(b_trim.unwrap().1, 1, "projB should have 1 completed entry removed");
+        assert!(
+            b_trim.is_some(),
+            "projB should appear in trimmed: {:?}",
+            report.trimmed
+        );
+        assert_eq!(
+            b_trim.unwrap().1,
+            1,
+            "projB should have 1 completed entry removed"
+        );
 
         assert!(
             !report.trimmed.iter().any(|(p, _)| p == &proj_c),
@@ -1333,10 +1470,19 @@ mod tests {
     #[test]
     fn test_scoring() {
         // orr-prefix gets a boost
-        assert!(score_project_mention("update orrapus", "orrapus") > score_project_mention("update concord", "concord"));
+        assert!(
+            score_project_mention("update orrapus", "orrapus")
+                > score_project_mention("update concord", "concord")
+        );
         // explicit context beats bare mention
-        assert!(score_project_mention("the notes project", "notes") > score_project_mention("trade notes on data", "notes"));
+        assert!(
+            score_project_mention("the notes project", "notes")
+                > score_project_mention("trade notes on data", "notes")
+        );
         // ambiguous word with no context scores 0 or below threshold
-        assert_eq!(score_project_mention("cluster admins can restrict", "admin"), 0);
+        assert_eq!(
+            score_project_mention("cluster admins can restrict", "admin"),
+            0
+        );
     }
 }

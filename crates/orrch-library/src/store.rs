@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use crate::item::{ItemKind, LibraryItem};
+use std::path::{Path, PathBuf};
 
 /// Access layer for the library's git-backed storage.
 pub struct LibraryStore {
@@ -9,12 +9,14 @@ pub struct LibraryStore {
 impl LibraryStore {
     /// Open a library store at the given root directory.
     pub fn open(root: &Path) -> Self {
-        Self { root: root.to_path_buf() }
+        Self {
+            root: root.to_path_buf(),
+        }
     }
 
     /// Default library path: ~/.config/orrchestrator/library/
     pub fn default_path() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         PathBuf::from(home)
             .join(".config")
             .join("orrchestrator")
@@ -28,10 +30,10 @@ impl LibraryStore {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "md") {
-                    if let Some(item) = self.load_item(&path, kind) {
-                        items.push(item);
-                    }
+                if path.extension().is_some_and(|e| e == "md")
+                    && let Some(item) = self.load_item(&path, kind)
+                {
+                    items.push(item);
                 }
             }
         }
@@ -42,8 +44,12 @@ impl LibraryStore {
     /// List all items across all kinds.
     pub fn list_all(&self) -> Vec<LibraryItem> {
         let kinds = [
-            ItemKind::Agent, ItemKind::Skill, ItemKind::Tool,
-            ItemKind::McpServer, ItemKind::WorkforceTemplate, ItemKind::ApiKey,
+            ItemKind::Agent,
+            ItemKind::Skill,
+            ItemKind::Tool,
+            ItemKind::McpServer,
+            ItemKind::WorkforceTemplate,
+            ItemKind::ApiKey,
         ];
         kinds.iter().flat_map(|k| self.list(*k)).collect()
     }

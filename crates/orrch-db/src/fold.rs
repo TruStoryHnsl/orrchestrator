@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 /// Fold the `events` log into the `bugs` current-state table.
 ///
@@ -25,15 +25,25 @@ pub fn fold_bugs(conn: &Connection) -> rusqlite::Result<()> {
 
     // (project, bug_id) -> folded fields
     use std::collections::BTreeMap;
-    let mut acc: BTreeMap<(String, String), (String, String, String, String, String, Option<String>)> =
-        BTreeMap::new();
+    let mut acc: BTreeMap<
+        (String, String),
+        (String, String, String, String, String, Option<String>),
+    > = BTreeMap::new();
     // tuple = (title, severity, status, first_seen, last_ts, resolution)
 
     for row in rows {
         let (project, bug_id, ts, kind, payload_json) = row?;
-        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
         let entry = acc.entry((project, bug_id)).or_insert_with(|| {
-            (String::new(), "unknown".into(), "open".into(), ts.clone(), ts.clone(), None)
+            (
+                String::new(),
+                "unknown".into(),
+                "open".into(),
+                ts.clone(),
+                ts.clone(),
+                None,
+            )
         });
         entry.4 = ts.clone(); // last_ts
         match kind.as_str() {
@@ -53,7 +63,10 @@ pub fn fold_bugs(conn: &Connection) -> rusqlite::Result<()> {
             }
             "bug_resolved" => {
                 entry.2 = "resolved".into();
-                entry.5 = payload.get("resolution").and_then(|v| v.as_str()).map(|s| s.to_string());
+                entry.5 = payload
+                    .get("resolution")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
             }
             _ => {}
         }
@@ -93,17 +106,35 @@ mod tests {
     fn open_then_resolve_yields_resolved_status() {
         let conn = Connection::open_in_memory().unwrap();
         init_schema(&conn).unwrap();
-        insert_event(&conn, &ev("e1", "2026-05-29T01:00:00Z", EventKind::BugOpened,
-            serde_json::json!({"title":"Crash","severity":"high"}))).unwrap();
-        insert_event(&conn, &ev("e2", "2026-05-29T02:00:00Z", EventKind::BugResolved,
-            serde_json::json!({"resolution":"clamp slice on char boundary"}))).unwrap();
+        insert_event(
+            &conn,
+            &ev(
+                "e1",
+                "2026-05-29T01:00:00Z",
+                EventKind::BugOpened,
+                serde_json::json!({"title":"Crash","severity":"high"}),
+            ),
+        )
+        .unwrap();
+        insert_event(
+            &conn,
+            &ev(
+                "e2",
+                "2026-05-29T02:00:00Z",
+                EventKind::BugResolved,
+                serde_json::json!({"resolution":"clamp slice on char boundary"}),
+            ),
+        )
+        .unwrap();
 
         fold_bugs(&conn).unwrap();
 
         let (status, title, sev, res): (String, String, String, Option<String>) = conn
-            .query_row("SELECT status, title, severity, resolution FROM bugs WHERE bug_id='b1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-            })
+            .query_row(
+                "SELECT status, title, severity, resolution FROM bugs WHERE bug_id='b1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
             .unwrap();
         assert_eq!(status, "resolved");
         assert_eq!(title, "Crash");
@@ -115,11 +146,21 @@ mod tests {
     fn fold_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
         init_schema(&conn).unwrap();
-        insert_event(&conn, &ev("e1", "2026-05-29T01:00:00Z", EventKind::BugOpened,
-            serde_json::json!({"title":"X","severity":"low"}))).unwrap();
+        insert_event(
+            &conn,
+            &ev(
+                "e1",
+                "2026-05-29T01:00:00Z",
+                EventKind::BugOpened,
+                serde_json::json!({"title":"X","severity":"low"}),
+            ),
+        )
+        .unwrap();
         fold_bugs(&conn).unwrap();
         fold_bugs(&conn).unwrap();
-        let n: i64 = conn.query_row("SELECT count(*) FROM bugs", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM bugs", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1);
     }
 }

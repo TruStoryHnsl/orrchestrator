@@ -4,17 +4,17 @@
 //! global library. The database holds zero unique durable state and is fully
 //! reconstructable from those files. There are no schema migrations.
 
-pub mod model;
-pub mod schema;
-pub mod parse;
-pub mod ingest;
 pub mod fold;
-pub mod rebuild;
-pub mod query;
-pub mod watch;
+pub mod ingest;
 pub mod migrate;
+pub mod model;
+pub mod parse;
+pub mod query;
+pub mod rebuild;
+pub mod schema;
+pub mod watch;
 
 pub use model::{
     ArchFact, BugRow, EntityType, EventKind, EventRecord, FeatureRow, LibraryRow, LicenseRow,
 };
-pub use rebuild::{rebuild_all, RebuildSources};
+pub use rebuild::{RebuildSources, rebuild_all};

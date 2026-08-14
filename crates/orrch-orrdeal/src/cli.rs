@@ -40,8 +40,7 @@ async fn skeleton_run() -> anyhow::Result<()> {
     }
 
     // Both arms run concurrently; each always resolves to a Target.
-    let (ephemeral, mesh) =
-        tokio::join!(provision::run(&cfg.proxmox), discover::run(&cfg.mesh));
+    let (ephemeral, mesh) = tokio::join!(provision::run(&cfg.proxmox), discover::run(&cfg.mesh));
 
     let mut reg = Registry::new();
     reg.add(ephemeral);

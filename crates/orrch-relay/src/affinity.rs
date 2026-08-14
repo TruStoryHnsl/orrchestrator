@@ -49,7 +49,11 @@ pub struct OllamaEmbedder {
 }
 impl OllamaEmbedder {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
-        Self { base_url: base_url.into(), model: model.into(), client: reqwest::Client::new() }
+        Self {
+            base_url: base_url.into(),
+            model: model.into(),
+            client: reqwest::Client::new(),
+        }
     }
 }
 #[async_trait]
@@ -63,7 +67,10 @@ impl Embedder for OllamaEmbedder {
             .get("embedding")
             .and_then(|e| e.as_array())
             .ok_or_else(|| anyhow::anyhow!("no embedding field"))?;
-        Ok(arr.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect())
+        Ok(arr
+            .iter()
+            .filter_map(|v| v.as_f64().map(|f| f as f32))
+            .collect())
     }
 }
 
@@ -74,8 +81,12 @@ pub struct MockEmbedder {
 }
 #[cfg(test)]
 impl MockEmbedder {
-    pub fn constant(v: Vec<f32>) -> Self { Self { constant: Some(v) } }
-    pub fn failing() -> Self { Self { constant: None } }
+    pub fn constant(v: Vec<f32>) -> Self {
+        Self { constant: Some(v) }
+    }
+    pub fn failing() -> Self {
+        Self { constant: None }
+    }
 }
 #[cfg(test)]
 #[async_trait]
@@ -132,7 +143,10 @@ mod tests {
     fn test_req(text: &str) -> crate::types::CompletionRequest {
         crate::types::CompletionRequest {
             model: "m".into(),
-            messages: vec![crate::types::ChatMessage { role: "user".into(), content: text.into() }],
+            messages: vec![crate::types::ChatMessage {
+                role: "user".into(),
+                content: text.into(),
+            }],
             stream: false,
             affinity_hint: None,
             extra: serde_json::Map::new(),

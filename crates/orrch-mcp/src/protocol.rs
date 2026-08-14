@@ -79,8 +79,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Legacy (initialize-handshake) revisions this dual-era server still accepts,
 /// newest first. Kept through the spec's twelve-month deprecation window so
 /// legacy clients keep working.
-const LEGACY_PROTOCOL_VERSIONS: &[&str] =
-    &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const LEGACY_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_NAME: &str = "orrch-mcp-server";
 const SERVER_VERSION: &str = "0.2.0";
 /// Freshness hint on cacheable list results. The tool list is static per
@@ -144,13 +143,12 @@ pub async fn run_stdio(server: OrrchMcpServer) -> Result<(), Box<dyn std::error:
         };
 
         // Validate jsonrpc version if present.
-        if let Some(ref v) = req.jsonrpc {
-            if v != "2.0" {
-                let resp =
-                    JsonRpcResponse::error(req.id, -32600, "Invalid jsonrpc version".into());
-                write_response(&mut stdout, &resp).await?;
-                continue;
-            }
+        if let Some(ref v) = req.jsonrpc
+            && v != "2.0"
+        {
+            let resp = JsonRpcResponse::error(req.id, -32600, "Invalid jsonrpc version".into());
+            write_response(&mut stdout, &resp).await?;
+            continue;
         }
 
         let response = dispatch(&server, &req).await;
@@ -293,10 +291,7 @@ async fn handle_tools_call(
     id: Option<Value>,
     params: &Value,
 ) -> JsonRpcResponse {
-    let name = params
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let arguments = params
         .get("arguments")
         .cloned()
@@ -396,10 +391,12 @@ mod tests {
         assert_eq!(err.code, UNSUPPORTED_PROTOCOL_VERSION);
         let data = err.data.unwrap();
         assert_eq!(data["requested"], "1900-01-01");
-        assert!(data["supported"]
-            .as_array()
-            .unwrap()
-            .contains(&Value::String(MODERN_PROTOCOL_VERSION.into())));
+        assert!(
+            data["supported"]
+                .as_array()
+                .unwrap()
+                .contains(&Value::String(MODERN_PROTOCOL_VERSION.into()))
+        );
     }
 
     #[test]
@@ -421,7 +418,8 @@ mod tests {
 
     #[test]
     fn test_error_response() {
-        let resp = JsonRpcResponse::error(Some(Value::Number(1.into())), -32601, "Not found".into());
+        let resp =
+            JsonRpcResponse::error(Some(Value::Number(1.into())), -32601, "Not found".into());
         assert!(resp.error.is_some());
         assert!(resp.result.is_none());
         assert_eq!(resp.error.unwrap().code, -32601);

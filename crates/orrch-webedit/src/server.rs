@@ -20,8 +20,8 @@
 
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -204,8 +204,7 @@ mod tests {
     #[test]
     fn server_serves_index_on_root() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let handle =
-            launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
+        let handle = launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
         let addr = handle.addr();
 
         let mut stream = TcpStream::connect(addr).expect("connect");
@@ -231,20 +230,20 @@ mod tests {
     #[test]
     fn server_returns_404_for_unknown_route() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let handle =
-            launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
+        let handle = launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
         let addr = handle.addr();
 
         let mut stream = TcpStream::connect(addr).expect("connect");
         stream
-            .write_all(
-                b"GET /nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-            )
+            .write_all(b"GET /nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             .expect("write");
         let mut reader = BufReader::new(&stream);
         let mut status_line = String::new();
         reader.read_line(&mut status_line).expect("read");
-        assert!(status_line.starts_with("HTTP/1.1 404"), "got: {status_line:?}");
+        assert!(
+            status_line.starts_with("HTTP/1.1 404"),
+            "got: {status_line:?}"
+        );
 
         handle.shutdown();
     }
@@ -260,18 +259,16 @@ mod tests {
     /// fails loudly instead of the bug only surfacing in the browser.
     #[test]
     fn roundtrip_post_then_get_over_socket() {
-        use orrch_workforce::{parse_workforce_markdown, AgentNode, Workforce};
+        use orrch_workforce::{AgentNode, Workforce, parse_workforce_markdown};
 
         let tmp = tempfile::tempdir().expect("tempdir");
-        let handle =
-            launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
+        let handle = launch_webedit_server(tmp.path().to_path_buf(), 0).expect("server starts");
         let addr = handle.addr();
 
         // Build a 3-agent workforce via the public types + parser so we know
         // the JSON shape matches what the API expects.
         let base_md = "---\nname: Round Trip\ndescription: socket roundtrip fixture\noperations:\n  - DEVELOP FEATURE\n---\n\n## Agents\n\n| ID | Agent Profile | User-Facing |\n|----|---------------|-------------|\n| pm | Project Manager | yes |\n";
-        let mut wf: Workforce =
-            parse_workforce_markdown(base_md).expect("fixture parses");
+        let mut wf: Workforce = parse_workforce_markdown(base_md).expect("fixture parses");
         wf.agents.push(AgentNode {
             id: "dev1".into(),
             agent_profile: "Developer".into(),
@@ -304,7 +301,9 @@ mod tests {
         stream.write_all(request.as_bytes()).expect("write POST");
         let mut reader = BufReader::new(&stream);
         let mut status_line = String::new();
-        reader.read_line(&mut status_line).expect("read POST status");
+        reader
+            .read_line(&mut status_line)
+            .expect("read POST status");
         assert!(
             status_line.starts_with("HTTP/1.1 200"),
             "POST expected 200, got: {status_line:?}"
@@ -343,8 +342,7 @@ mod tests {
         let mut body_buf = Vec::new();
         reader.read_to_end(&mut body_buf).expect("read GET body");
         let body_str = String::from_utf8(body_buf).expect("utf8");
-        let got: Workforce =
-            serde_json::from_str(&body_str).expect("parse GET body as Workforce");
+        let got: Workforce = serde_json::from_str(&body_str).expect("parse GET body as Workforce");
         assert_eq!(
             got.agents.len(),
             3,

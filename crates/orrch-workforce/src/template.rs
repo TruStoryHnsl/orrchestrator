@@ -125,12 +125,24 @@ mod tests {
             name: "General Software Development".into(),
             description: "Full dev team with PM, engineers, testers".into(),
             agents: vec![
-                AgentNode { id: "pm".into(), agent_profile: "Project Manager".into(), user_facing: true, nested_workforce: None },
-                AgentNode { id: "dev".into(), agent_profile: "Developer".into(), user_facing: false, nested_workforce: None },
+                AgentNode {
+                    id: "pm".into(),
+                    agent_profile: "Project Manager".into(),
+                    user_facing: true,
+                    nested_workforce: None,
+                },
+                AgentNode {
+                    id: "dev".into(),
+                    agent_profile: "Developer".into(),
+                    user_facing: false,
+                    nested_workforce: None,
+                },
             ],
-            connections: vec![
-                Connection { from: "pm".into(), to: "dev".into(), data_type: DataFlow::Instructions },
-            ],
+            connections: vec![Connection {
+                from: "pm".into(),
+                to: "dev".into(),
+                data_type: DataFlow::Instructions,
+            }],
             operations: vec!["DEVELOP FEATURE".into()],
             teams: vec![],
         };

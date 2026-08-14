@@ -123,14 +123,27 @@ mod tests {
     #[test]
     fn test_all_roles_have_departments() {
         let roles = [
-            AgentRole::ExecutiveAssistant, AgentRole::ChiefOperationsOfficer,
-            AgentRole::IntelligenceResourcesManager, AgentRole::Mentor, AgentRole::Hypervisor,
-            AgentRole::ProjectManager, AgentRole::TalentScout, AgentRole::ResourceOptimizer,
-            AgentRole::SoftwareEngineer, AgentRole::Developer, AgentRole::FeatureTester,
-            AgentRole::Researcher, AgentRole::UiDesigner, AgentRole::Specialist,
-            AgentRole::PenetrationTester, AgentRole::BetaTester, AgentRole::RepositoryManager,
-            AgentRole::UxSpecialist, AgentRole::MarketResearcher,
-            AgentRole::LicensingAuditor, AgentRole::CopyrightInvestigator,
+            AgentRole::ExecutiveAssistant,
+            AgentRole::ChiefOperationsOfficer,
+            AgentRole::IntelligenceResourcesManager,
+            AgentRole::Mentor,
+            AgentRole::Hypervisor,
+            AgentRole::ProjectManager,
+            AgentRole::TalentScout,
+            AgentRole::ResourceOptimizer,
+            AgentRole::SoftwareEngineer,
+            AgentRole::Developer,
+            AgentRole::FeatureTester,
+            AgentRole::Researcher,
+            AgentRole::UiDesigner,
+            AgentRole::Specialist,
+            AgentRole::PenetrationTester,
+            AgentRole::BetaTester,
+            AgentRole::RepositoryManager,
+            AgentRole::UxSpecialist,
+            AgentRole::MarketResearcher,
+            AgentRole::LicensingAuditor,
+            AgentRole::CopyrightInvestigator,
         ];
         assert_eq!(roles.len(), 21); // 19 from plan + Hypervisor + Resource Optimizer
         for role in &roles {

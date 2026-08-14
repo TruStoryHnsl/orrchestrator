@@ -55,8 +55,7 @@ pub fn append_diff(project_dir: &Path, feature_id: &str, summary: &str) -> std::
     map.entry(feature_id.to_string()).or_default().push(entry);
 
     let path = diff_log_path(project_dir);
-    let json = serde_json::to_string_pretty(&map)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(&map).map_err(std::io::Error::other)?;
     std::fs::write(&path, json)?;
     Ok(())
 }

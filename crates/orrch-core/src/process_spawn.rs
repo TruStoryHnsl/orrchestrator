@@ -199,7 +199,9 @@ mod tests {
     fn falls_back_when_systemd_unavailable() {
         // Re-implement the fallback branch locally so the assertion proves
         // the contract regardless of host state.
-        let cmd = if false /* systemd unavailable */ {
+        let cmd = if false
+        /* systemd unavailable */
+        {
             let mut c = Command::new("systemd-run");
             c.args(["--user", "--scope", "--slice=orrch.slice", "--", "echo"]);
             c

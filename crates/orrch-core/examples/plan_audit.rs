@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn main() -> std::io::Result<()> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let projects_root = Path::new(&home).join("projects");
     let mut plans = Vec::new();
     collect_plans(&projects_root, &mut plans)?;
