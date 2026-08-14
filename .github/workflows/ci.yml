@@ -22,8 +22,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: System deps (tmux for orrch-webui integration tests)
-        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: System deps (tmux for webui tests; ALSA for orrch-voice/cpal)
+        run: sudo apt-get update && sudo apt-get install -y tmux libasound2-dev
       - run: cargo fmt --all --check
       # Non-blocking: ~60 pre-existing clippy style lints remain after the
       # auto-fixable ones were cleared. Flip to `-D warnings` (blocking)
