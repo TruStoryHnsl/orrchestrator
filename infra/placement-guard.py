@@ -42,7 +42,15 @@ def main():
         allow()
 
     local_host = os.environ.get("ORRCH_HOST_OVERRIDE") or socket.gethostname().split(".")[0].lower()
-    gen_dir = pathlib.Path(os.path.expanduser("~/projects/orrchestrator/infra/generated"))
+    # Resolve the generated-guard dir relative to THIS script first (works from
+    # any checkout path, including CI), then fall back to the conventional
+    # ~/projects location for a deployed guard invoked from elsewhere.
+    here_gen = pathlib.Path(__file__).resolve().parent / "generated"
+    gen_dir = (
+        here_gen
+        if here_gen.is_dir()
+        else pathlib.Path(os.path.expanduser("~/projects/orrchestrator/infra/generated"))
+    )
 
     # If the command deploys to a REMOTE host via ssh, evaluate against THAT
     # host's ruleset (ops run from one workstation, ssh into servers).
