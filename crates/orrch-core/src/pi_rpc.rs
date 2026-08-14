@@ -36,11 +36,7 @@ pub enum PiEvent {
 
 impl PiRpcSession {
     /// Spawn `pi --mode rpc --no-session [--provider p] [--model m] [--thinking off]`.
-    pub fn spawn(
-        provider: Option<&str>,
-        model: Option<&str>,
-        cwd: &Path,
-    ) -> anyhow::Result<Self> {
+    pub fn spawn(provider: Option<&str>, model: Option<&str>, cwd: &Path) -> anyhow::Result<Self> {
         let mut cmd = Command::new("pi");
         cmd.arg("--mode").arg("rpc");
         cmd.arg("--no-session");
@@ -97,8 +93,7 @@ impl PiRpcSession {
     /// Send a prompt command via JSONL stdin.
     pub fn prompt(&mut self, text: &str) -> anyhow::Result<()> {
         let msg = serde_json::json!({ "type": "prompt", "message": text });
-        writeln!(self.stdin, "{msg}")
-            .map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
+        writeln!(self.stdin, "{msg}").map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
         self.state = SessionState::Working;
         Ok(())
     }
@@ -106,16 +101,14 @@ impl PiRpcSession {
     /// Send a steer command (inject mid-turn).
     pub fn steer(&mut self, text: &str) -> anyhow::Result<()> {
         let msg = serde_json::json!({ "type": "steer", "message": text });
-        writeln!(self.stdin, "{msg}")
-            .map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
+        writeln!(self.stdin, "{msg}").map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
         Ok(())
     }
 
     /// Send abort command.
     pub fn abort(&mut self) -> anyhow::Result<()> {
         let msg = serde_json::json!({ "type": "abort" });
-        writeln!(self.stdin, "{msg}")
-            .map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
+        writeln!(self.stdin, "{msg}").map_err(|e| anyhow::anyhow!("pi stdin write failed: {e}"))?;
         Ok(())
     }
 
@@ -173,10 +166,7 @@ fn parse_pi_event(line: &str) -> PiEvent {
         return PiEvent::Unknown;
     };
 
-    let event_type = val
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let event_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match event_type {
         "agent_start" => PiEvent::AgentStart,
@@ -203,7 +193,9 @@ fn parse_pi_event(line: &str) -> PiEvent {
                 .get("assistantMessageEvent")
                 .and_then(|e| {
                     if e.get("type").and_then(|t| t.as_str()) == Some("text_delta") {
-                        e.get("delta").and_then(|d| d.as_str()).map(|s| s.to_string())
+                        e.get("delta")
+                            .and_then(|d| d.as_str())
+                            .map(|s| s.to_string())
                     } else {
                         None
                     }

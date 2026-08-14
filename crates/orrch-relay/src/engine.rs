@@ -2,15 +2,17 @@
 //! forwards one request at a time and relays the token stream back.
 use crate::types::{CompletionRequest, TokenEvent};
 use async_trait::async_trait;
-use futures::stream::BoxStream;
 use futures::StreamExt;
+use futures::stream::BoxStream;
 use std::sync::{Arc, Mutex};
 
 #[async_trait]
 pub trait Engine: Send + Sync {
     /// Run one completion, yielding token events ending in `Done` (or `Error`).
-    async fn complete(&self, req: &CompletionRequest)
-        -> anyhow::Result<BoxStream<'static, TokenEvent>>;
+    async fn complete(
+        &self,
+        req: &CompletionRequest,
+    ) -> anyhow::Result<BoxStream<'static, TokenEvent>>;
 }
 
 /// Drives any OpenAI-compatible `/v1/chat/completions` server (llama-server,
@@ -23,15 +25,24 @@ pub struct OpenAiEngine {
 
 impl OpenAiEngine {
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
-        Self { base_url: base_url.into(), api_key, client: reqwest::Client::new() }
+        Self {
+            base_url: base_url.into(),
+            api_key,
+            client: reqwest::Client::new(),
+        }
     }
 }
 
 #[async_trait]
 impl Engine for OpenAiEngine {
-    async fn complete(&self, req: &CompletionRequest)
-        -> anyhow::Result<BoxStream<'static, TokenEvent>> {
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
+    async fn complete(
+        &self,
+        req: &CompletionRequest,
+    ) -> anyhow::Result<BoxStream<'static, TokenEvent>> {
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
         let mut body = serde_json::to_value(req)?;
         body["stream"] = serde_json::Value::Bool(true);
         let mut rb = self.client.post(url).json(&body);
@@ -66,16 +77,17 @@ impl SseLineParser {
         while let Some(pos) = self.buf.find('\n') {
             let line: String = self.buf.drain(..=pos).collect();
             let line = line.trim();
-            let Some(payload) = line.strip_prefix("data:") else { continue };
+            let Some(payload) = line.strip_prefix("data:") else {
+                continue;
+            };
             let payload = payload.trim();
             if payload == "[DONE]" {
                 out.push(TokenEvent::Done);
-            } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(payload) {
-                if let Some(tok) = json["choices"][0]["delta"]["content"].as_str() {
-                    if !tok.is_empty() {
-                        out.push(TokenEvent::Token(tok.to_string()));
-                    }
-                }
+            } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(payload)
+                && let Some(tok) = json["choices"][0]["delta"]["content"].as_str()
+                && !tok.is_empty()
+            {
+                out.push(TokenEvent::Token(tok.to_string()));
             }
         }
         out
@@ -90,7 +102,10 @@ pub struct MockEngine {
 }
 impl MockEngine {
     pub fn new(tokens: Vec<String>) -> Self {
-        Self { tokens, received: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            tokens,
+            received: Arc::new(Mutex::new(Vec::new())),
+        }
     }
     pub fn received_models(&self) -> Vec<String> {
         self.received.lock().unwrap().clone()
@@ -98,8 +113,10 @@ impl MockEngine {
 }
 #[async_trait]
 impl Engine for MockEngine {
-    async fn complete(&self, req: &CompletionRequest)
-        -> anyhow::Result<BoxStream<'static, TokenEvent>> {
+    async fn complete(
+        &self,
+        req: &CompletionRequest,
+    ) -> anyhow::Result<BoxStream<'static, TokenEvent>> {
         self.received.lock().unwrap().push(req.model.clone());
         let mut events: Vec<TokenEvent> =
             self.tokens.iter().cloned().map(TokenEvent::Token).collect();
@@ -117,7 +134,10 @@ mod tests {
     fn req() -> CompletionRequest {
         CompletionRequest {
             model: "m".into(),
-            messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "hi".into(),
+            }],
             stream: true,
             affinity_hint: None,
             extra: serde_json::Map::new(),
@@ -146,7 +166,9 @@ mod tests {
         let mut toks = String::new();
         // A data line split mid-token across two byte chunks.
         for ev in p.push_bytes(b"data: {\"choices\":[{\"delta\":{\"content\":\"hel") {
-            if let TokenEvent::Token(t) = ev { toks.push_str(&t); }
+            if let TokenEvent::Token(t) = ev {
+                toks.push_str(&t);
+            }
         }
         let mut saw_done = false;
         for ev in p.push_bytes(b"lo\"}}]}\n\ndata: [DONE]\n\n") {
@@ -156,7 +178,10 @@ mod tests {
                 TokenEvent::Error(e) => panic!("{e}"),
             }
         }
-        assert_eq!(toks, "hello", "token split across chunks must be reassembled");
+        assert_eq!(
+            toks, "hello",
+            "token split across chunks must be reassembled"
+        );
         assert!(saw_done, "[DONE] after the token must be emitted");
     }
 }

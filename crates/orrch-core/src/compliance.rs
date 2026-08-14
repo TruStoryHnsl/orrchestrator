@@ -80,9 +80,17 @@ pub fn scan_licenses(project_dir: &Path) -> LicenseReport {
         let line = line.trim();
         if line == "[[package]]" {
             if !name.is_empty() {
-                let spdx = table.get(name.as_str()).cloned().unwrap_or_else(|| "Unknown".to_string());
+                let spdx = table
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| "Unknown".to_string());
                 let status = classify_spdx(&spdx);
-                deps.push(LicenseDep { name: std::mem::take(&mut name), version: std::mem::take(&mut version), spdx, status });
+                deps.push(LicenseDep {
+                    name: std::mem::take(&mut name),
+                    version: std::mem::take(&mut version),
+                    spdx,
+                    status,
+                });
             }
         } else if let Some(rest) = line.strip_prefix("name = ") {
             name = rest.trim_matches('"').to_string();
@@ -92,23 +100,53 @@ pub fn scan_licenses(project_dir: &Path) -> LicenseReport {
     }
     // Final package
     if !name.is_empty() {
-        let spdx = table.get(name.as_str()).cloned().unwrap_or_else(|| "Unknown".to_string());
+        let spdx = table
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string());
         let status = classify_spdx(&spdx);
-        deps.push(LicenseDep { name, version, spdx, status });
+        deps.push(LicenseDep {
+            name,
+            version,
+            spdx,
+            status,
+        });
     }
 
     let total = deps.len();
-    let permissive = deps.iter().filter(|d| d.status == LicenseStatus::Permissive).count();
-    let copyleft = deps.iter().filter(|d| d.status == LicenseStatus::Copyleft).count();
-    let unknown = deps.iter().filter(|d| d.status == LicenseStatus::Unknown).count();
+    let permissive = deps
+        .iter()
+        .filter(|d| d.status == LicenseStatus::Permissive)
+        .count();
+    let copyleft = deps
+        .iter()
+        .filter(|d| d.status == LicenseStatus::Copyleft)
+        .count();
+    let unknown = deps
+        .iter()
+        .filter(|d| d.status == LicenseStatus::Unknown)
+        .count();
 
-    LicenseReport { deps, total, permissive, copyleft, unknown }
+    LicenseReport {
+        deps,
+        total,
+        permissive,
+        copyleft,
+        unknown,
+    }
 }
 
 fn classify_spdx(spdx: &str) -> LicenseStatus {
-    if spdx == "Unknown" { return LicenseStatus::Unknown; }
+    if spdx == "Unknown" {
+        return LicenseStatus::Unknown;
+    }
     let s = spdx.to_uppercase();
-    if s.contains("GPL") || s.contains("LGPL") || s.contains("AGPL") || s.contains("MPL") || s.contains("EUPL") {
+    if s.contains("GPL")
+        || s.contains("LGPL")
+        || s.contains("AGPL")
+        || s.contains("MPL")
+        || s.contains("EUPL")
+    {
         LicenseStatus::Copyleft
     } else {
         LicenseStatus::Permissive
@@ -276,7 +314,9 @@ pub struct CopyrightReport {
 
 impl CopyrightReport {
     pub fn coverage_pct(&self) -> f32 {
-        if self.scanned == 0 { return 100.0; }
+        if self.scanned == 0 {
+            return 100.0;
+        }
         (self.with_header as f32 / self.scanned as f32) * 100.0
     }
 }

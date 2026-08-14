@@ -329,7 +329,13 @@ fn build_workflow_preamble(team_refs: &[TeamRef]) -> String {
 /// form "develop_feature" used in `teams/<name>.md` and TeamRef.team.
 fn slugify(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .split('_')
         .filter(|s| !s.is_empty())
@@ -368,7 +374,11 @@ mod tests {
             steps: vec![
                 TeamStep {
                     index: "1".into(),
-                    agent: if with_pm { "Project Manager".into() } else { "Developer".into() },
+                    agent: if with_pm {
+                        "Project Manager".into()
+                    } else {
+                        "Developer".into()
+                    },
                     tool_or_skill: Some("skill:plan".into()),
                     operation: "plan the work".into(),
                 },
@@ -399,7 +409,10 @@ mod tests {
         let prompts = vec![
             ("Project Manager".into(), "PM body".into()),
             ("Developer".into(), "Dev body".into()),
-            ("Researcher".into(), "Researcher body — should NOT appear".into()),
+            (
+                "Researcher".into(),
+                "Researcher body — should NOT appear".into(),
+            ),
         ];
         let compiled = compile_team(&team, &prompts);
         assert_eq!(compiled.agent_role_prompts.len(), 2);
@@ -469,8 +482,16 @@ mod tests {
             operations: vec![],
             teams: vec![
                 // user puts cleanup first by mistake
-                TeamRef { order: 1, team: "cleanup".into(), description: "".into() },
-                TeamRef { order: 2, team: "develop_feature".into(), description: "".into() },
+                TeamRef {
+                    order: 1,
+                    team: "cleanup".into(),
+                    description: "".into(),
+                },
+                TeamRef {
+                    order: 2,
+                    team: "develop_feature".into(),
+                    description: "".into(),
+                },
             ],
         };
         let compiled = compile_workflow(&wf, &[dev, cleanup], &[]);

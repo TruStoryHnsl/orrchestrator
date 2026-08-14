@@ -9,16 +9,24 @@ use std::process::{Command, Stdio};
 /// Tries wl-paste (Wayland) → xclip (X11) → arboard (fallback).
 pub fn clipboard_get() -> Option<String> {
     // Wayland
-    if let Ok(out) = Command::new("wl-paste").arg("--no-newline").stdout(Stdio::piped()).stderr(Stdio::null()).output() {
-        if out.status.success() {
-            return String::from_utf8(out.stdout).ok();
-        }
+    if let Ok(out) = Command::new("wl-paste")
+        .arg("--no-newline")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        && out.status.success()
+    {
+        return String::from_utf8(out.stdout).ok();
     }
     // X11
-    if let Ok(out) = Command::new("xclip").args(["-selection", "clipboard", "-o"]).stdout(Stdio::piped()).stderr(Stdio::null()).output() {
-        if out.status.success() {
-            return String::from_utf8(out.stdout).ok();
-        }
+    if let Ok(out) = Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        && out.status.success()
+    {
+        return String::from_utf8(out.stdout).ok();
     }
     // Last resort
     arboard::Clipboard::new().ok()?.get_text().ok()
@@ -28,27 +36,38 @@ pub fn clipboard_get() -> Option<String> {
 /// Tries wl-copy (Wayland) → xclip (X11) → arboard (fallback).
 pub fn clipboard_set(text: &str) -> bool {
     // Wayland
-    if let Ok(mut child) = Command::new("wl-copy").stdin(Stdio::piped()).stderr(Stdio::null()).spawn() {
-        if let Some(stdin) = child.stdin.take() {
-            use std::io::Write;
-            let mut stdin = stdin;
-            let _ = stdin.write_all(text.as_bytes());
-            drop(stdin);
-            if let Ok(status) = child.wait() {
-                if status.success() { return true; }
-            }
+    if let Ok(mut child) = Command::new("wl-copy")
+        .stdin(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        && let Some(stdin) = child.stdin.take()
+    {
+        use std::io::Write;
+        let mut stdin = stdin;
+        let _ = stdin.write_all(text.as_bytes());
+        drop(stdin);
+        if let Ok(status) = child.wait()
+            && status.success()
+        {
+            return true;
         }
     }
     // X11
-    if let Ok(mut child) = Command::new("xclip").args(["-selection", "clipboard"]).stdin(Stdio::piped()).stderr(Stdio::null()).spawn() {
-        if let Some(stdin) = child.stdin.take() {
-            use std::io::Write;
-            let mut stdin = stdin;
-            let _ = stdin.write_all(text.as_bytes());
-            drop(stdin);
-            if let Ok(status) = child.wait() {
-                if status.success() { return true; }
-            }
+    if let Ok(mut child) = Command::new("xclip")
+        .args(["-selection", "clipboard"])
+        .stdin(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        && let Some(stdin) = child.stdin.take()
+    {
+        use std::io::Write;
+        let mut stdin = stdin;
+        let _ = stdin.write_all(text.as_bytes());
+        drop(stdin);
+        if let Ok(status) = child.wait()
+            && status.success()
+        {
+            return true;
         }
     }
     // Last resort
@@ -103,9 +122,22 @@ fn find_terminal() -> Option<String> {
     if let Ok(t) = std::env::var("TERMINAL") {
         return Some(t);
     }
-    for name in &["alacritty", "kitty", "konsole", "gnome-terminal", "xfce4-terminal", "xterm"] {
-        if Command::new("which").arg(name).stdout(Stdio::null()).stderr(Stdio::null()).status()
-            .map(|s| s.success()).unwrap_or(false) {
+    for name in &[
+        "alacritty",
+        "kitty",
+        "konsole",
+        "gnome-terminal",
+        "xfce4-terminal",
+        "xterm",
+    ] {
+        if Command::new("which")
+            .arg(name)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
             return Some(name.to_string());
         }
     }
@@ -121,10 +153,7 @@ fn find_terminal() -> Option<String> {
 /// the window in alt-tab / taskbar; the rest belongs to the user's nvim.
 fn vim_title_args(title: &str) -> Vec<String> {
     let esc = title.replace(' ', "\\ ");
-    vec![
-        "-c".into(),
-        format!("set title titlestring={esc}"),
-    ]
+    vec!["-c".into(), format!("set title titlestring={esc}")]
 }
 
 /// Get the nvim `-c` args for branding (used by the blocking fallback in main.rs).
@@ -144,7 +173,9 @@ pub fn vim_title_args_pub(title: &str) -> Vec<String> {
 pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::process::Child> {
     use std::os::unix::process::CommandExt;
 
-    if !has_display() { return None; }
+    if !has_display() {
+        return None;
+    }
     let terminal = find_terminal()?;
     let file_str = file.to_str()?;
     let vim_args = vim_title_args(title);
@@ -161,16 +192,58 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
 
     // Each terminal has different syntax for "run this command"
     match terminal.as_str() {
-        "gnome-terminal" => { cmd.arg("--title").arg(title).arg("--").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
-        "kitty" => { cmd.arg("--title").arg(title).arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
-        "xterm" => { cmd.arg("-T").arg(title).arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
-        "konsole" => { cmd.arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
-        _ => { cmd.arg("--title").arg(title).arg("-e").arg("nvim").args(listen_args).args(&vim_args).arg(file_str); }
+        "gnome-terminal" => {
+            cmd.arg("--title")
+                .arg(title)
+                .arg("--")
+                .arg("nvim")
+                .args(listen_args)
+                .args(&vim_args)
+                .arg(file_str);
+        }
+        "kitty" => {
+            cmd.arg("--title")
+                .arg(title)
+                .arg("nvim")
+                .args(listen_args)
+                .args(&vim_args)
+                .arg(file_str);
+        }
+        "xterm" => {
+            cmd.arg("-T")
+                .arg(title)
+                .arg("-e")
+                .arg("nvim")
+                .args(listen_args)
+                .args(&vim_args)
+                .arg(file_str);
+        }
+        "konsole" => {
+            cmd.arg("-e")
+                .arg("nvim")
+                .args(listen_args)
+                .args(&vim_args)
+                .arg(file_str);
+        }
+        _ => {
+            cmd.arg("--title")
+                .arg(title)
+                .arg("-e")
+                .arg("nvim")
+                .args(listen_args)
+                .args(&vim_args)
+                .arg(file_str);
+        }
     }
 
     // Detach: new session so the terminal survives orrchestrator exit/crash.
     // SAFETY: setsid() is async-signal-safe and has no preconditions.
-    unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
 
     let child = cmd.spawn().ok();
 
@@ -187,7 +260,9 @@ pub fn spawn_vim_window(file: &std::path::Path, title: &str) -> Option<std::proc
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);
-                if ok { break; }
+                if ok {
+                    break;
+                }
             }
         });
     }

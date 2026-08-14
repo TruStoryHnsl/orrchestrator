@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use crate::item::{ItemKind, LibraryItem};
-use crate::store::{parse_frontmatter_pub, extract_field_pub};
+use crate::store::{extract_field_pub, parse_frontmatter_pub};
+use std::path::{Path, PathBuf};
 
 /// Load all PI extensions from `dir` (`library/pi-extensions/*.ts`).
 /// Returns a `LibraryItem` per file; description comes from the first
@@ -12,10 +12,10 @@ pub fn load_pi_extensions(dir: &Path) -> Vec<LibraryItem> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "ts") {
-            if let Some(item) = load_pi_extension_item(&path) {
-                items.push(item);
-            }
+        if path.extension().is_some_and(|e| e == "ts")
+            && let Some(item) = load_pi_extension_item(&path)
+        {
+            items.push(item);
         }
     }
     items.sort_by(|a, b| a.name.cmp(&b.name));
@@ -27,10 +27,13 @@ fn load_pi_extension_item(path: &Path) -> Option<LibraryItem> {
     let name = path.file_stem()?.to_string_lossy().to_string();
 
     // Extract description from first `// Description: ...` comment line.
-    let description = content.lines()
+    let description = content
+        .lines()
         .find_map(|line| {
             let trimmed = line.trim();
-            trimmed.strip_prefix("// Description:").map(|s| s.trim().to_string())
+            trimmed
+                .strip_prefix("// Description:")
+                .map(|s| s.trim().to_string())
         })
         .unwrap_or_default();
 
@@ -48,7 +51,10 @@ fn load_pi_extension_item(path: &Path) -> Option<LibraryItem> {
 /// Extracts frontmatter `name`, `description`, `tags` and wraps the
 /// body as a system-prompt injected via `pi.on("session_start")`.
 /// Returns the path of the written `.ts` file.
-pub fn translate_skill_to_pi_extension(skill_path: &Path, out_dir: &Path) -> anyhow::Result<PathBuf> {
+pub fn translate_skill_to_pi_extension(
+    skill_path: &Path,
+    out_dir: &Path,
+) -> anyhow::Result<PathBuf> {
     let content = std::fs::read_to_string(skill_path)?;
     let slug = skill_path
         .file_stem()
@@ -64,7 +70,13 @@ pub fn translate_skill_to_pi_extension(skill_path: &Path, out_dir: &Path) -> any
         (slug.clone(), String::new(), content.trim().to_string())
     };
 
-    let ts = skill_to_ts(&slug, &name, &description, &body, skill_path.to_string_lossy().as_ref());
+    let ts = skill_to_ts(
+        &slug,
+        &name,
+        &description,
+        &body,
+        skill_path.to_string_lossy().as_ref(),
+    );
     std::fs::create_dir_all(out_dir)?;
     let out_path = out_dir.join(format!("{}.ts", slug));
     std::fs::write(&out_path, ts)?;
@@ -83,15 +95,25 @@ pub fn translate_tool_to_pi_extension(tool_path: &Path, out_dir: &Path) -> anyho
         .to_string();
 
     // Extract description from leading comment lines (skip shebang).
-    let description = content.lines()
+    let description = content
+        .lines()
         .skip_while(|l| l.starts_with("#!/"))
         .find_map(|line| {
             let t = line.trim_start_matches('#').trim();
-            if t.is_empty() { None } else { Some(t.to_string()) }
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
         })
         .unwrap_or_else(|| format!("{} tool", slug));
 
-    let ts = tool_to_ts(&slug, &description, &content, tool_path.to_string_lossy().as_ref());
+    let ts = tool_to_ts(
+        &slug,
+        &description,
+        &content,
+        tool_path.to_string_lossy().as_ref(),
+    );
     std::fs::create_dir_all(out_dir)?;
     let out_path = out_dir.join(format!("{}.ts", slug));
     std::fs::write(&out_path, ts)?;
@@ -102,7 +124,10 @@ pub fn translate_tool_to_pi_extension(tool_path: &Path, out_dir: &Path) -> anyho
 
 fn skill_to_ts(slug: &str, name: &str, description: &str, body: &str, source: &str) -> String {
     // Escape backticks inside the body for template literal safety.
-    let escaped_body = body.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
+    let escaped_body = body
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
     format!(
         r#"import type {{ ExtensionAPI }} from "@mariozechner/pi-coding-agent";
 
@@ -133,7 +158,10 @@ export default function (pi: ExtensionAPI) {{
 
 fn tool_to_ts(slug: &str, description: &str, script: &str, source: &str) -> String {
     // Escape the script for embedding in a template literal.
-    let escaped_script = script.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
+    let escaped_script = script
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
     format!(
         r#"import type {{ ExtensionAPI }} from "@mariozechner/pi-coding-agent";
 import {{ spawnSync }} from "child_process";
@@ -184,7 +212,11 @@ mod tests {
     fn test_translate_skill_produces_ts() {
         let dir = tempdir().unwrap();
         let skill = dir.path().join("my_skill.md");
-        std::fs::write(&skill, "---\nname: My Skill\ndescription: Does things\n---\n\n# Body\nDo stuff.").unwrap();
+        std::fs::write(
+            &skill,
+            "---\nname: My Skill\ndescription: Does things\n---\n\n# Body\nDo stuff.",
+        )
+        .unwrap();
         let out_dir = dir.path().join("pi-extensions");
         let out = translate_skill_to_pi_extension(&skill, &out_dir).unwrap();
         assert!(out.exists());
@@ -218,7 +250,11 @@ mod tests {
     #[test]
     fn test_load_pi_extensions_reads_ts() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("ext.ts"), "// Description: hello\nexport default function(pi) {}").unwrap();
+        std::fs::write(
+            dir.path().join("ext.ts"),
+            "// Description: hello\nexport default function(pi) {}",
+        )
+        .unwrap();
         let items = load_pi_extensions(dir.path());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].name, "ext");

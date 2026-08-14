@@ -31,10 +31,7 @@ impl AgentProfile {
 
     /// Format the agent profile as a prompt preamble to prepend to a task goal.
     pub fn as_preamble(&self, task: &str) -> String {
-        format!(
-            "{}\n\n---\n\n## Your Task\n\n{}",
-            self.prompt, task,
-        )
+        format!("{}\n\n---\n\n## Your Task\n\n{}", self.prompt, task,)
     }
 
     /// Short display label: "Name (role)"
@@ -53,10 +50,10 @@ pub fn load_agents(dir: &Path) -> Vec<AgentProfile> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(profile) = AgentProfile::load(&path) {
-                    agents.push(profile);
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(profile) = AgentProfile::load(&path)
+            {
+                agents.push(profile);
             }
         }
     }
@@ -73,7 +70,7 @@ pub fn agents_dir() -> PathBuf {
         return local;
     }
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home)
         .join(".config")
         .join("orrchestrator")
@@ -148,7 +145,10 @@ mod tests {
         let fm = "name: Hypervisor\ndepartment: admin\nrole: Workforce Orchestrator";
         assert_eq!(extract_field(fm, "name"), Some("Hypervisor".into()));
         assert_eq!(extract_field(fm, "department"), Some("admin".into()));
-        assert_eq!(extract_field(fm, "role"), Some("Workforce Orchestrator".into()));
+        assert_eq!(
+            extract_field(fm, "role"),
+            Some("Workforce Orchestrator".into())
+        );
     }
 
     #[test]

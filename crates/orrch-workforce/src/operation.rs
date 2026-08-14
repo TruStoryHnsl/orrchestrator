@@ -77,7 +77,9 @@ impl std::fmt::Display for TriggerCondition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UserSubmit { input_type } => write!(f, "user submits {}", input_type),
-            Self::InboxNotEmpty { project } => write!(f, "unprocessed instructions exist in project {}", project),
+            Self::InboxNotEmpty { project } => {
+                write!(f, "unprocessed instructions exist in project {}", project)
+            }
             Self::Manual => write!(f, "manual trigger"),
             Self::OperationComplete { operation } => write!(f, "{} operation completes", operation),
         }
@@ -87,8 +89,12 @@ impl std::fmt::Display for TriggerCondition {
 impl std::fmt::Display for BlockCondition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ApiRateLimited { provider } => write!(f, "API rate limit reached for {}", provider),
-            Self::OperationInProgress { operation } => write!(f, "{} is currently running", operation),
+            Self::ApiRateLimited { provider } => {
+                write!(f, "API rate limit reached for {}", provider)
+            }
+            Self::OperationInProgress { operation } => {
+                write!(f, "{} is currently running", operation)
+            }
             Self::Custom { description } => write!(f, "{}", description),
         }
     }
@@ -112,7 +118,9 @@ mod tests {
     fn test_instruction_intake_module() {
         let op = Operation {
             name: "INSTRUCTION INTAKE".into(),
-            trigger: TriggerCondition::UserSubmit { input_type: "instructions".into() },
+            trigger: TriggerCondition::UserSubmit {
+                input_type: "instructions".into(),
+            },
             blocker: None,
             steps: vec![
                 Step {
@@ -150,17 +158,53 @@ mod tests {
     fn test_develop_feature_parallel_steps() {
         let op = Operation {
             name: "DEVELOP FEATURE".into(),
-            trigger: TriggerCondition::InboxNotEmpty { project: "*".into() },
-            blocker: Some(BlockCondition::ApiRateLimited { provider: "any".into() }),
+            trigger: TriggerCondition::InboxNotEmpty {
+                project: "*".into(),
+            },
+            blocker: Some(BlockCondition::ApiRateLimited {
+                provider: "any".into(),
+            }),
             steps: vec![
-                Step { index: "1".into(), agent: "Project Manager".into(), tool_or_skill: None, operation: "synthesize instructions".into(), parallel_group: None, model_override: None },
-                Step { index: "2".into(), agent: "Developer".into(), tool_or_skill: None, operation: "execute coding tasks".into(), parallel_group: Some(1), model_override: None },
-                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "conduct research".into(), parallel_group: Some(1), model_override: None },
-                Step { index: "2".into(), agent: "Feature Tester".into(), tool_or_skill: None, operation: "design tests".into(), parallel_group: Some(1), model_override: None },
+                Step {
+                    index: "1".into(),
+                    agent: "Project Manager".into(),
+                    tool_or_skill: None,
+                    operation: "synthesize instructions".into(),
+                    parallel_group: None,
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Developer".into(),
+                    tool_or_skill: None,
+                    operation: "execute coding tasks".into(),
+                    parallel_group: Some(1),
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Researcher".into(),
+                    tool_or_skill: None,
+                    operation: "conduct research".into(),
+                    parallel_group: Some(1),
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Feature Tester".into(),
+                    tool_or_skill: None,
+                    operation: "design tests".into(),
+                    parallel_group: Some(1),
+                    model_override: None,
+                },
             ],
             interrupts: vec![InterruptCondition::UserCancel],
         };
-        let parallel: Vec<_> = op.steps.iter().filter(|s| s.parallel_group == Some(1)).collect();
+        let parallel: Vec<_> = op
+            .steps
+            .iter()
+            .filter(|s| s.parallel_group == Some(1))
+            .collect();
         assert_eq!(parallel.len(), 3);
     }
 }

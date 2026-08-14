@@ -21,8 +21,8 @@ fn main() {
     println!("cargo:rustc-env=ORRCH_BUILD_TIMESTAMP_NS={nanos}");
 
     // CARGO_MANIFEST_DIR points to the binary crate (src/). Repo root is its parent.
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR set by cargo");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
     let repo_root = std::path::Path::new(&manifest_dir)
         .parent()
         .map(|p| p.to_string_lossy().into_owned())

@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 
 use orrch_core::file_registry::{AgentId, FileRegistry};
 use orrch_core::loop_review::{
-    loop_review_with, ActionCoeffs, CandidateStep, EnergyScorer, LagrangianScorer, LinearCoeffs,
-    LinearLagrangianScorer, ScoringContext, TermBreakdown, WorkspaceState, DEFAULT_HISTORY_PATH,
-    DEFAULT_RANKED_PATH,
+    ActionCoeffs, CandidateStep, DEFAULT_HISTORY_PATH, DEFAULT_RANKED_PATH, EnergyScorer,
+    LagrangianScorer, LinearCoeffs, LinearLagrangianScorer, ScoringContext, TermBreakdown,
+    WorkspaceState, loop_review_with,
 };
 
 fn tmp_root() -> tempfile::TempDir {
@@ -86,11 +86,8 @@ fn linear_scorer_default_coeffs() {
     //   = 0.025775
     let expected_diff = 0.025_f64;
     let expected_tok = 2025.0_f64 / 200_000.0_f64;
-    let expected_e = 0.30 * 0.0
-        + 0.15 * expected_diff
-        + 0.20 * expected_tok
-        + 0.20 * 0.10
-        + 0.15 * 0.0;
+    let expected_e =
+        0.30 * 0.0 + 0.15 * expected_diff + 0.20 * expected_tok + 0.20 * 0.10 + 0.15 * 0.0;
     assert!(
         (scored.energy - expected_e).abs() < 1e-9,
         "E mismatch: got {}, want {}",
@@ -173,10 +170,10 @@ fn lagrangian_scorer_kinetic_potential_split() {
     let scorer_t_dominant = LagrangianScorer::new(ActionCoeffs {
         alpha_tok: 1e-5,
         alpha_cpu: 1e-3,
-        alpha_risk: 100.0,    // crank up risk weight
+        alpha_risk: 100.0, // crank up risk weight
         alpha_ctx: 1e-4,
         beta_block: 5.0,
-        beta_acc: 1.0,        // de-emphasize V
+        beta_acc: 1.0, // de-emphasize V
         beta_reuse: 0.5,
     });
     let sr2 = scorer_t_dominant.score(&s_refactor, &ctx_r);
@@ -220,7 +217,11 @@ fn ranking_replaces_preliminary() {
     #[derive(Debug)]
     struct WorkedExampleScorer;
     impl EnergyScorer for WorkedExampleScorer {
-        fn score(&self, step: &CandidateStep, _ctx: &ScoringContext<'_>) -> orrch_core::loop_review::ScoredStep {
+        fn score(
+            &self,
+            step: &CandidateStep,
+            _ctx: &ScoringContext<'_>,
+        ) -> orrch_core::loop_review::ScoredStep {
             let coeffs = LinearCoeffs::default();
             let (reuse, diff, tok, risk, unblk) = match step.id.as_str() {
                 "T-A" => (-1.00, 0.02, 0.05, 0.0, 0.0),
@@ -247,13 +248,39 @@ fn ranking_replaces_preliminary() {
                 },
             }
         }
-        fn name(&self) -> &'static str { "worked-example" }
+        fn name(&self) -> &'static str {
+            "worked-example"
+        }
     }
 
     let plan = vec![
-        step("T-A", "lib.rs comment tweak", &[], "tweak", &[], 0.05, Some(0.0)),
-        step("T-B", "add Session field", &[], "add field", &[], 0.25, Some(0.3)),
-        step("T-C", "split process_manager", &[], "refactor", &[], 0.6, Some(1.0)),
+        step(
+            "T-A",
+            "lib.rs comment tweak",
+            &[],
+            "tweak",
+            &[],
+            0.05,
+            Some(0.0),
+        ),
+        step(
+            "T-B",
+            "add Session field",
+            &[],
+            "add field",
+            &[],
+            0.25,
+            Some(0.3),
+        ),
+        step(
+            "T-C",
+            "split process_manager",
+            &[],
+            "refactor",
+            &[],
+            0.6,
+            Some(1.0),
+        ),
         step("T-D", "pub use line", &[], "add", &[], 0.05, Some(0.1)),
     ];
     let scorer = WorkedExampleScorer;
@@ -275,20 +302,47 @@ fn ranking_replaces_preliminary() {
         "ranking should reflect the math (not spec's typo'd E_TD)"
     );
 
-    let e_by: HashMap<&str, f64> = outcome.ranked.iter().map(|s| (s.step_id.as_str(), s.energy)).collect();
-    assert!((e_by["T-A"] - (-0.287)).abs() < 1e-3, "TA E mismatch: {}", e_by["T-A"]);
+    let e_by: HashMap<&str, f64> = outcome
+        .ranked
+        .iter()
+        .map(|s| (s.step_id.as_str(), s.energy))
+        .collect();
+    assert!(
+        (e_by["T-A"] - (-0.287)).abs() < 1e-3,
+        "TA E mismatch: {}",
+        e_by["T-A"]
+    );
     // True arithmetic value of T-D:
-    assert!((e_by["T-D"] - (-0.4185)).abs() < 1e-3, "TD E mismatch: {}", e_by["T-D"]);
-    assert!((e_by["T-B"] - 0.1325).abs() < 1e-3, "TB E mismatch: {}", e_by["T-B"]);
-    assert!((e_by["T-C"] - 0.475).abs() < 1e-3, "TC E mismatch: {}", e_by["T-C"]);
+    assert!(
+        (e_by["T-D"] - (-0.4185)).abs() < 1e-3,
+        "TD E mismatch: {}",
+        e_by["T-D"]
+    );
+    assert!(
+        (e_by["T-B"] - 0.1325).abs() < 1e-3,
+        "TB E mismatch: {}",
+        e_by["T-B"]
+    );
+    assert!(
+        (e_by["T-C"] - 0.475).abs() < 1e-3,
+        "TC E mismatch: {}",
+        e_by["T-C"]
+    );
 
     // File exists, parseable.
     let ranked_text = fs::read_to_string(root.path().join(DEFAULT_RANKED_PATH)).unwrap();
     assert!(ranked_text.starts_with("RANKING"));
     // First TASK block listed is T-D (lowest E).
     let after_dashes = ranked_text.split("---\n").nth(1).unwrap();
-    let first_task_line = after_dashes.lines().find(|l| l.starts_with("TASK ")).unwrap();
-    assert!(first_task_line.starts_with("TASK T-D:"), "first task block should be T-D, got: {}", first_task_line);
+    let first_task_line = after_dashes
+        .lines()
+        .find(|l| l.starts_with("TASK "))
+        .unwrap();
+    assert!(
+        first_task_line.starts_with("TASK T-D:"),
+        "first task block should be T-D, got: {}",
+        first_task_line
+    );
 }
 
 // 4. history_jsonl_grows — two calls -> 2N rows, each valid JSON.
@@ -308,7 +362,11 @@ fn history_jsonl_grows() {
     let path = root.path().join(DEFAULT_HISTORY_PATH);
     let text = fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    assert_eq!(lines.len(), 6, "2 invocations * 3 candidates = 6 history rows");
+    assert_eq!(
+        lines.len(),
+        6,
+        "2 invocations * 3 candidates = 6 history rows"
+    );
     for l in &lines {
         let v: serde_json::Value = serde_json::from_str(l).expect("each line must be valid JSON");
         // Required fields exist.
@@ -339,8 +397,24 @@ fn context_reuse_bonus_via_file_registry() {
     let scorer = LinearLagrangianScorer::defaults();
     let workspace = WorkspaceState::capture(root.path());
 
-    let s_reuse = step("R", "edit owned", &["owned.rs"], "tweak", &[], 0.05, Some(0.0));
-    let s_fresh = step("F", "edit other", &["other.rs"], "tweak", &[], 0.05, Some(0.0));
+    let s_reuse = step(
+        "R",
+        "edit owned",
+        &["owned.rs"],
+        "tweak",
+        &[],
+        0.05,
+        Some(0.0),
+    );
+    let s_fresh = step(
+        "F",
+        "edit other",
+        &["other.rs"],
+        "tweak",
+        &[],
+        0.05,
+        Some(0.0),
+    );
     let all = vec![s_reuse.clone(), s_fresh.clone()];
 
     let ctx_with = ScoringContext::new(Some(&registry), &all, &workspace);
@@ -426,7 +500,11 @@ fn fifo_vs_lagrangian_worked_example() {
     #[derive(Debug)]
     struct WorkedExampleScorer;
     impl EnergyScorer for WorkedExampleScorer {
-        fn score(&self, step: &CandidateStep, _ctx: &ScoringContext<'_>) -> orrch_core::loop_review::ScoredStep {
+        fn score(
+            &self,
+            step: &CandidateStep,
+            _ctx: &ScoringContext<'_>,
+        ) -> orrch_core::loop_review::ScoredStep {
             let coeffs = LinearCoeffs::default();
             let (reuse, diff, tok, risk, unblk) = match step.id.as_str() {
                 "T-A" => (-1.00, 0.02, 0.05, 0.0, 0.0),
@@ -453,13 +531,23 @@ fn fifo_vs_lagrangian_worked_example() {
                 },
             }
         }
-        fn name(&self) -> &'static str { "worked-example" }
+        fn name(&self) -> &'static str {
+            "worked-example"
+        }
     }
     let root = tmp_root();
     let fifo_plan = vec![
         step("T-A", "lib.rs tweak", &[], "tweak", &[], 0.05, Some(0.0)),
         step("T-B", "add field", &[], "add", &[], 0.25, Some(0.3)),
-        step("T-C", "massive refactor", &[], "refactor", &[], 0.6, Some(1.0)),
+        step(
+            "T-C",
+            "massive refactor",
+            &[],
+            "refactor",
+            &[],
+            0.6,
+            Some(1.0),
+        ),
         step("T-D", "tiny pub use", &[], "add", &[], 0.05, Some(0.1)),
     ];
     let fifo_order: Vec<String> = fifo_plan.iter().map(|s| s.id.clone()).collect();

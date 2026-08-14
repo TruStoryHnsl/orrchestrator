@@ -3,7 +3,7 @@
 //! The library is a git repo containing agent profiles, workforces, models, etc.
 //! These functions provide a thin wrapper around `git` for clone/pull/push.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
 

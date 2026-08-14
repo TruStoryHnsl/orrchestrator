@@ -16,8 +16,20 @@ use crate::intent::VoiceAction;
 use crate::protocol::Utterance;
 use crate::tts::{SpeechSink, SystemTts};
 
-const PI_BIN: &str = "/home/user/.npm-global/bin/pi";
-const ORRCH_MCP_BIN: &str = "/home/user/.local/bin/orrch-mcp-server";
+/// Path to the `pi` CLI. Override with `ORRCH_PI_BIN`; the default
+/// assumes it is on PATH.
+fn pi_bin() -> String {
+    std::env::var("ORRCH_PI_BIN").unwrap_or_else(|_| "pi".into())
+}
+
+/// Path to the orrch MCP server binary. Override with
+/// `ORRCH_MCP_BIN`; the default is where install.sh puts it.
+fn orrch_mcp_bin() -> String {
+    std::env::var("ORRCH_MCP_BIN").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        format!("{home}/.local/bin/orrch-mcp-server")
+    })
+}
 
 const DEFAULT_SYSTEM_PROMPT: &str = r#"You are the conversational orrchestrator admin portal.
 You help the user create and submit feedback or implementation instructions, and you can dispatch heavier work to Codex.
@@ -182,7 +194,8 @@ impl RpcProcess {
         // assistant message events, and the turn is complete on `agent_end`.
         // The process must keep stdin open; EOF requests shutdown.
         write_mcp_config(&config.mcp_config_path)?;
-        let mut child = Command::new(PI_BIN)
+        let pi = pi_bin();
+        let mut child = Command::new(&pi)
             .arg("--mode")
             .arg("rpc")
             .arg("--provider")
@@ -204,7 +217,7 @@ impl RpcProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .with_context(|| format!("failed to start {PI_BIN} in RPC mode"))?;
+            .with_context(|| format!("failed to start {pi} in RPC mode"))?;
 
         let stdin = child
             .stdin
@@ -466,7 +479,7 @@ pub fn write_mcp_config(path: &Path) -> Result<()> {
     let config = json!({
         "mcpServers": {
             "orrchestrator": {
-                "command": ORRCH_MCP_BIN,
+                "command": orrch_mcp_bin(),
                 "args": [],
                 "env": {},
                 "lifecycle": "eager",
@@ -598,7 +611,7 @@ mod tests {
 
         assert_eq!(
             value["mcpServers"]["orrchestrator"]["command"],
-            ORRCH_MCP_BIN
+            orrch_mcp_bin()
         );
     }
 }

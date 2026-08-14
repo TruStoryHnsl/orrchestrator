@@ -5,8 +5,8 @@ pub mod protocol;
 pub mod store;
 pub mod tracker;
 
-pub use analyzer::{analyze_ecosystem, EcosystemAnalysis, ProjectAnalysis};
-pub use error_parser::{classify_error, extract_errors, ErrorCategory};
+pub use analyzer::{EcosystemAnalysis, ProjectAnalysis, analyze_ecosystem};
+pub use error_parser::{ErrorCategory, classify_error, extract_errors};
 pub use fingerprint::fingerprint;
 pub use protocol::generate_protocols;
 pub use store::{ErrorRecord, ErrorStore};

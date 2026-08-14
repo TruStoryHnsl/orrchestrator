@@ -37,7 +37,10 @@ pub fn build_hypervisor_context(
         let path = agents_dir.join(format!("{}.md", filename));
         out.push_str(&format!(
             "| {} | {} | {} | {} |\n",
-            node.id, node.agent_profile, facing, path.display(),
+            node.id,
+            node.agent_profile,
+            facing,
+            path.display(),
         ));
     }
     out.push('\n');
@@ -101,21 +104,17 @@ impl AgentRunner {
     /// 1. Agent identity and behavioral rules (from profile .md body)
     /// 2. Core context (project summary, if provided)
     /// 3. Task instruction
-    pub fn build_prompt(
-        agent: &AgentProfile,
-        task: &str,
-        core_context: Option<&str>,
-    ) -> String {
+    pub fn build_prompt(agent: &AgentProfile, task: &str, core_context: Option<&str>) -> String {
         let mut parts = Vec::with_capacity(3);
 
         // Agent identity preamble
         parts.push(agent.prompt.clone());
 
         // Core context (shared reference info, never current-task state)
-        if let Some(ctx) = core_context {
-            if !ctx.is_empty() {
-                parts.push(format!("## Core Context\n\n{}", ctx));
-            }
+        if let Some(ctx) = core_context
+            && !ctx.is_empty()
+        {
+            parts.push(format!("## Core Context\n\n{}", ctx));
         }
 
         // Task instruction
@@ -140,10 +139,10 @@ impl AgentRunner {
         parts.push(agent.prompt.clone());
 
         // Core context (historical only)
-        if let Some(ctx) = core_context {
-            if !ctx.is_empty() {
-                parts.push(format!("## Core Context\n\n{}", ctx));
-            }
+        if let Some(ctx) = core_context
+            && !ctx.is_empty()
+        {
+            parts.push(format!("## Core Context\n\n{}", ctx));
         }
 
         // Deliverable only — no implementation notes
@@ -226,10 +225,10 @@ impl AgentRunner {
 
         parts.push(agent.prompt.clone());
 
-        if let Some(ctx) = core_context {
-            if !ctx.is_empty() {
-                parts.push(format!("## Core Context\n\n{}", ctx));
-            }
+        if let Some(ctx) = core_context
+            && !ctx.is_empty()
+        {
+            parts.push(format!("## Core Context\n\n{}", ctx));
         }
 
         // Handoff from previous agent (compressed to drop reasoning/preamble)
@@ -354,10 +353,7 @@ fn strip_thinking_blocks(text: &str) -> String {
 /// This helper deliberately takes a plain `&str` filename instead of importing
 /// `orrch_core::Project`, so `orrch-agents` does not need to depend on
 /// `orrch-core`.
-pub fn load_project_core_context(
-    project_root: &Path,
-    profile_filename: &str,
-) -> Option<String> {
+pub fn load_project_core_context(project_root: &Path, profile_filename: &str) -> Option<String> {
     let path = project_root.join(profile_filename);
     std::fs::read_to_string(path).ok()
 }
@@ -447,12 +443,42 @@ pub fn mentor_review_profile(
 /// agent's profile body, library items whose name/path contain them become
 /// candidates.
 const MENTOR_TOPIC_KEYWORDS: &[&str] = &[
-    "test", "commit", "release", "review", "debug", "deploy", "build",
-    "branch", "pr", "pull request", "scope", "plan", "develop", "feature",
-    "instruction", "intake", "audit", "security", "penetration", "research",
-    "beta", "pm", "engineer", "developer", "tester", "coo", "ux", "ui",
-    "mentor", "repo", "repository", "interpret", "compress", "route",
-    "cluster", "workflow",
+    "test",
+    "commit",
+    "release",
+    "review",
+    "debug",
+    "deploy",
+    "build",
+    "branch",
+    "pr",
+    "pull request",
+    "scope",
+    "plan",
+    "develop",
+    "feature",
+    "instruction",
+    "intake",
+    "audit",
+    "security",
+    "penetration",
+    "research",
+    "beta",
+    "pm",
+    "engineer",
+    "developer",
+    "tester",
+    "coo",
+    "ux",
+    "ui",
+    "mentor",
+    "repo",
+    "repository",
+    "interpret",
+    "compress",
+    "route",
+    "cluster",
+    "workflow",
 ];
 
 fn extract_profile_topics(profile: &crate::profile::AgentProfile) -> Vec<String> {
@@ -488,11 +514,7 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn item_matches_topics(
-    name: &str,
-    path: &std::path::Path,
-    topics: &[String],
-) -> bool {
+fn item_matches_topics(name: &str, path: &std::path::Path, topics: &[String]) -> bool {
     let hay = format!(
         "{} {}",
         name.to_lowercase(),
@@ -688,17 +710,37 @@ mod tests {
     fn test_compress_handoff_strips_thinking() {
         let input = "<thinking>internal reasoning here</thinking>\nFinal answer.";
         let out = compress_handoff(input);
-        assert!(!out.contains("internal reasoning"), "thinking block not stripped: {:?}", out);
-        assert!(out.contains("Final answer."), "final answer missing: {:?}", out);
+        assert!(
+            !out.contains("internal reasoning"),
+            "thinking block not stripped: {:?}",
+            out
+        );
+        assert!(
+            out.contains("Final answer."),
+            "final answer missing: {:?}",
+            out
+        );
     }
 
     #[test]
     fn test_compress_handoff_strips_preamble() {
         let input = "Let me check the code.\nLooking at this file, I see the issue.\nThe fix is in foo.rs:42.";
         let out = compress_handoff(input);
-        assert!(!out.contains("Let me check"), "preamble 'Let me' not stripped: {:?}", out);
-        assert!(!out.contains("Looking at this"), "preamble 'Looking at this' not stripped: {:?}", out);
-        assert!(out.contains("The fix is in foo.rs:42."), "substantive line missing: {:?}", out);
+        assert!(
+            !out.contains("Let me check"),
+            "preamble 'Let me' not stripped: {:?}",
+            out
+        );
+        assert!(
+            !out.contains("Looking at this"),
+            "preamble 'Looking at this' not stripped: {:?}",
+            out
+        );
+        assert!(
+            out.contains("The fix is in foo.rs:42."),
+            "substantive line missing: {:?}",
+            out
+        );
     }
 
     #[test]
@@ -706,7 +748,11 @@ mod tests {
         let input = "Summary:\n```rust\nlet me reassign x = 5;\n```\nDone.";
         let out = compress_handoff(input);
         // The "let me reassign" line is inside a fenced code block, so it must be kept.
-        assert!(out.contains("let me reassign x = 5;"), "code-block line was stripped: {:?}", out);
+        assert!(
+            out.contains("let me reassign x = 5;"),
+            "code-block line was stripped: {:?}",
+            out
+        );
         assert!(out.contains("```"), "code fence missing: {:?}", out);
         assert!(out.contains("Summary:"));
         assert!(out.contains("Done."));
@@ -718,7 +764,11 @@ mod tests {
         let out = compress_handoff(input);
         // Should collapse the run of blank lines to a single blank line:
         // "line one\n\nline two"
-        assert_eq!(out, "line one\n\nline two", "blank lines not collapsed: {:?}", out);
+        assert_eq!(
+            out, "line one\n\nline two",
+            "blank lines not collapsed: {:?}",
+            out
+        );
     }
 
     #[test]
@@ -770,17 +820,35 @@ mod tests {
     fn test_mentor_review_profile_matches_test_topics() {
         let profile = tester_profile();
         let skills = vec![
-            ("agent-feature-tester".to_string(), std::path::PathBuf::from("library/skills/agent-feature-tester.md")),
-            ("agent-pm".to_string(),             std::path::PathBuf::from("library/skills/agent-pm.md")),
-            ("release".to_string(),              std::path::PathBuf::from("library/skills/release.md")),
+            (
+                "agent-feature-tester".to_string(),
+                std::path::PathBuf::from("library/skills/agent-feature-tester.md"),
+            ),
+            (
+                "agent-pm".to_string(),
+                std::path::PathBuf::from("library/skills/agent-pm.md"),
+            ),
+            (
+                "release".to_string(),
+                std::path::PathBuf::from("library/skills/release.md"),
+            ),
         ];
         let tools = vec![
-            ("workflow_status.sh".to_string(), std::path::PathBuf::from("library/tools/workflow_status.sh")),
-            ("route_instructions.sh".to_string(), std::path::PathBuf::from("library/tools/route_instructions.sh")),
+            (
+                "workflow_status.sh".to_string(),
+                std::path::PathBuf::from("library/tools/workflow_status.sh"),
+            ),
+            (
+                "route_instructions.sh".to_string(),
+                std::path::PathBuf::from("library/tools/route_instructions.sh"),
+            ),
         ];
 
         let block = mentor_review_profile(&profile, &skills, &tools);
-        assert!(!block.is_empty(), "tester profile should produce a non-empty references block");
+        assert!(
+            !block.is_empty(),
+            "tester profile should produce a non-empty references block"
+        );
         assert!(block.contains("Mentor-Suggested Library References"));
         assert!(block.contains("Skills"));
         // agent-feature-tester matches "tester" / "feature" / "test"
@@ -790,9 +858,10 @@ mod tests {
     #[test]
     fn test_mentor_review_profile_no_matches_returns_empty() {
         let profile = empty_profile();
-        let skills = vec![
-            ("unrelated-item-xyz".to_string(), std::path::PathBuf::from("library/skills/unrelated-item-xyz.md")),
-        ];
+        let skills = vec![(
+            "unrelated-item-xyz".to_string(),
+            std::path::PathBuf::from("library/skills/unrelated-item-xyz.md"),
+        )];
         let tools: Vec<(String, std::path::PathBuf)> = vec![];
 
         let block = mentor_review_profile(&profile, &skills, &tools);
@@ -864,8 +933,10 @@ mod tests {
 
     #[test]
     fn test_build_hypervisor_context() {
-        use orrch_workforce::{Workforce, AgentNode, Connection, Operation, Step, TriggerCondition};
         use orrch_workforce::template::DataFlow;
+        use orrch_workforce::{
+            AgentNode, Connection, Operation, Step, TriggerCondition, Workforce,
+        };
 
         let workforce = Workforce {
             name: "Test Workforce".into(),

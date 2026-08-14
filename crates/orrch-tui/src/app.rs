@@ -6,16 +6,16 @@ use std::sync::mpsc as std_mpsc;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
 use orrch_core::process_manager::SessionEvent;
-use orrch_core::usage::{self, UsageRecord, UsageEvent};
+use orrch_core::usage::{self, UsageEvent, UsageRecord};
 use orrch_core::{
-    analyze_output, infer_state, load_projects, BackendKind, ColorTag,
-    OutputSignal, ProcessManager, Project, SessionState, Temperature, CONTINUE_DEV_PROMPT,
-    FeedbackItem, FeedbackStatus, load_agents, agents_dir,
+    BackendKind, CONTINUE_DEV_PROMPT, ColorTag, FeedbackItem, FeedbackStatus, OutputSignal,
+    ProcessManager, Project, SessionState, Temperature, agents_dir, analyze_output, infer_state,
+    load_agents, load_projects,
 };
 use orrch_retrospect::{ErrorStore, SolutionTracker};
 use tokio::sync::mpsc;
 
-use crate::editor::{VimKind, VimRequest, PendingEditor};
+use crate::editor::{PendingEditor, VimKind, VimRequest};
 
 /// Translate a crossterm key event into a tmux `send-keys` argument.
 ///
@@ -68,9 +68,15 @@ fn key_to_tmux_spec(code: KeyCode, mods: KeyModifiers) -> Option<String> {
 #[allow(dead_code)] // helper for `key_to_tmux_spec`; kept paired with it.
 fn format_key_spec(base: &str, ctrl: bool, alt: bool, shift: bool) -> String {
     let mut prefix = String::new();
-    if ctrl { prefix.push_str("C-"); }
-    if alt { prefix.push_str("M-"); }
-    if shift { prefix.push_str("S-"); }
+    if ctrl {
+        prefix.push_str("C-");
+    }
+    if alt {
+        prefix.push_str("M-");
+    }
+    if shift {
+        prefix.push_str("S-");
+    }
     format!("{prefix}{base}")
 }
 
@@ -94,7 +100,9 @@ pub struct ScrollState {
 }
 
 impl ScrollState {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Update total item count and clamp selected/offset.
     pub fn set_total(&mut self, total: usize) {
@@ -160,7 +168,9 @@ impl ScrollState {
 
     /// Ensure offset keeps selected in view.
     fn clamp_offset(&mut self) {
-        if self.viewport == 0 { return; }
+        if self.viewport == 0 {
+            return;
+        }
         if self.selected < self.offset {
             self.offset = self.selected;
         }
@@ -318,10 +328,16 @@ pub enum SubView {
     /// Inline rename for a project in Oversee list (94c). Carries the project index.
     RenameProject(usize),
     /// Inline rename for a plan feature (94d).
-    RenamePlanFeature { phase_idx: usize, feat_idx: usize },
+    RenamePlanFeature {
+        phase_idx: usize,
+        feat_idx: usize,
+    },
     /// Inline rename for a file in the Oversee file tree (OPT-014).
     /// Carries (project index, tree_nodes index).
-    RenameFile { proj_idx: usize, tree_idx: usize },
+    RenameFile {
+        proj_idx: usize,
+        tree_idx: usize,
+    },
     /// Text input to steer a session (send keys). Carries flat session index.
     SteerSession(usize),
     /// OPT-005: text input for setting a project logo path. Carries project index.
@@ -399,23 +415,29 @@ impl DesignSub {
 /// Tabs within the Workforce editor (Design > Workforce).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkforceTab {
-    Harnesses,     // harness definitions (read-only editor stub)
-    Workflows,     // workforce templates (pipelines)
-    Teams,         // operation modules (alias)
+    Harnesses, // harness definitions (read-only editor stub)
+    Workflows, // workforce templates (pipelines)
+    Teams,     // operation modules (alias)
     Agents,
     Skills,
     Tools,
     McpServers,
-    Profiles,      // system-prompt profiles
-    TrainingData,  // model training data (coming soon)
-    Models,        // model definitions (coming soon)
+    Profiles,     // system-prompt profiles
+    TrainingData, // model training data (coming soon)
+    Models,       // model definitions (coming soon)
 }
 
 impl WorkforceTab {
     pub const ALL: [WorkforceTab; 10] = [
-        WorkforceTab::Harnesses, WorkforceTab::Workflows, WorkforceTab::Teams,
-        WorkforceTab::Agents, WorkforceTab::Skills, WorkforceTab::Tools,
-        WorkforceTab::McpServers, WorkforceTab::Profiles, WorkforceTab::TrainingData,
+        WorkforceTab::Harnesses,
+        WorkforceTab::Workflows,
+        WorkforceTab::Teams,
+        WorkforceTab::Agents,
+        WorkforceTab::Skills,
+        WorkforceTab::Tools,
+        WorkforceTab::McpServers,
+        WorkforceTab::Profiles,
+        WorkforceTab::TrainingData,
         WorkforceTab::Models,
     ];
 
@@ -464,8 +486,12 @@ pub enum LibrarySub {
 impl LibrarySub {
     pub const ALL: [LibrarySub; 9] = [
         LibrarySub::Fit,
-        LibrarySub::Agents, LibrarySub::Models, LibrarySub::Harnesses,
-        LibrarySub::McpServers, LibrarySub::Skills, LibrarySub::Tools,
+        LibrarySub::Agents,
+        LibrarySub::Models,
+        LibrarySub::Harnesses,
+        LibrarySub::McpServers,
+        LibrarySub::Skills,
+        LibrarySub::Tools,
         LibrarySub::Connections,
         LibrarySub::PiExtensions,
     ];
@@ -701,16 +727,16 @@ pub struct TreeNode {
 /// A context-sensitive action that can be performed on the selected item.
 #[derive(Debug, Clone)]
 pub struct ActionItem {
-    pub key: char,        // accelerator key
-    pub label: String,    // display text
+    pub key: char,     // accelerator key
+    pub label: String, // display text
     pub action: ActionKind,
 }
 
 #[derive(Debug, Clone)]
 pub enum ActionKind {
     SpawnSession,
-    SpawnAll,       // N — multi-spawn
-    StartLoop,      // L — register an autonomous loop schedule for this project
+    SpawnAll,  // N — multi-spawn
+    StartLoop, // L — register an autonomous loop schedule for this project
     NewProject,
     WriteFeedback,
     WriteProjectFeedback(usize),
@@ -723,12 +749,12 @@ pub enum ActionKind {
     DeprecateProject,
     CompleteProject,
     ReloadProjects,
-    GitCommit,     // commit+push selected project via Claude
-    GitCommitAll,  // commit+push all dirty projects via Claude
-    CycleDefaultEngine, // ENG-006: cycle the global default engine (Config.default_engine)
+    GitCommit,             // commit+push selected project via Claude
+    GitCommitAll,          // commit+push all dirty projects via Claude
+    CycleDefaultEngine,    // ENG-006: cycle the global default engine (Config.default_engine)
     IntegrateInbox(usize), // integrate instructions_inbox.md into PLAN.md
     KillSession(String),
-    SubmitFeedback(String),  // filename
+    SubmitFeedback(String), // filename
     ResumeFeedback(String),
     DeleteFeedback(usize),
 }
@@ -749,13 +775,13 @@ pub struct App {
     pub hot_indices: Vec<usize>,
     pub cold_indices: Vec<usize>,
     pub ignored_indices: Vec<usize>,
-    pub facilities: Vec<Project>,   // hyperfolders (admin, etc.)
-    pub project_selected: usize,    // global selection index into the rendered list
+    pub facilities: Vec<Project>, // hyperfolders (admin, etc.)
+    pub project_selected: usize,  // global selection index into the rendered list
     pub session_selected: usize,
     pub roadmap_selected: usize,
     pub roadmap_scroll: usize,
     pub expanded_projects: HashSet<usize>,
-    pub show_deprecated: bool,      // toggled in facilities section
+    pub show_deprecated: bool, // toggled in facilities section
 
     /// VIS-001: scopes hidden from Oversee list. Mirrors `Config::hidden_scopes`
     /// and is persisted via `Config::save()` whenever it changes.
@@ -794,8 +820,8 @@ pub struct App {
     /// ENG-006: engine picker index. 0 = "(default — resolver)", 1+ = index into
     /// the valve-filtered engine list (see `selectable_engines`).
     pub spawn_engine_idx: usize,
-    pub spawn_host_idx: usize, // 0 = local, 1+ = remote_hosts index
-    pub spawn_workforce_idx: usize,  // 0 = no workforce (solo), 1+ = index into loaded_workforces
+    pub spawn_host_idx: usize,      // 0 = local, 1+ = remote_hosts index
+    pub spawn_workforce_idx: usize, // 0 = no workforce (solo), 1+ = index into loaded_workforces
     pub loaded_workforces: Vec<orrch_workforce::Workforce>,
 
     // Agent profiles
@@ -816,8 +842,8 @@ pub struct App {
     pub library_models: Vec<orrch_library::ModelEntry>,
     pub library_harnesses: Vec<orrch_library::HarnessEntry>,
     pub library_mcp_servers: Vec<orrch_library::McpServerEntry>,
-    pub library_skills: Vec<(String, PathBuf)>,  // (name, path) from library/skills/
-    pub library_tools: Vec<(String, PathBuf)>,   // (name, path) from library/tools/
+    pub library_skills: Vec<(String, PathBuf)>, // (name, path) from library/skills/
+    pub library_tools: Vec<(String, PathBuf)>,  // (name, path) from library/tools/
     pub library_profiles: Vec<(String, PathBuf)>, // system-prompt profiles
     pub library_pi_extensions: Vec<orrch_library::LibraryItem>, // PI extensions (.ts)
     pub connection_store: orrch_core::ConnectionStore,
@@ -827,11 +853,11 @@ pub struct App {
 
     // HWF-005 Fit panel state
     pub fit_registry: orrch_hwfit::MachineRegistry,
-    pub fit_machine_idx: usize,                       // index into fit_registry.all()
-    pub fit_results: Vec<orrch_hwfit::FitResult>,     // cached ranked rows for selected machine
-    pub fit_system: Option<orrch_hwfit::SystemInfo>,  // cached probe result (for header / error)
-    pub fit_row: usize,                               // selected row in the fit table
-    pub fit_probed_machine: Option<String>,           // name of machine fit_results was computed for (lazy-probe guard)
+    pub fit_machine_idx: usize, // index into fit_registry.all()
+    pub fit_results: Vec<orrch_hwfit::FitResult>, // cached ranked rows for selected machine
+    pub fit_system: Option<orrch_hwfit::SystemInfo>, // cached probe result (for header / error)
+    pub fit_row: usize,         // selected row in the fit table
+    pub fit_probed_machine: Option<String>, // name of machine fit_results was computed for (lazy-probe guard)
 
     pub valve_store: orrch_library::ValveStore,
     pub usage_tracker: orrch_core::UsageTracker,
@@ -858,8 +884,8 @@ pub struct App {
     pub section_cursor: SectionCursor,
 
     // Dev map (parsed Plan.md feature tree)
-    pub devmap_phase_idx: usize,    // which phase is expanded (or usize::MAX for none)
-    pub devmap_selected: usize,     // flat selection index across all visible items
+    pub devmap_phase_idx: usize, // which phase is expanded (or usize::MAX for none)
+    pub devmap_selected: usize,  // flat selection index across all visible items
 
     // Deprecated panel (two-column browser)
     pub dep_parent_entries: Vec<orrch_core::DirEntry>,
@@ -916,7 +942,12 @@ pub struct App {
 
     // Publish panel: Distribution (item 101)
     /// Per-platform publish status (populated on first entry to Distribution tab).
-    pub distribution_status: Option<Vec<(orrch_core::release::DistributionPlatform, orrch_core::release::PlatformStatus)>>,
+    pub distribution_status: Option<
+        Vec<(
+            orrch_core::release::DistributionPlatform,
+            orrch_core::release::PlatformStatus,
+        )>,
+    >,
     /// Selected row in the Distribution tab table.
     pub distribution_selected: usize,
 
@@ -1055,11 +1086,11 @@ pub struct App {
     // Add MCP Server form state (Task 62)
     pub add_mcp_name: String,
     pub add_mcp_desc: String,
-    pub add_mcp_transport: usize,   // 0=stdio, 1=sse
-    pub add_mcp_command: String,    // command (stdio) or url (sse)
-    pub add_mcp_args: String,       // space-separated args (stdio only)
-    pub add_mcp_roles: String,      // comma-separated role names
-    pub add_mcp_field: usize,       // 0=name, 1=desc, 2=transport, 3=command/url, 4=args, 5=roles
+    pub add_mcp_transport: usize, // 0=stdio, 1=sse
+    pub add_mcp_command: String,  // command (stdio) or url (sse)
+    pub add_mcp_args: String,     // space-separated args (stdio only)
+    pub add_mcp_roles: String,    // comma-separated role names
+    pub add_mcp_field: usize,     // 0=name, 1=desc, 2=transport, 3=command/url, 4=args, 5=roles
 
     /// Live `orrch-webedit` HTTP server, started on demand from the
     /// Design > Workforce tab via Ctrl+w (PLAN item 37). When `Some`, the
@@ -1085,8 +1116,8 @@ pub struct App {
     // Session log browser (Hypervise > L)
     pub session_logs: Vec<orrch_core::windows::SessionLogMeta>,
     pub session_logs_selected: usize,
-    pub session_log_view: bool,        // true = viewing head/tail of selected log
-    pub session_log_scroll: usize,     // line offset when viewing log
+    pub session_log_view: bool, // true = viewing head/tail of selected log
+    pub session_log_scroll: usize, // line offset when viewing log
 
     /// Port the WebUI server is listening on, or None if not started.
     pub webui_port: Option<u16>,
@@ -1143,10 +1174,7 @@ pub struct App {
     /// Per-session pane snapshot for inline-expand rendering. Refreshed at
     /// most ~10 Hz to avoid running `tmux capture-pane` every draw tick.
     /// Key = session name; Value = (last capture instant, ANSI pane text).
-    pub inline_pane_cache: std::collections::HashMap<
-        String,
-        (std::time::Instant, String),
-    >,
+    pub inline_pane_cache: std::collections::HashMap<String, (std::time::Instant, String)>,
     /// Per-session vertical scroll offset for the inline-expand preview.
     /// Counts lines OFF THE BOTTOM (0 = newest content visible at the
     /// bottom of the viewport). Up arrow on an expanded session header
@@ -1213,6 +1241,12 @@ fn sanitize_connection_status(connection: &orrch_core::Connection, status: &str)
     }
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1234,7 +1268,9 @@ impl App {
         let deprecated_path = projects_dir.join("deprecated");
         let workforce_files = scan_md_dir(&projects_dir.join("orrchestrator").join("workforces"));
         let operation_files = scan_md_dir(&projects_dir.join("orrchestrator").join("operations"));
-        let loaded_workforces = orrch_workforce::load_workforces(&projects_dir.join("orrchestrator").join("workforces"));
+        let loaded_workforces = orrch_workforce::load_workforces(
+            &projects_dir.join("orrchestrator").join("workforces"),
+        );
         let library_root = projects_dir.join("orrchestrator").join("library");
         let library_models = orrch_library::load_models(&library_root.join("models"));
         let library_harnesses = orrch_library::load_harnesses(&library_root.join("harnesses"));
@@ -1245,7 +1281,8 @@ impl App {
         let library_skills = scan_skills_dir_filtered(&library_root.join("skills"));
         let library_tools = scan_md_dir(&library_root.join("tools"));
         let library_profiles = scan_md_dir(&library_root.join("profiles"));
-        let library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
+        let library_pi_extensions =
+            orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
         let valve_store = orrch_library::ValveStore::load();
         let mut usage_tracker = orrch_core::UsageTracker::new();
         usage_tracker.set_defaults();
@@ -1470,9 +1507,7 @@ impl App {
         };
         // Populate fields that need projects_dir AFTER struct construction
         // (struct moves projects_dir into self.projects_dir).
-        app.brand_profiles = scan_md_dir(
-            &app.projects_dir.join("orrchestrator").join("brands"),
-        );
+        app.brand_profiles = scan_md_dir(&app.projects_dir.join("orrchestrator").join("brands"));
         app.loop_schedules = orrch_core::load_loops(&app.projects_dir);
         app.categorize_projects();
         // Expand all projects by default so sessions are visible at a glance
@@ -1490,7 +1525,10 @@ impl App {
         let orphans = orrch_core::windows::detect_orphaned_sessions();
         if !orphans.is_empty() {
             app.last_notification = Some((
-                format!("{} orphaned tmux window(s) from last session detected", orphans.len()),
+                format!(
+                    "{} orphaned tmux window(s) from last session detected",
+                    orphans.len()
+                ),
                 std::time::Instant::now(),
             ));
         }
@@ -1502,12 +1540,12 @@ impl App {
     pub fn content_depth(&self) -> usize {
         match self.panel {
             Panel::Design => match self.design_sub {
-                DesignSub::Intentions => 2,  // panel(0) → sub(1) → content(2)
-                DesignSub::Workforce => 3,   // panel(0) → sub(1) → wf tabs(2) → content(3)
-                DesignSub::Library => 3,     // panel(0) → sub(1) → lib tabs(2) → content(3)
-                DesignSub::Plans => 2,       // panel(0) → sub(1) → content(2)
+                DesignSub::Intentions => 2, // panel(0) → sub(1) → content(2)
+                DesignSub::Workforce => 3,  // panel(0) → sub(1) → wf tabs(2) → content(3)
+                DesignSub::Library => 3,    // panel(0) → sub(1) → lib tabs(2) → content(3)
+                DesignSub::Plans => 2,      // panel(0) → sub(1) → content(2)
             },
-            _ => 1,                          // panel(0) → content(1)
+            _ => 1, // panel(0) → content(1)
         }
     }
 
@@ -1536,16 +1574,22 @@ impl App {
         let mut map = Vec::new();
         if !self.hot_indices.is_empty() {
             map.push(ListEntry::SectionHeader);
-            for &idx in &self.hot_indices { map.push(ListEntry::Project(idx)); }
+            for &idx in &self.hot_indices {
+                map.push(ListEntry::Project(idx));
+            }
         }
         if !self.cold_indices.is_empty() {
             map.push(ListEntry::SectionHeader);
-            for &idx in &self.cold_indices { map.push(ListEntry::Project(idx)); }
+            for &idx in &self.cold_indices {
+                map.push(ListEntry::Project(idx));
+            }
         }
         // Ignored section
         if !self.ignored_indices.is_empty() {
             map.push(ListEntry::SectionHeader);
-            for &idx in &self.ignored_indices { map.push(ListEntry::Project(idx)); }
+            for &idx in &self.ignored_indices {
+                map.push(ListEntry::Project(idx));
+            }
         }
         // Production section
         if !self.production_versions.is_empty() {
@@ -1588,23 +1632,35 @@ impl App {
             active_sub: format!("{:?}", self.sub).to_lowercase(),
             term_cols: cols,
             term_rows: rows,
-            ideas: self.ideas.iter().map(|i| orrch_webui::WebIdea {
-                filename: i.filename.clone(),
-                progress: i.pipeline.progress,
-                targets_count: i.pipeline.targets.len(),
-                submitted: i.pipeline.is_submitted(),
-                complete: i.pipeline.is_complete(),
-            }).collect(),
-            sessions: self.managed_sessions.iter().map(|s| orrch_webui::WebSession {
-                name: s.name.clone(),
-                category: s.category.label().to_string(),
-                goal: String::new(),
-                attach_cmd: format!("tmux attach -t {}:{}", s.category.tmux_name(), s.name),
-            }).collect(),
-            projects: self.projects.iter().map(|p| orrch_webui::WebProject {
-                name: p.name.clone(),
-                status: format!("{:?}", p.lifecycle_stage).to_lowercase(),
-            }).collect(),
+            ideas: self
+                .ideas
+                .iter()
+                .map(|i| orrch_webui::WebIdea {
+                    filename: i.filename.clone(),
+                    progress: i.pipeline.progress,
+                    targets_count: i.pipeline.targets.len(),
+                    submitted: i.pipeline.is_submitted(),
+                    complete: i.pipeline.is_complete(),
+                })
+                .collect(),
+            sessions: self
+                .managed_sessions
+                .iter()
+                .map(|s| orrch_webui::WebSession {
+                    name: s.name.clone(),
+                    category: s.category.label().to_string(),
+                    goal: String::new(),
+                    attach_cmd: format!("tmux attach -t {}:{}", s.category.tmux_name(), s.name),
+                })
+                .collect(),
+            projects: self
+                .projects
+                .iter()
+                .map(|p| orrch_webui::WebProject {
+                    name: p.name.clone(),
+                    status: format!("{:?}", p.lifecycle_stage).to_lowercase(),
+                })
+                .collect(),
         }
     }
 
@@ -1631,7 +1687,8 @@ impl App {
         if self.hidden_scopes.is_empty() {
             return 0;
         }
-        self.projects.iter()
+        self.projects
+            .iter()
             .filter(|p| self.hidden_scopes.contains(&p.scope))
             .count()
     }
@@ -1692,7 +1749,11 @@ impl App {
     ) {
         let entries = orrch_core::list_directory(dir);
         for entry in entries {
-            let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path).to_path_buf();
+            let rel = entry
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&entry.path)
+                .to_path_buf();
             let is_expanded = entry.is_dir && expanded.contains(&rel);
             out.push(TreeNode {
                 name: entry.name.clone(),
@@ -1728,14 +1789,18 @@ impl App {
                 let dirs = children.iter().filter(|e| e.is_dir).count();
                 self.tree_preview = format!(
                     "{} {}\n\n  Type: Directory\n  Contents: {} dirs, {} files",
-                    node.icon, node.name, dirs, children.len() - dirs,
+                    node.icon,
+                    node.name,
+                    dirs,
+                    children.len() - dirs,
                 );
             } else if node.is_editable {
                 let content = std::fs::read_to_string(&node.path).unwrap_or_default();
                 let lines = content.lines().count();
                 let preview: String = content.lines().take(30).collect::<Vec<_>>().join("\n");
                 self.tree_preview = format!(
-                    "{} {} ({} lines)\n\n{}", node.icon, node.name, lines, preview,
+                    "{} {} ({} lines)\n\n{}",
+                    node.icon, node.name, lines, preview,
                 );
             } else {
                 self.tree_preview = format!("{} {}", node.icon, node.name);
@@ -1746,27 +1811,45 @@ impl App {
     }
 
     pub fn sessions_for_project(&self, project_path: &Path) -> Vec<&orrch_core::Session> {
-        self.pm.sessions().into_iter()
+        self.pm
+            .sessions()
+            .into_iter()
             .filter(|s| s.project_dir == project_path)
             .collect()
     }
 
-    pub fn external_sessions_for_project(&self, project_path: &Path) -> Vec<&orrch_core::ExternalSession> {
+    pub fn external_sessions_for_project(
+        &self,
+        project_path: &Path,
+    ) -> Vec<&orrch_core::ExternalSession> {
         let path_str = project_path.to_string_lossy();
-        let proj_name = project_path.file_name().unwrap_or_default().to_string_lossy();
-        let mut sessions: Vec<&orrch_core::ExternalSession> = self.pm.external_sessions().iter()
-            .filter(|e| e.project_dir == path_str.as_ref() || e.project_dir.starts_with(path_str.as_ref()))
+        let proj_name = project_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let mut sessions: Vec<&orrch_core::ExternalSession> = self
+            .pm
+            .external_sessions()
+            .iter()
+            .filter(|e| {
+                e.project_dir == path_str.as_ref() || e.project_dir.starts_with(path_str.as_ref())
+            })
             .collect();
         // Include remote sessions matching by project name (paths differ across machines)
-        sessions.extend(self.remote_sessions.iter()
-            .filter(|e| e.project_dir.ends_with(&format!("/{proj_name}"))));
+        sessions.extend(
+            self.remote_sessions
+                .iter()
+                .filter(|e| e.project_dir.ends_with(&format!("/{proj_name}"))),
+        );
         sessions
     }
 
     /// Sessions at ~/projects/ root — admin/general sessions.
     pub fn admin_sessions(&self) -> Vec<&orrch_core::ExternalSession> {
         let projects_str = self.projects_dir.to_string_lossy();
-        self.pm.external_sessions().iter()
+        self.pm
+            .external_sessions()
+            .iter()
             .filter(|e| e.project_dir == projects_str.as_ref())
             .collect()
     }
@@ -1797,7 +1880,9 @@ impl App {
     /// Returns the number of existing sessions with this goal.
     pub fn duplicate_goal_count(&self, project_path: &Path, goal: &str) -> usize {
         let goal_lower = goal.to_lowercase();
-        self.pm.sessions().iter()
+        self.pm
+            .sessions()
+            .iter()
             .filter(|s| {
                 s.project_dir == project_path
                     && s.state != SessionState::Dead
@@ -1807,7 +1892,10 @@ impl App {
     }
 
     pub fn active_session_count(&self, project_path: &Path) -> usize {
-        let managed = self.pm.sessions().iter()
+        let managed = self
+            .pm
+            .sessions()
+            .iter()
             .filter(|s| s.project_dir == project_path && s.state != SessionState::Dead)
             .count();
         let external = self.external_sessions_for_project(project_path).len();
@@ -1815,7 +1903,12 @@ impl App {
     }
 
     /// Spawn a Claude session as a tmux window in the orrch session.
-    pub fn spawn_session(&mut self, project_dir: &Path, backend: BackendKind, goal: Option<&str>) -> Result<String> {
+    pub fn spawn_session(
+        &mut self,
+        project_dir: &Path,
+        backend: BackendKind,
+        goal: Option<&str>,
+    ) -> Result<String> {
         self.spawn_session_named(project_dir, backend, goal, None)
     }
 
@@ -1879,7 +1972,10 @@ impl App {
     /// (the harness uses its own default endpoint). Uses the currently-selected
     /// spawn project's dir for the project-default layer.
     pub fn resolved_default_engine_label(&self) -> Option<String> {
-        let project_dir = self.projects.get(self.spawn_project_idx).map(|p| p.path.clone());
+        let project_dir = self
+            .projects
+            .get(self.spawn_project_idx)
+            .map(|p| p.path.clone());
 
         let agent_path = self
             .spawn_agent_idx
@@ -1905,13 +2001,20 @@ impl App {
             self.spawn_importance,
             "",
         );
-        if decision.engine_id.is_empty() { None } else { Some(decision.engine_id) }
+        if decision.engine_id.is_empty() {
+            None
+        } else {
+            Some(decision.engine_id)
+        }
     }
 
     /// ENG-009: human-readable rationale for the engine the spawn picker will
     /// pre-select, shown next to the picker so the user sees WHY.
     pub fn spawn_engine_rationale(&self) -> Option<String> {
-        let project_dir = self.projects.get(self.spawn_project_idx).map(|p| p.path.clone())?;
+        let project_dir = self
+            .projects
+            .get(self.spawn_project_idx)
+            .map(|p| p.path.clone())?;
         Some(self.spawn_engine_decision(&project_dir).rationale)
     }
 
@@ -1939,12 +2042,18 @@ impl App {
                         // is reading/writing the environment concurrently. Set
                         // before the tmux child forks so it inherits the engine
                         // endpoint env vars.
-                        unsafe { std::env::set_var(&k, &v); }
+                        unsafe {
+                            std::env::set_var(&k, &v);
+                        }
                     }
                     self.notify(format!("Engine: {} ({})", eng.name, backend.label()));
                 }
                 Err(e) => {
-                    let msg = format!("Engine '{}' incompatible with {}: {e}", eng.name, backend.label());
+                    let msg = format!(
+                        "Engine '{}' incompatible with {}: {e}",
+                        eng.name,
+                        backend.label()
+                    );
                     self.notify(msg.clone());
                     return Err(anyhow::anyhow!(msg));
                 }
@@ -1977,7 +2086,10 @@ impl App {
 
         // Check throttle state
         if self.usage_tracker.is_throttled(provider) {
-            let reason = self.usage_tracker.throttle_reason(provider).unwrap_or("rate limited");
+            let reason = self
+                .usage_tracker
+                .throttle_reason(provider)
+                .unwrap_or("rate limited");
             let msg = format!("{} throttled: {}", provider, reason);
             self.notify(msg.clone());
             return Err(anyhow::anyhow!(msg));
@@ -1991,19 +2103,38 @@ impl App {
             }
         };
 
-        let proj_name = project_dir.file_name().unwrap_or_default().to_string_lossy();
+        let proj_name = project_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         let goal_display = goal.unwrap_or("continue development");
         let session_name: String = if let Some(name) = explicit_name {
             // Caller supplied a name — sanitize but otherwise use as-is.
             name.chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect()
         } else {
             // Legacy: derive from project name + first 25 chars of goal.
-            format!("{}-{}", proj_name, goal_display.chars().take(25).collect::<String>())
-                .chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-                .collect()
+            format!(
+                "{}-{}",
+                proj_name,
+                goal_display.chars().take(25).collect::<String>()
+            )
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
         };
 
         match orrch_core::windows::spawn_tmux_session(
@@ -2014,7 +2145,10 @@ impl App {
         ) {
             Ok(window_name) => {
                 // Start real-time session log
-                let log_dir = self.projects_dir.join("orrchestrator").join(".session-logs");
+                let log_dir = self
+                    .projects_dir
+                    .join("orrchestrator")
+                    .join(".session-logs");
                 orrch_core::windows::start_session_log(
                     orrch_core::windows::SessionCategory::Dev,
                     &window_name,
@@ -2032,7 +2166,12 @@ impl App {
                 });
                 // Record for throttle tracking (in-memory rolling window)
                 self.usage_tracker.record_request(provider, 0);
-                self.notify(format!("tmux:{} — {} {}", window_name, backend.label(), goal_display));
+                self.notify(format!(
+                    "tmux:{} — {} {}",
+                    window_name,
+                    backend.label(),
+                    goal_display
+                ));
                 Ok(format!("tmux:{window_name}"))
             }
             Err(e) => {
@@ -2121,7 +2260,10 @@ impl App {
 
     /// Refresh the child column based on parent selection.
     fn browser_refresh_child(&mut self) {
-        if let Some(entry) = self.browser_parent_entries.get(self.browser_parent_selected) {
+        if let Some(entry) = self
+            .browser_parent_entries
+            .get(self.browser_parent_selected)
+        {
             if entry.is_dir {
                 self.browser_child_entries = orrch_core::list_directory(&entry.path);
             } else {
@@ -2138,7 +2280,8 @@ impl App {
         let entry = if self.browser_in_child {
             self.browser_child_entries.get(self.browser_child_selected)
         } else {
-            self.browser_parent_entries.get(self.browser_parent_selected)
+            self.browser_parent_entries
+                .get(self.browser_parent_selected)
         };
 
         let Some(entry) = entry else {
@@ -2152,24 +2295,36 @@ impl App {
             let files = children.len() - dirs;
             self.browser_preview = format!(
                 "{} {}\n\n  Type: Directory\n  Contents: {} dirs, {} files\n  Path: {}",
-                entry.icon(), entry.name, dirs, files, entry.path.display()
+                entry.icon(),
+                entry.name,
+                dirs,
+                files,
+                entry.path.display()
             );
         } else if entry.is_editable {
             // Show file details + content preview
-            let content = std::fs::read_to_string(&entry.path)
-                .unwrap_or_else(|e| format!("(error: {e})"));
+            let content =
+                std::fs::read_to_string(&entry.path).unwrap_or_else(|e| format!("(error: {e})"));
             let line_count = content.lines().count();
             let preview: String = content.lines().take(40).collect::<Vec<_>>().join("\n");
             self.browser_preview = format!(
                 "{} {}\n\n  Type: {}\n  Size: {}\n  Lines: {}\n  Path: {}\n\n{}",
-                entry.icon(), entry.name, entry.type_label(), entry.size_display(),
-                line_count, entry.path.display(), preview
+                entry.icon(),
+                entry.name,
+                entry.type_label(),
+                entry.size_display(),
+                line_count,
+                entry.path.display(),
+                preview
             );
         } else {
             // Binary/non-editable — metadata only
             self.browser_preview = format!(
                 "{} {}\n\n  Type: {}\n  Size: {}\n  Path: {}",
-                entry.icon(), entry.name, entry.type_label(), entry.size_display(),
+                entry.icon(),
+                entry.name,
+                entry.type_label(),
+                entry.size_display(),
                 entry.path.display()
             );
         }
@@ -2194,22 +2349,43 @@ impl App {
         } else {
             self.dep_parent_entries.get(self.dep_parent_selected)
         };
-        let Some(entry) = entry else { self.dep_preview.clear(); return; };
+        let Some(entry) = entry else {
+            self.dep_preview.clear();
+            return;
+        };
 
         if entry.is_dir {
             let children = orrch_core::list_directory(&entry.path);
             let dirs = children.iter().filter(|e| e.is_dir).count();
-            self.dep_preview = format!("{} {}\n\n  Type: Directory\n  Contents: {} dirs, {} files\n  Path: {}",
-                entry.icon(), entry.name, dirs, children.len() - dirs, entry.path.display());
+            self.dep_preview = format!(
+                "{} {}\n\n  Type: Directory\n  Contents: {} dirs, {} files\n  Path: {}",
+                entry.icon(),
+                entry.name,
+                dirs,
+                children.len() - dirs,
+                entry.path.display()
+            );
         } else if entry.is_editable {
             let content = std::fs::read_to_string(&entry.path).unwrap_or_default();
             let lines = content.lines().count();
             let preview: String = content.lines().take(40).collect::<Vec<_>>().join("\n");
-            self.dep_preview = format!("{} {}\n\n  Type: {}\n  Size: {}\n  Lines: {}\n\n{}",
-                entry.icon(), entry.name, entry.type_label(), entry.size_display(), lines, preview);
+            self.dep_preview = format!(
+                "{} {}\n\n  Type: {}\n  Size: {}\n  Lines: {}\n\n{}",
+                entry.icon(),
+                entry.name,
+                entry.type_label(),
+                entry.size_display(),
+                lines,
+                preview
+            );
         } else {
-            self.dep_preview = format!("{} {}\n\n  Type: {}\n  Size: {}",
-                entry.icon(), entry.name, entry.type_label(), entry.size_display());
+            self.dep_preview = format!(
+                "{} {}\n\n  Type: {}\n  Size: {}",
+                entry.icon(),
+                entry.name,
+                entry.type_label(),
+                entry.size_display()
+            );
         }
     }
 
@@ -2231,16 +2407,23 @@ impl App {
                         session.output_buffer.extend_from_slice(&data);
                         session.last_output_time = Some(std::time::Instant::now());
                         Some(session.project_dir.to_string_lossy().to_string())
-                    } else { None };
+                    } else {
+                        None
+                    };
                     if let Some(dir) = project_dir {
                         let text = String::from_utf8_lossy(&data);
                         let signal = analyze_output(&text);
                         if let Some(session) = self.pm.get_session_mut(&sid) {
                             let new_state = infer_state(session.last_output_time, &signal, 15.0);
                             if session.state != SessionState::Dead {
-                                if new_state == SessionState::Waiting && session.state != SessionState::Waiting {
+                                if new_state == SessionState::Waiting
+                                    && session.state != SessionState::Waiting
+                                {
                                     let name = session.display_name().to_string();
-                                    self.last_notification = Some((format!("⚠ {name} needs input"), std::time::Instant::now()));
+                                    self.last_notification = Some((
+                                        format!("⚠ {name} needs input"),
+                                        std::time::Instant::now(),
+                                    ));
                                 }
                                 session.state = new_state;
                             }
@@ -2258,7 +2441,14 @@ impl App {
                             provider: session.backend.label().to_string(),
                             event: UsageEvent::SessionEnd,
                             session_name: Some(sid.clone()),
-                            project: Some(session.project_dir.file_name().unwrap_or_default().to_string_lossy().to_string()),
+                            project: Some(
+                                session
+                                    .project_dir
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            ),
                             duration_secs: Some(duration),
                         });
                     }
@@ -2289,25 +2479,49 @@ impl App {
                     let fp = orrch_retrospect::fingerprint(error_text);
                     let category = orrch_retrospect::classify_error(error_text);
                     let known_fix = store.get_resolution(&fp).map(|s| s.to_string());
-                    store.append(orrch_retrospect::ErrorRecord::new(fp.clone(), category, error_text.clone(), sid.into(), project_dir.into()));
+                    store.append(orrch_retrospect::ErrorRecord::new(
+                        fp.clone(),
+                        category,
+                        error_text.clone(),
+                        sid.into(),
+                        project_dir.into(),
+                    ));
                     if let Some(fix) = known_fix {
                         notifications.push(format!("Known {}: injecting", category.label()));
-                        injectable.push((sid.to_string(), format!("\n[orrchestrator] Known error ({}). Fix:\n{}\n", category.label(), &fix[..fix.len().min(200)])));
+                        injectable.push((
+                            sid.to_string(),
+                            format!(
+                                "\n[orrchestrator] Known error ({}). Fix:\n{}\n",
+                                category.label(),
+                                &fix[..fix.len().min(200)]
+                            ),
+                        ));
                     } else {
                         notifications.push(format!("New error: {}", category.label()));
                     }
                 }
             }
             if let Some(tracker) = self.solution_trackers.get_mut(project_dir) {
-                for error_text in &errors { tracker.on_error(sid, &orrch_retrospect::fingerprint(error_text)); }
+                for error_text in &errors {
+                    tracker.on_error(sid, &orrch_retrospect::fingerprint(error_text));
+                }
             }
             self.error_count += errors.len();
-        } else if let (Some(store), Some(tracker)) = (self.error_stores.get_mut(project_dir), self.solution_trackers.get_mut(project_dir)) {
+        } else if let (Some(store), Some(tracker)) = (
+            self.error_stores.get_mut(project_dir),
+            self.solution_trackers.get_mut(project_dir),
+        ) {
             let resolved = tracker.on_output(sid, &text, store);
-            if !resolved.is_empty() { notifications.push(format!("{} resolved", resolved.len())); }
+            if !resolved.is_empty() {
+                notifications.push(format!("{} resolved", resolved.len()));
+            }
         }
-        for (target, hint) in injectable { let _ = self.pm.write_to_session(&target, hint.as_bytes()); }
-        if let Some(msg) = notifications.last() { self.last_notification = Some((msg.clone(), std::time::Instant::now())); }
+        for (target, hint) in injectable {
+            let _ = self.pm.write_to_session(&target, hint.as_bytes());
+        }
+        if let Some(msg) = notifications.last() {
+            self.last_notification = Some((msg.clone(), std::time::Instant::now()));
+        }
     }
 
     // ─── Key Handling ─────────────────────────────────────────────
@@ -2336,7 +2550,11 @@ impl App {
                 match self.detail_focus {
                     DetailFocus::SectionSelect => {
                         // Mouse scroll in SectionSelect: move section cursor
-                        let sections: Vec<SectionCursor> = vec![SectionCursor::Roadmap, SectionCursor::Sessions, SectionCursor::Browser];
+                        let sections: Vec<SectionCursor> = vec![
+                            SectionCursor::Roadmap,
+                            SectionCursor::Sessions,
+                            SectionCursor::Browser,
+                        ];
                         if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
                             if delta < 0 && pos > 0 {
                                 self.section_cursor = sections[pos - 1];
@@ -2347,14 +2565,16 @@ impl App {
                     }
                     DetailFocus::Roadmap => {
                         if delta < 0 {
-                            self.roadmap_selected = self.roadmap_selected.saturating_sub((-delta) as usize);
+                            self.roadmap_selected =
+                                self.roadmap_selected.saturating_sub((-delta) as usize);
                         } else {
                             self.roadmap_selected += delta as usize;
                         }
                     }
                     DetailFocus::Sessions => {
                         if delta < 0 {
-                            self.session_selected = self.session_selected.saturating_sub((-delta) as usize);
+                            self.session_selected =
+                                self.session_selected.saturating_sub((-delta) as usize);
                         } else {
                             self.session_selected += delta as usize;
                         }
@@ -2362,17 +2582,23 @@ impl App {
                     DetailFocus::Browser => {
                         if self.browser_in_child {
                             if delta < 0 {
-                                self.browser_child_selected = self.browser_child_selected.saturating_sub((-delta) as usize);
+                                self.browser_child_selected = self
+                                    .browser_child_selected
+                                    .saturating_sub((-delta) as usize);
                             } else {
                                 let max = self.browser_child_entries.len().saturating_sub(1);
-                                self.browser_child_selected = (self.browser_child_selected + delta as usize).min(max);
+                                self.browser_child_selected =
+                                    (self.browser_child_selected + delta as usize).min(max);
                             }
                         } else {
                             if delta < 0 {
-                                self.browser_parent_selected = self.browser_parent_selected.saturating_sub((-delta) as usize);
+                                self.browser_parent_selected = self
+                                    .browser_parent_selected
+                                    .saturating_sub((-delta) as usize);
                             } else {
                                 let max = self.browser_parent_entries.len().saturating_sub(1);
-                                self.browser_parent_selected = (self.browser_parent_selected + delta as usize).min(max);
+                                self.browser_parent_selected =
+                                    (self.browser_parent_selected + delta as usize).min(max);
                             }
                             self.browser_refresh_child();
                         }
@@ -2382,31 +2608,37 @@ impl App {
             }
             _ => {
                 // Generic scroll for Design sub-panels
-                match self.panel {
-                    Panel::Design => match self.design_sub {
+                if self.panel == Panel::Design {
+                    match self.design_sub {
                         DesignSub::Workforce => {
                             let count = self.wf_items_for_tab().len();
                             if delta < 0 {
-                                self.wf_selected = self.wf_selected.saturating_sub((-delta) as usize);
+                                self.wf_selected =
+                                    self.wf_selected.saturating_sub((-delta) as usize);
                             } else {
-                                self.wf_selected = (self.wf_selected + delta as usize).min(count.saturating_sub(1));
+                                self.wf_selected = (self.wf_selected + delta as usize)
+                                    .min(count.saturating_sub(1));
                             }
                             self.wf_preview_scroll = 0;
                         }
                         DesignSub::Library => {
                             let count = self.library_item_count();
                             if delta < 0 {
-                                self.library_selected = self.library_selected.saturating_sub((-delta) as usize);
+                                self.library_selected =
+                                    self.library_selected.saturating_sub((-delta) as usize);
                             } else {
-                                self.library_selected = (self.library_selected + delta as usize).min(count.saturating_sub(1));
+                                self.library_selected = (self.library_selected + delta as usize)
+                                    .min(count.saturating_sub(1));
                             }
                             self.library_preview_scroll = 0;
                         }
                         DesignSub::Intentions => {
                             if delta < 0 {
-                                self.idea_selected = self.idea_selected.saturating_sub((-delta) as usize);
+                                self.idea_selected =
+                                    self.idea_selected.saturating_sub((-delta) as usize);
                             } else {
-                                self.idea_selected = (self.idea_selected + delta as usize).min(self.ideas.len().saturating_sub(1));
+                                self.idea_selected = (self.idea_selected + delta as usize)
+                                    .min(self.ideas.len().saturating_sub(1));
                             }
                         }
                         DesignSub::Plans => {
@@ -2414,21 +2646,27 @@ impl App {
                                 let proj_idx = self.plans_current_project_idx();
                                 let total = self.plans_flat_count(proj_idx);
                                 if delta < 0 {
-                                    self.plans_tree_selected = self.plans_tree_selected.saturating_sub((-delta) as usize);
+                                    self.plans_tree_selected =
+                                        self.plans_tree_selected.saturating_sub((-delta) as usize);
                                 } else if total > 0 {
-                                    self.plans_tree_selected = (self.plans_tree_selected + delta as usize).min(total.saturating_sub(1));
+                                    self.plans_tree_selected = (self.plans_tree_selected
+                                        + delta as usize)
+                                        .min(total.saturating_sub(1));
                                 }
                             } else {
                                 let count = self.plans_project_indices.len();
                                 if delta < 0 {
-                                    self.plans_project_selected = self.plans_project_selected.saturating_sub((-delta) as usize);
+                                    self.plans_project_selected = self
+                                        .plans_project_selected
+                                        .saturating_sub((-delta) as usize);
                                 } else if count > 0 {
-                                    self.plans_project_selected = (self.plans_project_selected + delta as usize).min(count.saturating_sub(1));
+                                    self.plans_project_selected = (self.plans_project_selected
+                                        + delta as usize)
+                                        .min(count.saturating_sub(1));
                                 }
                             }
                         }
                     }
-                    _ => {}
                 }
             }
         }
@@ -2438,8 +2676,16 @@ impl App {
         // Shift+Left/Right always switches panels (from any list view), landing at content depth
         if self.sub == SubView::List && modifiers.contains(KeyModifiers::SHIFT) {
             match code {
-                KeyCode::Left => { self.panel = self.panel.prev(); self.focus_depth = self.content_depth(); return Ok(()); }
-                KeyCode::Right => { self.panel = self.panel.next(); self.focus_depth = self.content_depth(); return Ok(()); }
+                KeyCode::Left => {
+                    self.panel = self.panel.prev();
+                    self.focus_depth = self.content_depth();
+                    return Ok(());
+                }
+                KeyCode::Right => {
+                    self.panel = self.panel.next();
+                    self.focus_depth = self.content_depth();
+                    return Ok(());
+                }
                 _ => {}
             }
         }
@@ -2505,7 +2751,26 @@ impl App {
         }
 
         // Normalize nvim navigation keys to arrows (except in text inputs)
-        let typing_text = matches!(self.sub, SubView::SpawnGoal | SubView::NewProjectName | SubView::ConnectionName | SubView::ConnectionBaseUrl | SubView::ConnectionApiKey | SubView::ConnectionModel | SubView::ConnectionRateLimit | SubView::AddFeature(_) | SubView::AddMcpServer | SubView::RenameWorkforce(_) | SubView::RenameIdea(_) | SubView::RenameProject(_) | SubView::RenamePlanFeature { .. } | SubView::RenameFile { .. } | SubView::SteerSession(_) | SubView::SetLogoPath(_)) || self.commit_typing_correction || self.session_prompt_active;
+        let typing_text = matches!(
+            self.sub,
+            SubView::SpawnGoal
+                | SubView::NewProjectName
+                | SubView::ConnectionName
+                | SubView::ConnectionBaseUrl
+                | SubView::ConnectionApiKey
+                | SubView::ConnectionModel
+                | SubView::ConnectionRateLimit
+                | SubView::AddFeature(_)
+                | SubView::AddMcpServer
+                | SubView::RenameWorkforce(_)
+                | SubView::RenameIdea(_)
+                | SubView::RenameProject(_)
+                | SubView::RenamePlanFeature { .. }
+                | SubView::RenameFile { .. }
+                | SubView::SteerSession(_)
+                | SubView::SetLogoPath(_)
+        ) || self.commit_typing_correction
+            || self.session_prompt_active;
         let key = if !typing_text {
             match code {
                 KeyCode::Char('j') => KeyCode::Down,
@@ -2523,58 +2788,108 @@ impl App {
             let handled = match self.focus_depth {
                 // Level 0: Panel bar (Design/Oversee/Hypervise/Analyze/Publish)
                 0 => match key {
-                    KeyCode::Left => { self.panel = self.panel.prev(); true }
-                    KeyCode::Right => { self.panel = self.panel.next(); true }
-                    KeyCode::Down | KeyCode::Enter => { self.focus_depth = 1; true }
-                    KeyCode::Char('q') => { self.should_quit = true; true }
-                    _ => false
+                    KeyCode::Left => {
+                        self.panel = self.panel.prev();
+                        true
+                    }
+                    KeyCode::Right => {
+                        self.panel = self.panel.next();
+                        true
+                    }
+                    KeyCode::Down | KeyCode::Enter => {
+                        self.focus_depth = 1;
+                        true
+                    }
+                    KeyCode::Char('q') => {
+                        self.should_quit = true;
+                        true
+                    }
+                    _ => false,
                 },
                 // Level 1: Design sub-bar (Intentions/Workforce/Library)
                 1 if self.panel == Panel::Design => match key {
-                    KeyCode::Left => { self.design_sub = self.design_sub.prev(); true }
-                    KeyCode::Right => { self.design_sub = self.design_sub.next(); true }
-                    KeyCode::Up => { self.focus_depth = 0; true }
+                    KeyCode::Left => {
+                        self.design_sub = self.design_sub.prev();
+                        true
+                    }
+                    KeyCode::Right => {
+                        self.design_sub = self.design_sub.next();
+                        true
+                    }
+                    KeyCode::Up => {
+                        self.focus_depth = 0;
+                        true
+                    }
                     KeyCode::Down | KeyCode::Enter => {
                         // Drop to next level (sub-sub bar or content, depending on design_sub)
                         self.focus_depth = 2;
                         true
                     }
-                    KeyCode::Char('q') => { self.should_quit = true; true }
-                    _ => false
+                    KeyCode::Char('q') => {
+                        self.should_quit = true;
+                        true
+                    }
+                    _ => false,
                 },
                 // Level 2: Workforce sub-tabs or Library sub-tabs
                 2 if self.panel == Panel::Design => match self.design_sub {
                     DesignSub::Workforce => match key {
                         KeyCode::Left => {
                             self.workforce_tab = self.workforce_tab.prev();
-                            self.wf_selected = 0; self.wf_preview_scroll = 0; true
+                            self.wf_selected = 0;
+                            self.wf_preview_scroll = 0;
+                            true
                         }
                         KeyCode::Right => {
                             self.workforce_tab = self.workforce_tab.next();
-                            self.wf_selected = 0; self.wf_preview_scroll = 0; true
+                            self.wf_selected = 0;
+                            self.wf_preview_scroll = 0;
+                            true
                         }
-                        KeyCode::Up => { self.focus_depth = 1; true }
-                        KeyCode::Down | KeyCode::Enter => { self.focus_depth = 3; true }
-                        KeyCode::Char('q') => { self.should_quit = true; true }
-                        _ => false
+                        KeyCode::Up => {
+                            self.focus_depth = 1;
+                            true
+                        }
+                        KeyCode::Down | KeyCode::Enter => {
+                            self.focus_depth = 3;
+                            true
+                        }
+                        KeyCode::Char('q') => {
+                            self.should_quit = true;
+                            true
+                        }
+                        _ => false,
                     },
                     DesignSub::Library => match key {
                         KeyCode::Left => {
                             self.library_sub = self.library_sub.prev();
-                            self.library_selected = 0; self.library_preview_scroll = 0; true
+                            self.library_selected = 0;
+                            self.library_preview_scroll = 0;
+                            true
                         }
                         KeyCode::Right => {
                             self.library_sub = self.library_sub.next();
-                            self.library_selected = 0; self.library_preview_scroll = 0; true
+                            self.library_selected = 0;
+                            self.library_preview_scroll = 0;
+                            true
                         }
-                        KeyCode::Up => { self.focus_depth = 1; true }
-                        KeyCode::Down | KeyCode::Enter => { self.focus_depth = 3; true }
-                        KeyCode::Char('q') => { self.should_quit = true; true }
-                        _ => false
+                        KeyCode::Up => {
+                            self.focus_depth = 1;
+                            true
+                        }
+                        KeyCode::Down | KeyCode::Enter => {
+                            self.focus_depth = 3;
+                            true
+                        }
+                        KeyCode::Char('q') => {
+                            self.should_quit = true;
+                            true
+                        }
+                        _ => false,
                     },
-                    _ => false // Intentions has no level 2 bar
+                    _ => false, // Intentions has no level 2 bar
                 },
-                _ => false
+                _ => false,
             };
             if handled {
                 return Ok(());
@@ -2669,8 +2984,14 @@ impl App {
             SubView::AppMenu => self.key_app_menu(key),
             SubView::ActionMenu => self.key_action_menu(key),
             SubView::ConfirmDeleteDeprecated => self.key_confirm_delete_deprecated(key),
-            SubView::CommitReview(idx) => { let idx = *idx; self.key_commit_review(key, idx) }
-            SubView::CommitCorrecting(idx) => { let idx = *idx; self.key_commit_correcting(key, idx) }
+            SubView::CommitReview(idx) => {
+                let idx = *idx;
+                self.key_commit_review(key, idx)
+            }
+            SubView::CommitCorrecting(idx) => {
+                let idx = *idx;
+                self.key_commit_correcting(key, idx)
+            }
             SubView::NewProjectName => self.key_new_project_name(key),
             SubView::NewProjectScope => self.key_new_project_scope(key),
             SubView::NewProjectConfirm => self.key_new_project_confirm(key),
@@ -2687,14 +3008,29 @@ impl App {
                 self.key_feedback_confirm(key, idx)
             }
             SubView::WorkflowPicker => self.key_workflow_picker(key),
-            SubView::AddFeature(pidx) => { let pidx = *pidx; self.key_add_feature(key, pidx) }
+            SubView::AddFeature(pidx) => {
+                let pidx = *pidx;
+                self.key_add_feature(key, pidx)
+            }
             SubView::AddMcpServer => self.key_add_mcp_server(key),
-            SubView::RenameWorkforce(idx) => { let idx = *idx; self.key_rename_workforce(key, idx) }
-            SubView::RenameIdea(idx) => { let idx = *idx; self.key_rename_idea(key, idx) }
+            SubView::RenameWorkforce(idx) => {
+                let idx = *idx;
+                self.key_rename_workforce(key, idx)
+            }
+            SubView::RenameIdea(idx) => {
+                let idx = *idx;
+                self.key_rename_idea(key, idx)
+            }
             SubView::ConfirmRollback => self.key_confirm_rollback(key),
             SubView::ConfirmKillSession(_) => self.key_confirm_kill_session(key),
-            SubView::RenameProject(idx) => { let idx = *idx; self.key_rename_project(key, idx) }
-            SubView::RenamePlanFeature { phase_idx, feat_idx } => {
+            SubView::RenameProject(idx) => {
+                let idx = *idx;
+                self.key_rename_project(key, idx)
+            }
+            SubView::RenamePlanFeature {
+                phase_idx,
+                feat_idx,
+            } => {
                 let (pi, fi) = (*phase_idx, *feat_idx);
                 self.key_rename_plan_feature(key, pi, fi)
             }
@@ -2702,8 +3038,14 @@ impl App {
                 let (pi, ti) = (*proj_idx, *tree_idx);
                 self.key_rename_file(key, pi, ti)
             }
-            SubView::SteerSession(idx) => { let idx = *idx; self.key_steer_session(key, idx) }
-            SubView::SetLogoPath(idx) => { let idx = *idx; self.key_set_logo_path(key, idx) }
+            SubView::SteerSession(idx) => {
+                let idx = *idx;
+                self.key_steer_session(key, idx)
+            }
+            SubView::SetLogoPath(idx) => {
+                let idx = *idx;
+                self.key_set_logo_path(key, idx)
+            }
             // ExpandedSession is intercepted in handle_key before the j/k/h/l
             // remap; it never reaches this dispatch table.
             SubView::ExpandedSession(_) => Ok(()),
@@ -2740,7 +3082,10 @@ impl App {
     fn key_deprecated_browser(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Esc => { self.sub = SubView::List; return Ok(()); }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+                return Ok(());
+            }
             KeyCode::Up => {
                 if self.dep_in_child {
                     self.dep_child_selected = self.dep_child_selected.saturating_sub(1);
@@ -2755,10 +3100,14 @@ impl App {
             }
             KeyCode::Down => {
                 if self.dep_in_child {
-                    if !self.dep_child_entries.is_empty() && self.dep_child_selected < self.dep_child_entries.len() - 1 {
+                    if !self.dep_child_entries.is_empty()
+                        && self.dep_child_selected < self.dep_child_entries.len() - 1
+                    {
                         self.dep_child_selected += 1;
                     }
-                } else if !self.dep_parent_entries.is_empty() && self.dep_parent_selected < self.dep_parent_entries.len() - 1 {
+                } else if !self.dep_parent_entries.is_empty()
+                    && self.dep_parent_selected < self.dep_parent_entries.len() - 1
+                {
                     self.dep_parent_selected += 1;
                     self.dep_refresh_child();
                 }
@@ -2766,14 +3115,15 @@ impl App {
             }
             KeyCode::Right => {
                 if self.dep_in_child {
-                    if let Some(entry) = self.dep_child_entries.get(self.dep_child_selected).cloned() {
-                        if entry.is_dir {
-                            self.dep_path = entry.path;
-                            self.dep_parent_entries = orrch_core::list_directory(&self.dep_path);
-                            self.dep_parent_selected = 0;
-                            self.dep_in_child = false;
-                            self.dep_refresh_child();
-                        }
+                    if let Some(entry) =
+                        self.dep_child_entries.get(self.dep_child_selected).cloned()
+                        && entry.is_dir
+                    {
+                        self.dep_path = entry.path;
+                        self.dep_parent_entries = orrch_core::list_directory(&self.dep_path);
+                        self.dep_parent_selected = 0;
+                        self.dep_in_child = false;
+                        self.dep_refresh_child();
                     }
                 } else if !self.dep_child_entries.is_empty() {
                     self.dep_in_child = true;
@@ -2783,14 +3133,14 @@ impl App {
             KeyCode::Left => {
                 if self.dep_in_child {
                     self.dep_in_child = false;
-                } else if self.dep_path != self.dep_root {
-                    if let Some(parent) = self.dep_path.parent() {
-                        self.dep_path = parent.to_path_buf();
-                        self.dep_parent_entries = orrch_core::list_directory(&self.dep_path);
-                        self.dep_parent_selected = 0;
-                        self.dep_in_child = false;
-                        self.dep_refresh_child();
-                    }
+                } else if self.dep_path != self.dep_root
+                    && let Some(parent) = self.dep_path.parent()
+                {
+                    self.dep_path = parent.to_path_buf();
+                    self.dep_parent_entries = orrch_core::list_directory(&self.dep_path);
+                    self.dep_parent_selected = 0;
+                    self.dep_in_child = false;
+                    self.dep_refresh_child();
                 }
                 self.dep_refresh_preview();
             }
@@ -2798,7 +3148,9 @@ impl App {
                 let entry = if self.dep_in_child {
                     self.dep_child_entries.get(self.dep_child_selected).cloned()
                 } else {
-                    self.dep_parent_entries.get(self.dep_parent_selected).cloned()
+                    self.dep_parent_entries
+                        .get(self.dep_parent_selected)
+                        .cloned()
                 };
                 if let Some(entry) = entry {
                     if entry.is_dir {
@@ -2816,12 +3168,12 @@ impl App {
             }
             KeyCode::Char('d') => {
                 // Delete a deprecated project (only at top level of deprecated/)
-                if !self.dep_in_child && self.dep_path == self.dep_root {
-                    if let Some(entry) = self.dep_parent_entries.get(self.dep_parent_selected) {
-                        if entry.is_dir {
-                            self.sub = SubView::ConfirmDeleteDeprecated;
-                        }
-                    }
+                if !self.dep_in_child
+                    && self.dep_path == self.dep_root
+                    && let Some(entry) = self.dep_parent_entries.get(self.dep_parent_selected)
+                    && entry.is_dir
+                {
+                    self.sub = SubView::ConfirmDeleteDeprecated;
                 }
             }
             _ => {}
@@ -2830,20 +3182,22 @@ impl App {
     }
 
     fn key_confirm_delete_deprecated(&mut self, key: KeyCode) -> Result<()> {
-        if key == KeyCode::Char('y') || key == KeyCode::Char('Y') {
-            if let Some(entry) = self.dep_parent_entries.get(self.dep_parent_selected) {
-                let name = entry.name.clone();
-                let path = entry.path.clone();
-                match std::fs::remove_dir_all(&path) {
-                    Ok(()) => {
-                        self.dep_parent_entries = orrch_core::list_directory(&self.dep_root);
-                        self.dep_parent_selected = self.dep_parent_selected.min(self.dep_parent_entries.len().saturating_sub(1));
-                        self.dep_refresh_child();
-                        self.dep_refresh_preview();
-                        self.notify(format!("Permanently deleted deprecated/{name}"));
-                    }
-                    Err(e) => self.notify(format!("Delete failed: {e}")),
+        if (key == KeyCode::Char('y') || key == KeyCode::Char('Y'))
+            && let Some(entry) = self.dep_parent_entries.get(self.dep_parent_selected)
+        {
+            let name = entry.name.clone();
+            let path = entry.path.clone();
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => {
+                    self.dep_parent_entries = orrch_core::list_directory(&self.dep_root);
+                    self.dep_parent_selected = self
+                        .dep_parent_selected
+                        .min(self.dep_parent_entries.len().saturating_sub(1));
+                    self.dep_refresh_child();
+                    self.dep_refresh_preview();
+                    self.notify(format!("Permanently deleted deprecated/{name}"));
                 }
+                Err(e) => self.notify(format!("Delete failed: {e}")),
             }
         }
         self.sub = SubView::DeprecatedBrowser;
@@ -2891,7 +3245,8 @@ impl App {
                 }
                 KeyCode::Down => {
                     if count > 0 {
-                        self.plans_project_selected = (self.plans_project_selected + 1).min(count - 1);
+                        self.plans_project_selected =
+                            (self.plans_project_selected + 1).min(count - 1);
                         self.plans_phase_expanded = usize::MAX;
                         self.plans_tree_selected = 0;
                     }
@@ -2914,7 +3269,9 @@ impl App {
                 KeyCode::Char('q') => self.should_quit = true,
                 KeyCode::Esc | KeyCode::Left => {
                     // If on a feature inside an expanded phase, collapse; else go back to project list
-                    if let Some((is_phase, _, _)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
+                    if let Some((is_phase, _, _)) =
+                        self.plans_item_at(proj_idx, self.plans_tree_selected)
+                    {
                         if !is_phase {
                             // We're on a feature — just go back to left pane
                             self.plans_focus_right = false;
@@ -2934,18 +3291,20 @@ impl App {
                 }
                 KeyCode::Down => {
                     if total > 0 {
-                        self.plans_tree_selected = (self.plans_tree_selected + 1).min(total.saturating_sub(1));
+                        self.plans_tree_selected =
+                            (self.plans_tree_selected + 1).min(total.saturating_sub(1));
                     }
                 }
                 KeyCode::Enter => {
                     // Toggle phase expansion / cycle feature status
-                    if let Some((is_phase, phase_idx, _feat_idx)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
-                        if is_phase {
-                            if self.plans_phase_expanded == phase_idx {
-                                self.plans_phase_expanded = usize::MAX;
-                            } else {
-                                self.plans_phase_expanded = phase_idx;
-                            }
+                    if let Some((is_phase, phase_idx, _feat_idx)) =
+                        self.plans_item_at(proj_idx, self.plans_tree_selected)
+                        && is_phase
+                    {
+                        if self.plans_phase_expanded == phase_idx {
+                            self.plans_phase_expanded = usize::MAX;
+                        } else {
+                            self.plans_phase_expanded = phase_idx;
                         }
                     }
                 }
@@ -2979,16 +3338,24 @@ impl App {
                 }
                 KeyCode::Char('r') | KeyCode::F(2) => {
                     // 94d / OPT-014: if on a feature, open rename dialog; otherwise refresh
-                    if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(proj_idx, self.plans_tree_selected) {
+                    if let Some((false, phase_idx, feat_idx)) =
+                        self.plans_item_at(proj_idx, self.plans_tree_selected)
+                    {
                         let title = proj_idx.and_then(|idx| {
-                            self.projects.get(idx)?
-                                .plan_phases.get(phase_idx)?
-                                .features.get(feat_idx)
+                            self.projects
+                                .get(idx)?
+                                .plan_phases
+                                .get(phase_idx)?
+                                .features
+                                .get(feat_idx)
                                 .map(|f| f.title.clone())
                         });
                         if let Some(t) = title {
                             self.rename_buffer = t;
-                            self.sub = SubView::RenamePlanFeature { phase_idx, feat_idx };
+                            self.sub = SubView::RenamePlanFeature {
+                                phase_idx,
+                                feat_idx,
+                            };
                         } else {
                             self.plans_reload_project(proj_idx);
                         }
@@ -3010,7 +3377,8 @@ impl App {
     /// every project that was created with a scaffolded PLAN.md is visible
     /// from the moment it exists.
     pub fn plans_refresh_project_list(&mut self) {
-        self.plans_project_indices = self.projects
+        self.plans_project_indices = self
+            .projects
             .iter()
             .enumerate()
             .filter(|(_, p)| p.has_plan)
@@ -3023,13 +3391,19 @@ impl App {
 
     /// Get the actual project index for the currently selected plans project.
     pub fn plans_current_project_idx(&self) -> Option<usize> {
-        self.plans_project_indices.get(self.plans_project_selected).copied()
+        self.plans_project_indices
+            .get(self.plans_project_selected)
+            .copied()
     }
 
     /// Count visible items in the plans tree (phases + expanded features).
     fn plans_flat_count(&self, proj_idx: Option<usize>) -> usize {
-        let Some(idx) = proj_idx else { return 0; };
-        let Some(proj) = self.projects.get(idx) else { return 0; };
+        let Some(idx) = proj_idx else {
+            return 0;
+        };
+        let Some(proj) = self.projects.get(idx) else {
+            return 0;
+        };
         let mut count = 0;
         for (i, phase) in proj.plan_phases.iter().enumerate() {
             count += 1;
@@ -3041,9 +3415,17 @@ impl App {
     }
 
     /// Map flat index to (is_phase_header, phase_idx, feature_idx).
-    fn plans_item_at(&self, proj_idx: Option<usize>, flat_idx: usize) -> Option<(bool, usize, usize)> {
-        let Some(idx) = proj_idx else { return None; };
-        let Some(proj) = self.projects.get(idx) else { return None; };
+    fn plans_item_at(
+        &self,
+        proj_idx: Option<usize>,
+        flat_idx: usize,
+    ) -> Option<(bool, usize, usize)> {
+        let Some(idx) = proj_idx else {
+            return None;
+        };
+        let Some(proj) = self.projects.get(idx) else {
+            return None;
+        };
         let mut pos = 0;
         for (i, phase) in proj.plan_phases.iter().enumerate() {
             if pos == flat_idx {
@@ -3062,10 +3444,16 @@ impl App {
 
     /// Mark the selected feature as verified.
     fn plans_mark_verified(&mut self, proj_idx: Option<usize>) {
-        let Some(idx) = proj_idx else { return; };
-        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+        let Some(idx) = proj_idx else {
+            return;
+        };
+        if let Some((false, phase_idx, feat_idx)) =
+            self.plans_item_at(Some(idx), self.plans_tree_selected)
+        {
             let resolved = self.projects.get(idx).and_then(|proj| {
-                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let plan_path = proj
+                    .path
+                    .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
                 let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
                 Some((plan_path, feat.title.clone()))
             });
@@ -3078,12 +3466,22 @@ impl App {
 
     /// Cycle the selected feature's status forward or backward.
     fn plans_cycle_status(&mut self, proj_idx: Option<usize>, forward: bool) {
-        let Some(idx) = proj_idx else { return; };
-        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+        let Some(idx) = proj_idx else {
+            return;
+        };
+        if let Some((false, phase_idx, feat_idx)) =
+            self.plans_item_at(Some(idx), self.plans_tree_selected)
+        {
             let resolved = self.projects.get(idx).and_then(|proj| {
-                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let plan_path = proj
+                    .path
+                    .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
                 let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
-                let new_status = if forward { feat.status.cycle_forward() } else { feat.status.cycle_backward() };
+                let new_status = if forward {
+                    feat.status.cycle_forward()
+                } else {
+                    feat.status.cycle_backward()
+                };
                 Some((plan_path, feat.title.clone(), new_status))
             });
             if let Some((plan_path, title, new_status)) = resolved {
@@ -3095,10 +3493,16 @@ impl App {
 
     /// Set the selected feature to a specific status.
     fn plans_set_status(&mut self, proj_idx: Option<usize>, status: orrch_core::FeatureStatus) {
-        let Some(idx) = proj_idx else { return; };
-        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+        let Some(idx) = proj_idx else {
+            return;
+        };
+        if let Some((false, phase_idx, feat_idx)) =
+            self.plans_item_at(Some(idx), self.plans_tree_selected)
+        {
             let resolved = self.projects.get(idx).and_then(|proj| {
-                let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                let plan_path = proj
+                    .path
+                    .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
                 let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
                 Some((plan_path, feat.title.clone()))
             });
@@ -3110,14 +3514,26 @@ impl App {
     }
 
     /// Move the selected feature up or down.
-    fn plans_move_feature(&mut self, proj_idx: Option<usize>, direction: orrch_core::MoveDirection) {
-        let Some(idx) = proj_idx else { return; };
-        if let Some((false, phase_idx, feat_idx)) = self.plans_item_at(Some(idx), self.plans_tree_selected) {
+    fn plans_move_feature(
+        &mut self,
+        proj_idx: Option<usize>,
+        direction: orrch_core::MoveDirection,
+    ) {
+        let Some(idx) = proj_idx else {
+            return;
+        };
+        if let Some((false, phase_idx, feat_idx)) =
+            self.plans_item_at(Some(idx), self.plans_tree_selected)
+        {
             let plan_path = match self.projects.get(idx) {
-                Some(proj) => proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md")),
+                Some(proj) => proj
+                    .path
+                    .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md")),
                 None => return,
             };
-            if let Ok(true) = orrch_core::move_feature_in_plan(&plan_path, phase_idx, feat_idx, direction) {
+            if let Ok(true) =
+                orrch_core::move_feature_in_plan(&plan_path, phase_idx, feat_idx, direction)
+            {
                 // Adjust selection to follow the moved feature
                 match direction {
                     orrch_core::MoveDirection::Up => {
@@ -3134,9 +3550,13 @@ impl App {
 
     /// Open the project's PLAN.md in nvim.
     fn plans_edit_in_vim(&mut self, proj_idx: Option<usize>) {
-        let Some(idx) = proj_idx else { return; };
+        let Some(idx) = proj_idx else {
+            return;
+        };
         if let Some(proj) = self.projects.get(idx) {
-            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+            let plan_path = proj
+                .path
+                .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
             if plan_path.exists() {
                 let title = format!("[orrchestrator] Plan — {}", proj.name);
                 self.vim_request = Some(VimRequest {
@@ -3150,9 +3570,13 @@ impl App {
 
     /// Reload plan_phases for a specific project from disk.
     fn plans_reload_project(&mut self, proj_idx: Option<usize>) {
-        let Some(idx) = proj_idx else { return; };
+        let Some(idx) = proj_idx else {
+            return;
+        };
         if let Some(proj) = self.projects.get_mut(idx) {
-            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+            let plan_path = proj
+                .path
+                .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
             if let Ok(content) = std::fs::read_to_string(&plan_path) {
                 proj.plan_phases = orrch_core::parse_plan(&content);
             }
@@ -3168,15 +3592,21 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Left => {
                 self.workforce_tab = self.workforce_tab.prev();
-                self.wf_selected = 0; self.wf_preview_scroll = 0;
+                self.wf_selected = 0;
+                self.wf_preview_scroll = 0;
             }
             KeyCode::Right => {
                 self.workforce_tab = self.workforce_tab.next();
-                self.wf_selected = 0; self.wf_preview_scroll = 0;
+                self.wf_selected = 0;
+                self.wf_preview_scroll = 0;
             }
             KeyCode::Up => {
-                if self.wf_selected == 0 { self.focus_depth = self.content_depth() - 1; }
-                else { self.wf_selected -= 1; self.wf_preview_scroll = 0; }
+                if self.wf_selected == 0 {
+                    self.focus_depth = self.content_depth() - 1;
+                } else {
+                    self.wf_selected -= 1;
+                    self.wf_preview_scroll = 0;
+                }
             }
             KeyCode::Down => {
                 if count > 0 && self.wf_selected < count - 1 {
@@ -3184,20 +3614,29 @@ impl App {
                     self.wf_preview_scroll = 0;
                 }
             }
-            KeyCode::PageDown => { self.wf_preview_scroll += 10; }
-            KeyCode::PageUp => { self.wf_preview_scroll = self.wf_preview_scroll.saturating_sub(10); }
+            KeyCode::PageDown => {
+                self.wf_preview_scroll += 10;
+            }
+            KeyCode::PageUp => {
+                self.wf_preview_scroll = self.wf_preview_scroll.saturating_sub(10);
+            }
             KeyCode::Home => {
                 self.wf_selected = 0;
                 self.wf_preview_scroll = 0;
             }
             KeyCode::End => {
-                if count > 0 { self.wf_selected = count - 1; }
+                if count > 0 {
+                    self.wf_selected = count - 1;
+                }
                 self.wf_preview_scroll = 0;
             }
             KeyCode::Char('n') => {
                 // Harnesses: editor stub — edit files directly
                 if self.workforce_tab == WorkforceTab::Harnesses {
-                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    self.notify(
+                        "Harness editor coming soon — edit .md directly in library/harnesses/"
+                            .into(),
+                    );
                     return Ok(());
                 }
                 // New from template for current tab
@@ -3290,13 +3729,20 @@ impl App {
             }
             KeyCode::Char('d') => {
                 if self.workforce_tab == WorkforceTab::Harnesses {
-                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    self.notify(
+                        "Harness editor coming soon — edit .md directly in library/harnesses/"
+                            .into(),
+                    );
                     return Ok(());
                 }
                 let items = self.wf_items_for_tab();
                 if let Some((_, path)) = items.get(self.wf_selected) {
                     let p = path.clone();
-                    let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let name = p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     if std::fs::remove_file(&p).is_ok() {
                         self.notify(format!("Deleted {name}"));
                         self.reload_all_library_data();
@@ -3305,13 +3751,20 @@ impl App {
             }
             KeyCode::Enter => {
                 if self.workforce_tab == WorkforceTab::Harnesses {
-                    self.notify("Harness editor coming soon — edit .md directly in library/harnesses/".into());
+                    self.notify(
+                        "Harness editor coming soon — edit .md directly in library/harnesses/"
+                            .into(),
+                    );
                     return Ok(());
                 }
                 let items = self.wf_items_for_tab();
                 if let Some((_, path)) = items.get(self.wf_selected) {
                     let p = path.clone();
-                    let title = format!("[{}] {}", self.workforce_tab.label(), p.file_name().unwrap_or_default().to_string_lossy());
+                    let title = format!(
+                        "[{}] {}",
+                        self.workforce_tab.label(),
+                        p.file_name().unwrap_or_default().to_string_lossy()
+                    );
                     self.vim_request = Some(VimRequest {
                         file: p,
                         kind: VimKind::NewIdea,
@@ -3332,9 +3785,9 @@ impl App {
             // INS-004: force re-scan all library/workforce data from disk (now uppercase R)
             KeyCode::Char('R') => {
                 self.reload_all_library_data();
-                self.wf_selected = self.wf_selected.min(
-                    self.wf_items_for_tab().len().saturating_sub(1),
-                );
+                self.wf_selected = self
+                    .wf_selected
+                    .min(self.wf_items_for_tab().len().saturating_sub(1));
                 self.notify("Refreshed all workforce/library data from disk".into());
             }
             // Task 3: export currently selected workforce to ~/Downloads/<name>.md
@@ -3353,9 +3806,15 @@ impl App {
                             .map(|c| if c == ' ' { '_' } else { c })
                             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
                             .collect();
-                        let filename = if sanitized.is_empty() { "workforce".to_string() } else { sanitized };
-                        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
-                        let out_path = PathBuf::from(home).join("Downloads").join(format!("{filename}.md"));
+                        let filename = if sanitized.is_empty() {
+                            "workforce".to_string()
+                        } else {
+                            sanitized
+                        };
+                        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+                        let out_path = PathBuf::from(home)
+                            .join("Downloads")
+                            .join(format!("{filename}.md"));
                         // Ensure parent dir exists
                         if let Some(parent) = out_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
@@ -3370,14 +3829,15 @@ impl App {
             }
             // Task 3: import workforce from ~/Downloads/import.md into the in-memory list
             KeyCode::Char('i') if self.workforce_tab == WorkforceTab::Workflows => {
-                let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                 let in_path = PathBuf::from(home).join("Downloads").join("import.md");
                 match orrch_workforce::engine::import_workforce_from_path(&in_path) {
                     Ok(wf) => {
                         let wf_name = wf.name.clone();
                         // Add to in-memory lists so it renders in the Workflows tab.
                         // workforce_files drives the tab list; loaded_workforces is the parsed cache.
-                        self.workforce_files.push((wf_name.clone(), in_path.clone()));
+                        self.workforce_files
+                            .push((wf_name.clone(), in_path.clone()));
                         self.workforce_files.sort_by(|a, b| a.0.cmp(&b.0));
                         self.loaded_workforces.push(wf);
                         self.notify(format!("Imported {wf_name}"));
@@ -3393,13 +3853,25 @@ impl App {
     /// Get the list of (name, path) items for the current workforce tab.
     pub fn wf_items_for_tab(&self) -> Vec<(String, PathBuf)> {
         match self.workforce_tab {
-            WorkforceTab::Harnesses => self.library_harnesses.iter().map(|h| (h.name.clone(), h.path.clone())).collect(),
+            WorkforceTab::Harnesses => self
+                .library_harnesses
+                .iter()
+                .map(|h| (h.name.clone(), h.path.clone()))
+                .collect(),
             WorkforceTab::Workflows => self.workforce_files.clone(),
             WorkforceTab::Teams => self.operation_files.clone(),
-            WorkforceTab::Agents => self.agent_profiles.iter().map(|a| (a.name.clone(), a.path.clone())).collect(),
+            WorkforceTab::Agents => self
+                .agent_profiles
+                .iter()
+                .map(|a| (a.name.clone(), a.path.clone()))
+                .collect(),
             WorkforceTab::Skills => self.library_skills.clone(),
             WorkforceTab::Tools => self.library_tools.clone(),
-            WorkforceTab::McpServers => self.library_mcp_servers.iter().map(|s| (s.name.clone(), s.path.clone())).collect(),
+            WorkforceTab::McpServers => self
+                .library_mcp_servers
+                .iter()
+                .map(|s| (s.name.clone(), s.path.clone()))
+                .collect(),
             WorkforceTab::Profiles => self.library_profiles.clone(),
             WorkforceTab::TrainingData | WorkforceTab::Models => Vec::new(),
         }
@@ -3419,7 +3891,8 @@ impl App {
         self.library_skills = scan_skills_dir_filtered(&library_root.join("skills"));
         self.library_tools = scan_md_dir(&library_root.join("tools"));
         self.library_profiles = scan_md_dir(&library_root.join("profiles"));
-        self.library_pi_extensions = orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
+        self.library_pi_extensions =
+            orrch_library::load_pi_extensions(&library_root.join("pi-extensions"));
         self.workforce_files = scan_md_dir(&orrch_dir.join("workforces"));
         self.operation_files = scan_md_dir(&orrch_dir.join("operations"));
     }
@@ -3441,8 +3914,11 @@ impl App {
                 self.library_preview_scroll = 0;
             }
             KeyCode::Up if self.library_sub == LibrarySub::Fit => {
-                if self.fit_row == 0 { self.focus_depth = self.content_depth() - 1; }
-                else { self.fit_row -= 1; }
+                if self.fit_row == 0 {
+                    self.focus_depth = self.content_depth() - 1;
+                } else {
+                    self.fit_row -= 1;
+                }
             }
             KeyCode::Down if self.library_sub == LibrarySub::Fit => {
                 if !self.fit_results.is_empty() && self.fit_row < self.fit_results.len() - 1 {
@@ -3450,8 +3926,12 @@ impl App {
                 }
             }
             KeyCode::Up => {
-                if self.library_selected == 0 { self.focus_depth = self.content_depth() - 1; }
-                else { self.library_selected -= 1; self.library_preview_scroll = 0; }
+                if self.library_selected == 0 {
+                    self.focus_depth = self.content_depth() - 1;
+                } else {
+                    self.library_selected -= 1;
+                    self.library_preview_scroll = 0;
+                }
             }
             KeyCode::Down => {
                 if count > 0 && self.library_selected < count - 1 {
@@ -3459,14 +3939,20 @@ impl App {
                     self.library_preview_scroll = 0;
                 }
             }
-            KeyCode::PageDown => { self.library_preview_scroll += 10; }
-            KeyCode::PageUp => { self.library_preview_scroll = self.library_preview_scroll.saturating_sub(10); }
+            KeyCode::PageDown => {
+                self.library_preview_scroll += 10;
+            }
+            KeyCode::PageUp => {
+                self.library_preview_scroll = self.library_preview_scroll.saturating_sub(10);
+            }
             KeyCode::Home => {
                 self.library_selected = 0;
                 self.library_preview_scroll = 0;
             }
             KeyCode::End => {
-                if count > 0 { self.library_selected = count - 1; }
+                if count > 0 {
+                    self.library_selected = count - 1;
+                }
                 self.library_preview_scroll = 0;
             }
             KeyCode::Char('v') if self.library_sub == LibrarySub::Models => {
@@ -3487,7 +3973,9 @@ impl App {
                     // Close until next Friday at 00:00 UTC (billing cycle reset)
                     self.valve_store.close_until_next_weekday(&provider, 5, 0); // 5 = Friday
                     let valve = self.valve_store.valves.get(&provider);
-                    let display = valve.map(|v| v.reopen_display()).unwrap_or_else(|| "?".into());
+                    let display = valve
+                        .map(|v| v.reopen_display())
+                        .unwrap_or_else(|| "?".into());
                     self.notify(format!("Valve CLOSED: {} — reopens {}", provider, display));
                 }
             }
@@ -3496,7 +3984,11 @@ impl App {
                 if idx < self.library_mcp_servers.len() {
                     self.library_mcp_servers[idx].enabled = !self.library_mcp_servers[idx].enabled;
                     let name = self.library_mcp_servers[idx].name.clone();
-                    let status = if self.library_mcp_servers[idx].enabled { "enabled" } else { "disabled" };
+                    let status = if self.library_mcp_servers[idx].enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
                     self.notify(format!("{} {}", name, status));
                 }
             }
@@ -3507,7 +3999,12 @@ impl App {
                 self.start_edit_connection();
             }
             KeyCode::Char('d') if self.library_sub == LibrarySub::Connections => {
-                if self.connection_store.list().get(self.library_selected).is_some() {
+                if self
+                    .connection_store
+                    .list()
+                    .get(self.library_selected)
+                    .is_some()
+                {
                     self.sub = SubView::ConfirmDeleteConnection;
                 }
             }
@@ -3521,10 +4018,7 @@ impl App {
             KeyCode::Char('P') => {
                 let dir = self.library_dir.clone();
                 if !dir.join(".git").exists() {
-                    self.notify(format!(
-                        "Library pull: not a git repo ({})",
-                        dir.display()
-                    ));
+                    self.notify(format!("Library pull: not a git repo ({})", dir.display()));
                 } else {
                     match orrch_library::sync_pull(&dir) {
                         Ok(()) => self.notify("Library pulled".into()),
@@ -3536,10 +4030,7 @@ impl App {
             KeyCode::Char('U') => {
                 let dir = self.library_dir.clone();
                 if !dir.join(".git").exists() {
-                    self.notify(format!(
-                        "Library push: not a git repo ({})",
-                        dir.display()
-                    ));
+                    self.notify(format!("Library push: not a git repo ({})", dir.display()));
                 } else {
                     match orrch_library::sync_push(&dir, "chore(library): sync") {
                         Ok(()) => self.notify("Library pushed".into()),
@@ -3569,7 +4060,10 @@ impl App {
                 let orrch_dir = self.projects_dir.join("orrchestrator");
                 match create_from_template(TemplateCategory::PiExtension, &orrch_dir) {
                     Ok(path) => {
-                        let title = format!("[new PI extension] {}", path.file_name().unwrap_or_default().to_string_lossy());
+                        let title = format!(
+                            "[new PI extension] {}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        );
                         self.vim_request = Some(VimRequest {
                             file: path,
                             kind: VimKind::NewIdea,
@@ -3584,7 +4078,10 @@ impl App {
             KeyCode::Char('e') if self.library_sub == LibrarySub::PiExtensions => {
                 if let Some(item) = self.library_pi_extensions.get(self.library_selected) {
                     let path = item.path.clone();
-                    let title = format!("[PI ext] {}", path.file_name().unwrap_or_default().to_string_lossy());
+                    let title = format!(
+                        "[PI ext] {}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    );
                     self.vim_request = Some(VimRequest {
                         file: path,
                         kind: VimKind::NewIdea,
@@ -3595,13 +4092,22 @@ impl App {
             // PI-003: export selected skill as PI extension
             KeyCode::Char('x') if self.library_sub == LibrarySub::Skills => {
                 if let Some((_, skill_path)) = self.library_skills.get(self.library_selected) {
-                    let pi_ext_dir = self.projects_dir.join("orrchestrator").join("library").join("pi-extensions");
+                    let pi_ext_dir = self
+                        .projects_dir
+                        .join("orrchestrator")
+                        .join("library")
+                        .join("pi-extensions");
                     let skill_path = skill_path.clone();
                     match orrch_library::translate_skill_to_pi_extension(&skill_path, &pi_ext_dir) {
                         Ok(out) => {
-                            let name = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            let name = out
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
                             self.notify(format!("Exported to pi-extensions/{name}"));
-                            self.library_pi_extensions = orrch_library::load_pi_extensions(&pi_ext_dir);
+                            self.library_pi_extensions =
+                                orrch_library::load_pi_extensions(&pi_ext_dir);
                         }
                         Err(e) => self.notify(format!("Export failed: {e}")),
                     }
@@ -3610,13 +4116,22 @@ impl App {
             // PI-003: export selected tool as PI extension
             KeyCode::Char('x') if self.library_sub == LibrarySub::Tools => {
                 if let Some((_, tool_path)) = self.library_tools.get(self.library_selected) {
-                    let pi_ext_dir = self.projects_dir.join("orrchestrator").join("library").join("pi-extensions");
+                    let pi_ext_dir = self
+                        .projects_dir
+                        .join("orrchestrator")
+                        .join("library")
+                        .join("pi-extensions");
                     let tool_path = tool_path.clone();
                     match orrch_library::translate_tool_to_pi_extension(&tool_path, &pi_ext_dir) {
                         Ok(out) => {
-                            let name = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            let name = out
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
                             self.notify(format!("Exported to pi-extensions/{name}"));
-                            self.library_pi_extensions = orrch_library::load_pi_extensions(&pi_ext_dir);
+                            self.library_pi_extensions =
+                                orrch_library::load_pi_extensions(&pi_ext_dir);
                         }
                         Err(e) => self.notify(format!("Export failed: {e}")),
                     }
@@ -3654,7 +4169,11 @@ impl App {
 
     fn start_new_connection(&mut self) {
         self.connection_preset_idx = 0;
-        self.connection_form = self.connection_presets.first().cloned().unwrap_or_else(blank_connection_form);
+        self.connection_form = self
+            .connection_presets
+            .first()
+            .cloned()
+            .unwrap_or_else(blank_connection_form);
         self.connection_edit_original = None;
         self.connection_form_error = None;
         self.sub = SubView::ConnectionPreset;
@@ -3672,12 +4191,22 @@ impl App {
     }
 
     fn toggle_selected_connection(&mut self) {
-        let Some((name, enabled)) = self.selected_connection().map(|c| (c.name.clone(), !c.enabled)) else {
+        let Some((name, enabled)) = self
+            .selected_connection()
+            .map(|c| (c.name.clone(), !c.enabled))
+        else {
             self.notify("No connection selected".into());
             return;
         };
-        match self.connection_store.set_enabled(&name, enabled).and_then(|_| self.connection_store.save()) {
-            Ok(()) => self.notify(format!("{name} {}", if enabled { "enabled" } else { "disabled" })),
+        match self
+            .connection_store
+            .set_enabled(&name, enabled)
+            .and_then(|_| self.connection_store.save())
+        {
+            Ok(()) => self.notify(format!(
+                "{name} {}",
+                if enabled { "enabled" } else { "disabled" }
+            )),
             Err(err) => self.notify(format!("Connection save failed: {err}")),
         }
     }
@@ -3688,15 +4217,21 @@ impl App {
             return;
         };
         let name = connection.name.clone();
-        self.connection_test_status.insert(name.clone(), "testing...".to_string());
+        self.connection_test_status
+            .insert(name.clone(), "testing...".to_string());
         let tx = self.connection_test_tx.clone();
         std::thread::Builder::new()
             .name(format!("orrch-connection-test-{name}"))
             .spawn(move || {
-                let status = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                let status = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
                     Ok(rt) => match rt.block_on(orrch_core::test_connection(&connection)) {
                         Ok(message) => message,
-                        Err(err) => sanitize_connection_status(&connection, &format!("failed: {err}")),
+                        Err(err) => {
+                            sanitize_connection_status(&connection, &format!("failed: {err}"))
+                        }
                     },
                     Err(err) => format!("failed: runtime unavailable: {err}"),
                 };
@@ -3709,10 +4244,22 @@ impl App {
         let total = self.connection_presets.len() + 1;
         match key {
             KeyCode::Esc => self.sub = SubView::List,
-            KeyCode::Up => self.connection_preset_idx = if self.connection_preset_idx == 0 { total - 1 } else { self.connection_preset_idx - 1 },
-            KeyCode::Down | KeyCode::Tab => self.connection_preset_idx = (self.connection_preset_idx + 1) % total,
+            KeyCode::Up => {
+                self.connection_preset_idx = if self.connection_preset_idx == 0 {
+                    total - 1
+                } else {
+                    self.connection_preset_idx - 1
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.connection_preset_idx = (self.connection_preset_idx + 1) % total
+            }
             KeyCode::Enter => {
-                self.connection_form = self.connection_presets.get(self.connection_preset_idx).cloned().unwrap_or_else(blank_connection_form);
+                self.connection_form = self
+                    .connection_presets
+                    .get(self.connection_preset_idx)
+                    .cloned()
+                    .unwrap_or_else(blank_connection_form);
                 self.connection_form_error = None;
                 self.sub = SubView::ConnectionName;
             }
@@ -3723,7 +4270,13 @@ impl App {
 
     fn key_connection_name(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Esc => self.sub = if self.connection_edit_original.is_some() { SubView::List } else { SubView::ConnectionPreset },
+            KeyCode::Esc => {
+                self.sub = if self.connection_edit_original.is_some() {
+                    SubView::List
+                } else {
+                    SubView::ConnectionPreset
+                }
+            }
             KeyCode::Enter => {
                 let name = self.connection_form.name.trim().to_string();
                 if name.is_empty() {
@@ -3731,15 +4284,22 @@ impl App {
                     return Ok(());
                 }
                 if name.contains(|ch: char| ch.is_whitespace() || "/\\:$".contains(ch)) {
-                    self.connection_form_error = Some("Use a simple name without spaces or path characters".into());
+                    self.connection_form_error =
+                        Some("Use a simple name without spaces or path characters".into());
                     return Ok(());
                 }
                 self.connection_form.name = name;
                 self.connection_form_error = None;
                 self.sub = SubView::ConnectionBaseUrl;
             }
-            KeyCode::Backspace => { self.connection_form.name.pop(); self.connection_form_error = None; }
-            KeyCode::Char(c) => { self.connection_form.name.push(c); self.connection_form_error = None; }
+            KeyCode::Backspace => {
+                self.connection_form.name.pop();
+                self.connection_form_error = None;
+            }
+            KeyCode::Char(c) => {
+                self.connection_form.name.push(c);
+                self.connection_form_error = None;
+            }
             _ => {}
         }
         Ok(())
@@ -3749,17 +4309,29 @@ impl App {
         match key {
             KeyCode::Esc => self.sub = SubView::ConnectionName,
             KeyCode::Enter => {
-                let base_url = self.connection_form.base_url.trim().trim_end_matches('/').to_string();
+                let base_url = self
+                    .connection_form
+                    .base_url
+                    .trim()
+                    .trim_end_matches('/')
+                    .to_string();
                 if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-                    self.connection_form_error = Some("Base URL must start with http:// or https://".into());
+                    self.connection_form_error =
+                        Some("Base URL must start with http:// or https://".into());
                     return Ok(());
                 }
                 self.connection_form.base_url = base_url;
                 self.connection_form_error = None;
                 self.sub = SubView::ConnectionApiKey;
             }
-            KeyCode::Backspace => { self.connection_form.base_url.pop(); self.connection_form_error = None; }
-            KeyCode::Char(c) => { self.connection_form.base_url.push(c); self.connection_form_error = None; }
+            KeyCode::Backspace => {
+                self.connection_form.base_url.pop();
+                self.connection_form_error = None;
+            }
+            KeyCode::Char(c) => {
+                self.connection_form.base_url.push(c);
+                self.connection_form_error = None;
+            }
             _ => {}
         }
         Ok(())
@@ -3768,9 +4340,18 @@ impl App {
     fn key_connection_api_key(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Esc => self.sub = SubView::ConnectionBaseUrl,
-            KeyCode::Enter => { self.connection_form_error = None; self.sub = SubView::ConnectionModel; }
-            KeyCode::Backspace => { self.connection_form.api_key.pop(); self.connection_form_error = None; }
-            KeyCode::Char(c) => { self.connection_form.api_key.push(c); self.connection_form_error = None; }
+            KeyCode::Enter => {
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionModel;
+            }
+            KeyCode::Backspace => {
+                self.connection_form.api_key.pop();
+                self.connection_form_error = None;
+            }
+            KeyCode::Char(c) => {
+                self.connection_form.api_key.push(c);
+                self.connection_form_error = None;
+            }
             _ => {}
         }
         Ok(())
@@ -3789,8 +4370,14 @@ impl App {
                 self.connection_form_error = None;
                 self.sub = SubView::ConnectionRateLimit;
             }
-            KeyCode::Backspace => { self.connection_form.default_model.pop(); self.connection_form_error = None; }
-            KeyCode::Char(c) => { self.connection_form.default_model.push(c); self.connection_form_error = None; }
+            KeyCode::Backspace => {
+                self.connection_form.default_model.pop();
+                self.connection_form_error = None;
+            }
+            KeyCode::Char(c) => {
+                self.connection_form.default_model.push(c);
+                self.connection_form_error = None;
+            }
             _ => {}
         }
         Ok(())
@@ -3799,7 +4386,10 @@ impl App {
     fn key_connection_rate_limit(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Esc => self.sub = SubView::ConnectionModel,
-            KeyCode::Enter => { self.connection_form_error = None; self.sub = SubView::ConnectionConfirm; }
+            KeyCode::Enter => {
+                self.connection_form_error = None;
+                self.sub = SubView::ConnectionConfirm;
+            }
             KeyCode::Backspace => {
                 let mut value = self.connection_form.rate_limit_rpm.to_string();
                 value.pop();
@@ -3832,7 +4422,12 @@ impl App {
                 };
                 match result.and_then(|_| self.connection_store.save()) {
                     Ok(()) => {
-                        self.library_selected = self.connection_store.list().iter().position(|c| c.name == self.connection_form.name).unwrap_or(0);
+                        self.library_selected = self
+                            .connection_store
+                            .list()
+                            .iter()
+                            .position(|c| c.name == self.connection_form.name)
+                            .unwrap_or(0);
                         self.notify(format!("Connection saved: {}", self.connection_form.name));
                         self.sub = SubView::List;
                     }
@@ -3849,14 +4444,19 @@ impl App {
         match key {
             KeyCode::Esc | KeyCode::Char('n') => self.sub = SubView::List,
             KeyCode::Char('y') | KeyCode::Enter => {
-                if let Some(name) = self.selected_connection().map(|connection| connection.name.clone()) {
+                if let Some(name) = self
+                    .selected_connection()
+                    .map(|connection| connection.name.clone())
+                {
                     self.connection_store.remove(&name);
                     self.connection_test_status.remove(&name);
                     match self.connection_store.save() {
                         Ok(()) => self.notify(format!("Deleted connection: {name}")),
                         Err(err) => self.notify(format!("Connection save failed: {err}")),
                     }
-                    self.library_selected = self.library_selected.min(self.connection_store.list().len().saturating_sub(1));
+                    self.library_selected = self
+                        .library_selected
+                        .min(self.connection_store.list().len().saturating_sub(1));
                 }
                 self.sub = SubView::List;
             }
@@ -3886,7 +4486,11 @@ impl App {
     pub(crate) fn refresh_fit(&mut self, fresh: bool) {
         let machines = self.fit_registry.all();
         if let Some(m) = machines.get(self.fit_machine_idx) {
-            let opts = orrch_hwfit::RankOptions { limit: 50, sort: "score", ..Default::default() };
+            let opts = orrch_hwfit::RankOptions {
+                limit: 50,
+                sort: "score",
+                ..Default::default()
+            };
             let (system, results) = orrch_hwfit::rank_for_machine(m, fresh, &opts);
             self.fit_system = Some(system);
             self.fit_results = results;
@@ -3919,7 +4523,9 @@ impl App {
     fn key_placeholder(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Up => { self.focus_depth = 0; }
+            KeyCode::Up => {
+                self.focus_depth = 0;
+            }
             _ => {}
         }
         Ok(())
@@ -4001,12 +4607,13 @@ impl App {
                     let proj_dir = self.projects_dir.join("orrchestrator");
                     if proj_dir.exists() {
                         let version = orrch_core::release::next_version_string(
-                            &proj_dir, orrch_core::release::BumpKind::Patch,
+                            &proj_dir,
+                            orrch_core::release::BumpKind::Patch,
                         );
-                        let entry = orrch_core::release::generate_changelog_entry(&proj_dir, &version);
-                        self.release_notes_preview = Some(format!(
-                            "Preview: {version} (not yet tagged)\n\n{entry}"
-                        ));
+                        let entry =
+                            orrch_core::release::generate_changelog_entry(&proj_dir, &version);
+                        self.release_notes_preview =
+                            Some(format!("Preview: {version} (not yet tagged)\n\n{entry}"));
                     }
                 }
             }
@@ -4016,63 +4623,63 @@ impl App {
                     let proj_dir = self.projects_dir.join("orrchestrator");
                     if proj_dir.exists() {
                         if self.build_targets.is_empty() {
-                            self.build_targets = orrch_core::release::detect_build_targets(&proj_dir);
+                            self.build_targets =
+                                orrch_core::release::detect_build_targets(&proj_dir);
                         }
                         self.build_running = true;
-                        self.build_results = self.build_targets.iter()
+                        self.build_results = self
+                            .build_targets
+                            .iter()
                             .map(|t| orrch_core::release::build_artifact(&proj_dir, t))
                             .collect();
                         self.build_running = false;
                     }
                 }
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                match self.publish_tab {
-                    PublishTab::Distribution => {
-                        if let Some(ref s) = self.distribution_status {
-                            let len = s.len();
-                            if len > 0 {
-                                self.distribution_selected = (self.distribution_selected + 1).min(len - 1);
-                            }
-                        }
-                    }
-                    PublishTab::History => {
-                        if let Some(ref h) = self.release_history {
-                            let len = h.len();
-                            if len > 0 {
-                                self.history_selected = (self.history_selected + 1).min(len - 1);
-                            }
-                        }
-                    }
-                    PublishTab::Marketing => {
-                        self.marketing_scroll = self.marketing_scroll.saturating_add(1);
-                    }
-                    PublishTab::Brands => {
-                        let len = self.brand_profiles.len();
+            KeyCode::Char('j') | KeyCode::Down => match self.publish_tab {
+                PublishTab::Distribution => {
+                    if let Some(ref s) = self.distribution_status {
+                        let len = s.len();
                         if len > 0 {
-                            self.brand_selected = (self.brand_selected + 1).min(len - 1);
+                            self.distribution_selected =
+                                (self.distribution_selected + 1).min(len - 1);
                         }
                     }
-                    _ => {}
                 }
-            }
-            KeyCode::Char('k') => {
-                match self.publish_tab {
-                    PublishTab::Distribution => {
-                        self.distribution_selected = self.distribution_selected.saturating_sub(1);
+                PublishTab::History => {
+                    if let Some(ref h) = self.release_history {
+                        let len = h.len();
+                        if len > 0 {
+                            self.history_selected = (self.history_selected + 1).min(len - 1);
+                        }
                     }
-                    PublishTab::History => {
-                        self.history_selected = self.history_selected.saturating_sub(1);
-                    }
-                    PublishTab::Marketing => {
-                        self.marketing_scroll = self.marketing_scroll.saturating_sub(1);
-                    }
-                    PublishTab::Brands => {
-                        self.brand_selected = self.brand_selected.saturating_sub(1);
-                    }
-                    _ => {}
                 }
-            }
+                PublishTab::Marketing => {
+                    self.marketing_scroll = self.marketing_scroll.saturating_add(1);
+                }
+                PublishTab::Brands => {
+                    let len = self.brand_profiles.len();
+                    if len > 0 {
+                        self.brand_selected = (self.brand_selected + 1).min(len - 1);
+                    }
+                }
+                _ => {}
+            },
+            KeyCode::Char('k') => match self.publish_tab {
+                PublishTab::Distribution => {
+                    self.distribution_selected = self.distribution_selected.saturating_sub(1);
+                }
+                PublishTab::History => {
+                    self.history_selected = self.history_selected.saturating_sub(1);
+                }
+                PublishTab::Marketing => {
+                    self.marketing_scroll = self.marketing_scroll.saturating_sub(1);
+                }
+                PublishTab::Brands => {
+                    self.brand_selected = self.brand_selected.saturating_sub(1);
+                }
+                _ => {}
+            },
             KeyCode::Char('D') => {
                 // 108: Rollback — delete the selected tag (Packaging tab uses
                 // the most-recent tag from history; History tab uses the
@@ -4083,12 +4690,11 @@ impl App {
                         let history = orrch_core::release::load_release_history(&dir);
                         history.into_iter().next().map(|e| e.tag)
                     }
-                    PublishTab::History => {
-                        self.release_history
-                            .as_ref()
-                            .and_then(|h| h.get(self.history_selected))
-                            .map(|e| e.tag.clone())
-                    }
+                    PublishTab::History => self
+                        .release_history
+                        .as_ref()
+                        .and_then(|h| h.get(self.history_selected))
+                        .map(|e| e.tag.clone()),
                     _ => None,
                 };
                 if let Some(tag) = tag_opt {
@@ -4099,7 +4705,9 @@ impl App {
                 }
             }
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Up => { self.focus_depth = 0; }
+            KeyCode::Up => {
+                self.focus_depth = 0;
+            }
             _ => {}
         }
         Ok(())
@@ -4120,7 +4728,8 @@ impl App {
             PublishTab::Distribution => {
                 let dir = self.projects_dir.join("orrchestrator");
                 if dir.exists() {
-                    self.distribution_status = Some(orrch_core::release::detect_distribution_status(&dir));
+                    self.distribution_status =
+                        Some(orrch_core::release::detect_distribution_status(&dir));
                 }
             }
             PublishTab::History => {
@@ -4132,7 +4741,8 @@ impl App {
             PublishTab::Marketing => {
                 let dir = self.projects_dir.join("orrchestrator");
                 if dir.exists() {
-                    self.marketing_metadata = Some(orrch_core::release::load_marketing_metadata(&dir));
+                    self.marketing_metadata =
+                        Some(orrch_core::release::load_marketing_metadata(&dir));
                 }
             }
         }
@@ -4144,9 +4754,8 @@ impl App {
         // 108: clear rollback advisory on refresh
         self.rollback_advisory = None;
         if proj_dir.exists() {
-            self.release_notes_preview = Some(
-                orrch_core::release::generate_release_notes(&proj_dir)
-            );
+            self.release_notes_preview =
+                Some(orrch_core::release::generate_release_notes(&proj_dir));
             self.checklist_results = orrch_core::release::run_checklist(&proj_dir)
                 .into_iter()
                 .map(|(check, passed)| (check.label().to_string(), passed))
@@ -4206,16 +4815,15 @@ impl App {
                         // user opened nvim outside orrch), refuse to submit
                         // when a live editor still holds a swap file. This
                         // prevents the silent stale-disk submission bug.
-                        if !saved {
-                            if let Some((_swap, pid)) =
+                        if !saved
+                            && let Some((_swap, pid)) =
                                 orrch_core::vault::detect_live_editor_for(&idea.path)
-                            {
-                                self.notify(format!(
+                        {
+                            self.notify(format!(
                                     "Submit blocked: nvim (pid {pid}) has '{}' open with possibly-unsaved edits. Save (:w) and retry.",
                                     idea.filename
                                 ));
-                                return Ok(());
-                            }
+                            return Ok(());
                         }
 
                         let vault = orrch_core::vault::vault_dir(&self.projects_dir);
@@ -4226,7 +4834,8 @@ impl App {
                             Ok(_) => {
                                 // Pre-create the per-idea workspace so the
                                 // skill doesn't have to mkdir on first write.
-                                let workspace = orrch_core::vault::intake_workspace(&vault, &idea_filename);
+                                let workspace =
+                                    orrch_core::vault::intake_workspace(&vault, &idea_filename);
                                 let _ = std::fs::create_dir_all(&workspace);
 
                                 let project_dir = self.projects_dir.join("orrchestrator");
@@ -4275,18 +4884,21 @@ impl App {
                     let workspace = orrch_core::vault::intake_workspace(&vault, &idea.filename);
                     let review_path = workspace.join("review.json");
 
-                    if review_path.exists() {
-                        if let Some(loaded) = orrch_core::load_review_at(&workspace) {
-                            self.intake_review = Some(loaded);
-                            self.intake_review_scroll_raw = 0;
-                            self.intake_review_scroll_opt = 0;
-                            self.intake_review_focus = IntakeReviewFocus::Raw;
-                            return Ok(());
-                        }
+                    if review_path.exists()
+                        && let Some(loaded) = orrch_core::load_review_at(&workspace)
+                    {
+                        self.intake_review = Some(loaded);
+                        self.intake_review_scroll_raw = 0;
+                        self.intake_review_scroll_opt = 0;
+                        self.intake_review_focus = IntakeReviewFocus::Raw;
+                        return Ok(());
                     }
 
                     // Fallback: read-only view scraped from the orrchestrator inbox.
-                    let inbox_path = self.projects_dir.join("orrchestrator").join("instructions_inbox.md");
+                    let inbox_path = self
+                        .projects_dir
+                        .join("orrchestrator")
+                        .join("instructions_inbox.md");
                     let optimized = if let Ok(inbox) = std::fs::read_to_string(&inbox_path) {
                         let source_marker = format!("plans/{}", idea.filename);
                         if inbox.contains(&source_marker) {
@@ -4301,7 +4913,11 @@ impl App {
                                     block.push('\n');
                                 }
                             }
-                            if block.is_empty() { format!("(no instructions found for {})", idea.filename) } else { block }
+                            if block.is_empty() {
+                                format!("(no instructions found for {})", idea.filename)
+                            } else {
+                                block
+                            }
                         } else {
                             format!("(no instructions found for {})", idea.filename)
                         }
@@ -4324,13 +4940,16 @@ impl App {
                 // Delete only if duplicate (warn otherwise)
                 if let Some(idea) = self.ideas.get(self.idea_selected) {
                     if idea.pipeline.is_submitted() {
-                        self.notify("Cannot delete: already in pipeline. Use only for duplicates.".into());
+                        self.notify(
+                            "Cannot delete: already in pipeline. Use only for duplicates.".into(),
+                        );
                     } else {
                         let path = idea.path.clone();
                         let _ = std::fs::remove_file(&path);
                         let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                         self.ideas = orrch_core::vault::load_ideas(&vault);
-                        self.idea_selected = self.idea_selected.min(self.ideas.len().saturating_sub(1));
+                        self.idea_selected =
+                            self.idea_selected.min(self.ideas.len().saturating_sub(1));
                         self.notify("Deleted (duplicate cleanup)".into());
                     }
                 }
@@ -4338,28 +4957,31 @@ impl App {
             KeyCode::Char('c') => {
                 // Mark selected idea as fully implemented (manual override for
                 // ideas whose instructions landed without tracked targets).
-                if let Some(idea) = self.ideas.get(self.idea_selected) {
-                    if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
-                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
-                        let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 100);
-                        self.ideas = orrch_core::vault::load_ideas(&vault);
-                        self.notify("Marked complete".into());
-                    }
+                if let Some(idea) = self.ideas.get(self.idea_selected)
+                    && idea.pipeline.is_submitted()
+                    && !idea.pipeline.is_complete()
+                {
+                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                    let _ =
+                        orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 100);
+                    self.ideas = orrch_core::vault::load_ideas(&vault);
+                    self.notify("Marked complete".into());
                 }
             }
             KeyCode::Char('X') => {
                 // Retract a stuck submission — resets progress to 0 and clears
                 // submitted_at so the idea can be re-submitted via 's'.
-                if let Some(idea) = self.ideas.get(self.idea_selected) {
-                    if idea.pipeline.is_submitted() && !idea.pipeline.is_complete() {
-                        let vault = orrch_core::vault::vault_dir(&self.projects_dir);
-                        let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 0);
-                        self.ideas = orrch_core::vault::load_ideas(&vault);
-                        self.notify("Submission retracted — ready to re-submit".into());
-                    }
+                if let Some(idea) = self.ideas.get(self.idea_selected)
+                    && idea.pipeline.is_submitted()
+                    && !idea.pipeline.is_complete()
+                {
+                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                    let _ = orrch_core::vault::update_pipeline_progress(&vault, &idea.filename, 0);
+                    self.ideas = orrch_core::vault::load_ideas(&vault);
+                    self.notify("Submission retracted — ready to re-submit".into());
                 }
             }
-KeyCode::Char('i') => {
+            KeyCode::Char('i') => {
                 // Toggle audit trail expansion for the selected idea
                 if self.ideas_audit_expanded == Some(self.idea_selected) {
                     self.ideas_audit_expanded = None;
@@ -4373,13 +4995,16 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Up => {
-                if self.idea_selected == 0 { self.focus_depth = self.content_depth() - 1; }
-                else { self.idea_selected -= 1; }
-            }
-            KeyCode::Down => {
-                if !self.ideas.is_empty() && self.idea_selected < self.ideas.len() - 1 {
-                    self.idea_selected += 1;
+                if self.idea_selected == 0 {
+                    self.focus_depth = self.content_depth() - 1;
+                } else {
+                    self.idea_selected -= 1;
                 }
+            }
+            KeyCode::Down
+                if !self.ideas.is_empty() && self.idea_selected < self.ideas.len() - 1 =>
+            {
+                self.idea_selected += 1;
             }
             _ => {}
         }
@@ -4396,18 +5021,18 @@ KeyCode::Char('i') => {
                     IntakeReviewFocus::Optimized => IntakeReviewFocus::Raw,
                 };
             }
-            KeyCode::Up => {
-                match self.intake_review_focus {
-                    IntakeReviewFocus::Raw => self.intake_review_scroll_raw = self.intake_review_scroll_raw.saturating_sub(1),
-                    IntakeReviewFocus::Optimized => self.intake_review_scroll_opt = self.intake_review_scroll_opt.saturating_sub(1),
+            KeyCode::Up => match self.intake_review_focus {
+                IntakeReviewFocus::Raw => {
+                    self.intake_review_scroll_raw = self.intake_review_scroll_raw.saturating_sub(1)
                 }
-            }
-            KeyCode::Down => {
-                match self.intake_review_focus {
-                    IntakeReviewFocus::Raw => self.intake_review_scroll_raw += 1,
-                    IntakeReviewFocus::Optimized => self.intake_review_scroll_opt += 1,
+                IntakeReviewFocus::Optimized => {
+                    self.intake_review_scroll_opt = self.intake_review_scroll_opt.saturating_sub(1)
                 }
-            }
+            },
+            KeyCode::Down => match self.intake_review_focus {
+                IntakeReviewFocus::Raw => self.intake_review_scroll_raw += 1,
+                IntakeReviewFocus::Optimized => self.intake_review_scroll_opt += 1,
+            },
             KeyCode::Char('e') => {
                 // Edit optimized text in nvim. Scratch file lives in the
                 // per-idea workspace so concurrent reviews never collide.
@@ -4469,7 +5094,8 @@ KeyCode::Char('i') => {
                         }
                     }
 
-                    match orrch_core::write_intake_decision(&review, "confirmed", &review.optimized) {
+                    match orrch_core::write_intake_decision(&review, "confirmed", &review.optimized)
+                    {
                         Ok(_) => {
                             // Reload projects so any newly scaffolded ones
                             // appear immediately in the Oversee/Plans panels
@@ -4482,7 +5108,9 @@ KeyCode::Char('i') => {
                             if let Some(idea_filename) = source_idea {
                                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                                 let _ = orrch_core::vault::update_pipeline_progress(
-                                    &vault, &idea_filename, 50,
+                                    &vault,
+                                    &idea_filename,
+                                    50,
                                 );
                                 self.ideas = orrch_core::vault::load_ideas(&vault);
 
@@ -4508,16 +5136,25 @@ KeyCode::Char('i') => {
                                 );
                                 let stem = idea_filename.trim_end_matches(".md");
                                 let cont_name = format!("intake-cont-{stem}");
-                                let _ = self.spawn_session_named(&project_dir, BackendKind::Claude, Some(&goal), Some(&cont_name));
+                                let _ = self.spawn_session_named(
+                                    &project_dir,
+                                    BackendKind::Claude,
+                                    Some(&goal),
+                                    Some(&cont_name),
+                                );
                             }
 
                             // User-facing notification reflects what actually happened.
-                            let mut msg = String::from("Intake confirmed — distribution session spawned");
+                            let mut msg =
+                                String::from("Intake confirmed — distribution session spawned");
                             if !scaffolded.is_empty() {
                                 msg.push_str(&format!(" (scaffolded: {})", scaffolded.join(", ")));
                             }
                             if !scaffold_errors.is_empty() {
-                                msg.push_str(&format!(" (scaffold errors: {})", scaffold_errors.join("; ")));
+                                msg.push_str(&format!(
+                                    " (scaffold errors: {})",
+                                    scaffold_errors.join("; ")
+                                ));
                             }
                             self.notify(msg);
                         }
@@ -4533,12 +5170,15 @@ KeyCode::Char('i') => {
                 // can re-edit and re-submit it.
                 if let Some(review) = self.intake_review.take() {
                     let source_idea = review.source_idea.clone();
-                    match orrch_core::write_intake_decision(&review, "rejected", &review.optimized) {
+                    match orrch_core::write_intake_decision(&review, "rejected", &review.optimized)
+                    {
                         Ok(_) => {
                             if let Some(idea_filename) = source_idea {
                                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                                 let _ = orrch_core::vault::update_pipeline_progress(
-                                    &vault, &idea_filename, 0,
+                                    &vault,
+                                    &idea_filename,
+                                    0,
                                 );
                                 self.ideas = orrch_core::vault::load_ideas(&vault);
                             }
@@ -4559,13 +5199,18 @@ KeyCode::Char('i') => {
         self.categorize_projects();
 
         // If we're inside a project (browsing sessions + files), handle that first
-        if self.tree_browsing {
-            if let Some(pidx) = self.tree_project {
-                return self.key_inside_project(key, pidx);
-            }
+        if self.tree_browsing
+            && let Some(pidx) = self.tree_project
+        {
+            return self.key_inside_project(key, pidx);
         }
 
-        let _count = self.projects.len() + self.facilities.iter().map(|f| 1 + f.sub_projects.len()).sum::<usize>();
+        let _count = self.projects.len()
+            + self
+                .facilities
+                .iter()
+                .map(|f| 1 + f.sub_projects.len())
+                .sum::<usize>();
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
@@ -4582,26 +5227,32 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('N') => {
                 // Multi-spawn: spawn a session for each open roadmap item
-                if let Some(pidx) = self.selected_project_index() {
-                    if let Some(proj) = self.projects.get(pidx) {
-                        let open_items: Vec<String> = proj.open_roadmap_items()
-                            .iter()
-                            .map(|item| item.title.clone())
-                            .collect();
-                        let path = proj.path.clone();
-                        let name = proj.name.clone();
-                        let count = open_items.len();
-                        if count == 0 {
-                            self.notify(format!("{name}: no open roadmap items"));
-                        } else {
-                            let mut spawned = 0;
-                            for goal in open_items {
-                                if self.spawn_session(&path, BackendKind::Claude, Some(&goal)).is_ok() {
-                                    spawned += 1;
-                                }
+                if let Some(pidx) = self.selected_project_index()
+                    && let Some(proj) = self.projects.get(pidx)
+                {
+                    let open_items: Vec<String> = proj
+                        .open_roadmap_items()
+                        .iter()
+                        .map(|item| item.title.clone())
+                        .collect();
+                    let path = proj.path.clone();
+                    let name = proj.name.clone();
+                    let count = open_items.len();
+                    if count == 0 {
+                        self.notify(format!("{name}: no open roadmap items"));
+                    } else {
+                        let mut spawned = 0;
+                        for goal in open_items {
+                            if self
+                                .spawn_session(&path, BackendKind::Claude, Some(&goal))
+                                .is_ok()
+                            {
+                                spawned += 1;
                             }
-                            self.notify(format!("{name}: spawned {spawned}/{count} parallel pipelines"));
                         }
+                        self.notify(format!(
+                            "{name}: spawned {spawned}/{count} parallel pipelines"
+                        ));
                     }
                 }
             }
@@ -4659,10 +5310,18 @@ KeyCode::Char('i') => {
                     let msg = if let Some(proj) = self.projects.get_mut(pidx) {
                         proj.color_tag = proj.color_tag.cycle();
                         proj.save_color_tag();
-                        let tag = if proj.color_tag == ColorTag::None { "none" } else { proj.color_tag.label() };
+                        let tag = if proj.color_tag == ColorTag::None {
+                            "none"
+                        } else {
+                            proj.color_tag.label()
+                        };
                         Some(format!("{}: {tag}", proj.name))
-                    } else { None };
-                    if let Some(m) = msg { self.notify(m); }
+                    } else {
+                        None
+                    };
+                    if let Some(m) = msg {
+                        self.notify(m);
+                    }
                 }
             }
             KeyCode::Tab => {
@@ -4710,19 +5369,19 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('s') => {
                 // Toggle hot/cold
-                if let Some(pidx) = self.selected_project_index() {
-                    if let Some(proj) = self.projects.get_mut(pidx) {
-                        proj.temperature = match proj.temperature {
-                            Temperature::Hot => Temperature::Cold,
-                            Temperature::Cold => Temperature::Hot,
-                            Temperature::Ignored => Temperature::Cold,
-                        };
-                        proj.save_temperature();
-                        let label = proj.temperature.label();
-                        let name = proj.name.clone();
-                        self.categorize_projects();
-                        self.notify(format!("{name} → {label}"));
-                    }
+                if let Some(pidx) = self.selected_project_index()
+                    && let Some(proj) = self.projects.get_mut(pidx)
+                {
+                    proj.temperature = match proj.temperature {
+                        Temperature::Hot => Temperature::Cold,
+                        Temperature::Cold => Temperature::Hot,
+                        Temperature::Ignored => Temperature::Cold,
+                    };
+                    proj.save_temperature();
+                    let label = proj.temperature.label();
+                    let name = proj.name.clone();
+                    self.categorize_projects();
+                    self.notify(format!("{name} → {label}"));
                 }
             }
             KeyCode::Char('S') => {
@@ -4732,8 +5391,12 @@ KeyCode::Char('i') => {
                         proj.scope = proj.scope.cycle();
                         proj.save_scope();
                         Some(format!("{}: [{}]", proj.name, proj.scope.label()))
-                    } else { None };
-                    if let Some(m) = msg { self.notify(m); }
+                    } else {
+                        None
+                    };
+                    if let Some(m) = msg {
+                        self.notify(m);
+                    }
                 }
             }
             KeyCode::Char('l') => {
@@ -4742,23 +5405,30 @@ KeyCode::Char('i') => {
                     let msg = if let Some(proj) = self.projects.get_mut(pidx) {
                         proj.lifecycle_stage = proj.lifecycle_stage.cycle();
                         proj.save_lifecycle_stage();
-                        Some(format!("{}: lifecycle={}", proj.name, proj.lifecycle_stage.label()))
-                    } else { None };
-                    if let Some(m) = msg { self.notify(m); }
+                        Some(format!(
+                            "{}: lifecycle={}",
+                            proj.name,
+                            proj.lifecycle_stage.label()
+                        ))
+                    } else {
+                        None
+                    };
+                    if let Some(m) = msg {
+                        self.notify(m);
+                    }
                 }
             }
             KeyCode::Char('i') => {
                 // Ignore (only for cold projects)
-                if let Some(pidx) = self.selected_project_index() {
-                    if let Some(proj) = self.projects.get_mut(pidx) {
-                        if proj.temperature == Temperature::Cold {
-                            proj.temperature = Temperature::Ignored;
-                            proj.save_temperature();
-                            let name = proj.name.clone();
-                            self.categorize_projects();
-                            self.notify(format!("{name} → ignored"));
-                        }
-                    }
+                if let Some(pidx) = self.selected_project_index()
+                    && let Some(proj) = self.projects.get_mut(pidx)
+                    && proj.temperature == Temperature::Cold
+                {
+                    proj.temperature = Temperature::Ignored;
+                    proj.save_temperature();
+                    let name = proj.name.clone();
+                    self.categorize_projects();
+                    self.notify(format!("{name} → ignored"));
                 }
             }
             KeyCode::Enter => {
@@ -4772,7 +5442,11 @@ KeyCode::Char('i') => {
                             self.roadmap_scroll = 0;
                             // OPT-004: always enter SectionSelect mode
                             self.detail_focus = DetailFocus::SectionSelect;
-                            self.section_cursor = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
+                            self.section_cursor = if self
+                                .projects
+                                .get(idx)
+                                .is_some_and(|p| !p.roadmap.is_empty())
+                            {
                                 SectionCursor::Roadmap
                             } else {
                                 SectionCursor::Sessions
@@ -4794,12 +5468,12 @@ KeyCode::Char('i') => {
                             self.sub = SubView::DeprecatedBrowser;
                         }
                         ListEntry::SubProject(fi, si) => {
-                            if let Some(facility) = self.facilities.get(*fi) {
-                                if let Some(sub) = facility.sub_projects.get(*si) {
-                                    self.browser_open(&sub.path.clone());
-                                    // Use a special detail view — for now open as browser
-                                    self.sub = SubView::DeprecatedBrowser; // reuse for read-only browse
-                                }
+                            if let Some(facility) = self.facilities.get(*fi)
+                                && let Some(sub) = facility.sub_projects.get(*si)
+                            {
+                                self.browser_open(&sub.path.clone());
+                                // Use a special detail view — for now open as browser
+                                self.sub = SubView::DeprecatedBrowser; // reuse for read-only browse
                             }
                         }
                         _ => {} // section headers, facility headers — no action
@@ -4807,31 +5481,40 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Up => {
-                if self.project_selected == 0 { self.focus_depth = 0; }
-                else { self.project_selected -= 1; }
+                if self.project_selected == 0 {
+                    self.focus_depth = 0;
+                } else {
+                    self.project_selected -= 1;
+                }
             }
             KeyCode::Down => {
                 let map = self.build_list_map();
-                if !map.is_empty() && self.project_selected < map.len() - 1 { self.project_selected += 1; }
+                if !map.is_empty() && self.project_selected < map.len() - 1 {
+                    self.project_selected += 1;
+                }
             }
             KeyCode::Right => {
                 // OPT-005: → on a project = open project detail view (same as Enter)
                 let map = self.build_list_map();
-                if let Some(entry) = map.get(self.project_selected) {
-                    if let ListEntry::Project(idx) = entry {
-                        let idx = *idx;
-                        // OPT-004: always enter SectionSelect mode
-                        self.detail_focus = DetailFocus::SectionSelect;
-                        self.section_cursor = if self.projects.get(idx).map_or(false, |p| !p.roadmap.is_empty()) {
-                            SectionCursor::Roadmap
-                        } else {
-                            SectionCursor::Sessions
-                        };
-                        if let Some(proj) = self.projects.get(idx) {
-                            self.browser_open(&proj.path.clone());
-                        }
-                        self.sub = SubView::ProjectDetail(idx);
+                if let Some(entry) = map.get(self.project_selected)
+                    && let ListEntry::Project(idx) = entry
+                {
+                    let idx = *idx;
+                    // OPT-004: always enter SectionSelect mode
+                    self.detail_focus = DetailFocus::SectionSelect;
+                    self.section_cursor = if self
+                        .projects
+                        .get(idx)
+                        .is_some_and(|p| !p.roadmap.is_empty())
+                    {
+                        SectionCursor::Roadmap
+                    } else {
+                        SectionCursor::Sessions
+                    };
+                    if let Some(proj) = self.projects.get(idx) {
+                        self.browser_open(&proj.path.clone());
                     }
+                    self.sub = SubView::ProjectDetail(idx);
                 }
             }
             _ => {}
@@ -4844,7 +5527,11 @@ KeyCode::Char('i') => {
     /// tree_selected indexes into this combined list.
     fn key_inside_project(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         // Build the combined item list: sessions first, then directory tree nodes
-        let proj_path = self.projects.get(proj_idx).map(|p| p.path.clone()).unwrap_or_default();
+        let proj_path = self
+            .projects
+            .get(proj_idx)
+            .map(|p| p.path.clone())
+            .unwrap_or_default();
         let session_count = self.sessions_for_project(&proj_path).len()
             + self.external_sessions_for_project(&proj_path).len();
         let tree_nodes = self.build_tree(proj_idx);
@@ -4861,11 +5548,15 @@ KeyCode::Char('i') => {
                         if node.depth > 0 {
                             // Collapse the parent directory
                             if let Some(parent) = node.path.parent() {
-                                let rel = parent.strip_prefix(&proj_path).unwrap_or(parent).to_path_buf();
+                                let rel = parent
+                                    .strip_prefix(&proj_path)
+                                    .unwrap_or(parent)
+                                    .to_path_buf();
                                 self.tree_toggle_dir(proj_idx, &rel);
                                 // Move selection to the parent dir entry
                                 let new_nodes = self.build_tree(proj_idx);
-                                let parent_pos = new_nodes.iter()
+                                let parent_pos = new_nodes
+                                    .iter()
                                     .position(|n| n.path == *parent)
                                     .unwrap_or(0);
                                 self.tree_selected = session_count + parent_pos;
@@ -4875,7 +5566,11 @@ KeyCode::Char('i') => {
                         }
                         // At tree depth 0 with expanded dir — collapse it
                         if node.is_dir && node.expanded {
-                            let rel = node.path.strip_prefix(&proj_path).unwrap_or(&node.path).to_path_buf();
+                            let rel = node
+                                .path
+                                .strip_prefix(&proj_path)
+                                .unwrap_or(&node.path)
+                                .to_path_buf();
                             self.tree_toggle_dir(proj_idx, &rel);
                             self.update_tree_preview(proj_idx);
                             return Ok(());
@@ -4916,17 +5611,25 @@ KeyCode::Char('i') => {
             KeyCode::Right => {
                 if !in_sessions {
                     // In file tree — expand directory
-                    if let Some(node) = tree_nodes.get(tree_offset) {
-                        if node.is_dir && !node.expanded {
-                            let rel = node.path.strip_prefix(&proj_path).unwrap_or(&node.path).to_path_buf();
-                            self.tree_expanded.entry(proj_idx).or_default().insert(rel);
-                            // Move selection into the expanded dir (first child)
-                            let new_nodes = self.build_tree(proj_idx);
-                            if let Some(next) = new_nodes.iter().position(|n| n.depth > node.depth && n.path.starts_with(&node.path)) {
-                                self.tree_selected = session_count + next;
-                            }
-                            self.update_tree_preview(proj_idx);
+                    if let Some(node) = tree_nodes.get(tree_offset)
+                        && node.is_dir
+                        && !node.expanded
+                    {
+                        let rel = node
+                            .path
+                            .strip_prefix(&proj_path)
+                            .unwrap_or(&node.path)
+                            .to_path_buf();
+                        self.tree_expanded.entry(proj_idx).or_default().insert(rel);
+                        // Move selection into the expanded dir (first child)
+                        let new_nodes = self.build_tree(proj_idx);
+                        if let Some(next) = new_nodes
+                            .iter()
+                            .position(|n| n.depth > node.depth && n.path.starts_with(&node.path))
+                        {
+                            self.tree_selected = session_count + next;
                         }
+                        self.update_tree_preview(proj_idx);
                     }
                 }
                 // In sessions section, right does nothing (sessions aren't expandable)
@@ -4950,8 +5653,10 @@ KeyCode::Char('i') => {
                             let externals = self.external_sessions_for_project(&proj.path);
                             if let Some(ext) = externals.get(ext_idx) {
                                 let pid = ext.pid;
-                                self.ext_log_cache = orrch_core::session_log::format_session_log(pid, 50);
-                                self.ext_log_scroll = self.ext_log_cache.lines().count().saturating_sub(1);
+                                self.ext_log_cache =
+                                    orrch_core::session_log::format_session_log(pid, 50);
+                                self.ext_log_scroll =
+                                    self.ext_log_cache.lines().count().saturating_sub(1);
                                 self.sub = SubView::ExternalSessionView(pid);
                             }
                         }
@@ -4969,10 +5674,16 @@ KeyCode::Char('i') => {
                             });
                         } else if node.is_dir {
                             // Enter on a directory = expand it
-                            let rel = node.path.strip_prefix(&proj_path).unwrap_or(&node.path).to_path_buf();
+                            let rel = node
+                                .path
+                                .strip_prefix(&proj_path)
+                                .unwrap_or(&node.path)
+                                .to_path_buf();
                             self.tree_expanded.entry(proj_idx).or_default().insert(rel);
                             let new_nodes = self.build_tree(proj_idx);
-                            if let Some(next) = new_nodes.iter().position(|n| n.depth > node.depth && n.path.starts_with(&node.path)) {
+                            if let Some(next) = new_nodes.iter().position(|n| {
+                                n.depth > node.depth && n.path.starts_with(&node.path)
+                            }) {
                                 self.tree_selected = session_count + next;
                             }
                             self.update_tree_preview(proj_idx);
@@ -4992,34 +5703,34 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('x') => {
                 // Kill selected session (only in sessions section)
-                if in_sessions {
-                    if let Some(proj) = self.projects.get(proj_idx) {
-                        let sessions = self.sessions_for_project(&proj.path);
-                        if let Some(s) = sessions.get(self.tree_selected) {
-                            let sid = s.sid.clone();
-                            self.pm.kill_session(&sid);
-                        }
+                if in_sessions && let Some(proj) = self.projects.get(proj_idx) {
+                    let sessions = self.sessions_for_project(&proj.path);
+                    if let Some(s) = sessions.get(self.tree_selected) {
+                        let sid = s.sid.clone();
+                        self.pm.kill_session(&sid);
                     }
                 }
             }
             // OPT-014: rename the selected file/directory in the Oversee tree.
             // Only active when focus is inside the file tree (not the sessions section).
             KeyCode::Char('r') | KeyCode::F(2) => {
-                if !in_sessions {
-                    if let Some(node) = tree_nodes.get(tree_offset) {
-                        // Don't let users rename the project root itself via the tree
-                        // (project rename is handled by RenameProject from the main list).
-                        let proj_root = self.projects.get(proj_idx).map(|p| p.path.clone());
-                        if proj_root.as_ref() == Some(&node.path) {
-                            self.notify("Select a child file/dir to rename; project rename is on the main project list".into());
-                        } else {
-                            let base_name = node.path
-                                .file_name()
-                                .map(|s| s.to_string_lossy().into_owned())
-                                .unwrap_or_default();
-                            self.rename_buffer = base_name;
-                            self.sub = SubView::RenameFile { proj_idx, tree_idx: tree_offset };
-                        }
+                if !in_sessions && let Some(node) = tree_nodes.get(tree_offset) {
+                    // Don't let users rename the project root itself via the tree
+                    // (project rename is handled by RenameProject from the main list).
+                    let proj_root = self.projects.get(proj_idx).map(|p| p.path.clone());
+                    if proj_root.as_ref() == Some(&node.path) {
+                        self.notify("Select a child file/dir to rename; project rename is on the main project list".into());
+                    } else {
+                        let base_name = node
+                            .path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.rename_buffer = base_name;
+                        self.sub = SubView::RenameFile {
+                            proj_idx,
+                            tree_idx: tree_offset,
+                        };
                     }
                 }
             }
@@ -5034,13 +5745,17 @@ KeyCode::Char('i') => {
         match key {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Up => {
-                if self.production_selected == 0 { self.focus_depth = 0; }
-                else { self.production_selected -= 1; }
-            }
-            KeyCode::Down => {
-                if !self.production_versions.is_empty() && self.production_selected < self.production_versions.len() - 1 {
-                    self.production_selected += 1;
+                if self.production_selected == 0 {
+                    self.focus_depth = 0;
+                } else {
+                    self.production_selected -= 1;
                 }
+            }
+            KeyCode::Down
+                if !self.production_versions.is_empty()
+                    && self.production_selected < self.production_versions.len() - 1 =>
+            {
+                self.production_selected += 1;
             }
             _ => {}
         }
@@ -5048,7 +5763,11 @@ KeyCode::Char('i') => {
     }
 
     fn key_project_detail(&mut self, key: KeyCode) -> Result<()> {
-        let proj_idx = if let SubView::ProjectDetail(idx) = self.sub { idx } else { return Ok(()); };
+        let proj_idx = if let SubView::ProjectDetail(idx) = self.sub {
+            idx
+        } else {
+            return Ok(());
+        };
 
         // Global commands always available
         match key {
@@ -5063,17 +5782,25 @@ KeyCode::Char('i') => {
             }
             // Left: from item-level nav → SectionSelect; from SectionSelect → back to list
             KeyCode::Left if self.detail_focus == DetailFocus::SectionSelect => {
-                self.sub = SubView::List; return Ok(());
+                self.sub = SubView::List;
+                return Ok(());
             }
             KeyCode::Left if self.detail_focus != DetailFocus::Browser => {
                 // Exit item-level nav back to section-select
                 self.detail_focus = DetailFocus::SectionSelect;
                 return Ok(());
             }
-            KeyCode::Char('a') => { self.open_action_menu(); return Ok(()); }
+            KeyCode::Char('a') => {
+                self.open_action_menu();
+                return Ok(());
+            }
             KeyCode::Char('L') => {
                 // OPT-005: open logo path input popup
-                let current = self.projects.get(proj_idx).and_then(|p| p.logo_path.clone()).unwrap_or_default();
+                let current = self
+                    .projects
+                    .get(proj_idx)
+                    .and_then(|p| p.logo_path.clone())
+                    .unwrap_or_default();
                 self.logo_path_input = current;
                 self.sub = SubView::SetLogoPath(proj_idx);
                 return Ok(());
@@ -5111,7 +5838,8 @@ KeyCode::Char('i') => {
                 if let Some(proj) = self.projects.get(proj_idx) {
                     let name = proj.name.clone();
                     let windows = orrch_core::windows::list_tmux_windows();
-                    let proj_windows: Vec<_> = windows.iter()
+                    let proj_windows: Vec<_> = windows
+                        .iter()
                         .filter(|w| w.name.contains(&name) || w.cwd.ends_with(&format!("/{name}")))
                         .collect();
                     if proj_windows.is_empty() {
@@ -5124,10 +5852,17 @@ KeyCode::Char('i') => {
             }
             KeyCode::Tab => {
                 // Cycle focus: SectionSelect → Roadmap → Sessions → Browser → SectionSelect
-                let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
+                let has_roadmap = self
+                    .projects
+                    .get(proj_idx)
+                    .is_some_and(|p| !p.roadmap.is_empty());
                 self.detail_focus = match self.detail_focus {
                     DetailFocus::SectionSelect => {
-                        if has_roadmap { DetailFocus::Roadmap } else { DetailFocus::Sessions }
+                        if has_roadmap {
+                            DetailFocus::Roadmap
+                        } else {
+                            DetailFocus::Sessions
+                        }
                     }
                     DetailFocus::Roadmap => DetailFocus::Sessions,
                     DetailFocus::Sessions => DetailFocus::Browser,
@@ -5145,7 +5880,8 @@ KeyCode::Char('i') => {
             DetailFocus::Browser => {
                 // Down at bottom of browser: don't wrap, just stay
                 // Up at top of browser: switch to SectionSelect
-                if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child {
+                if key == KeyCode::Up && self.browser_parent_selected == 0 && !self.browser_in_child
+                {
                     self.detail_focus = DetailFocus::SectionSelect;
                     self.section_cursor = SectionCursor::Browser;
                     return Ok(());
@@ -5157,9 +5893,16 @@ KeyCode::Char('i') => {
 
     /// OPT-004: Section-level cursor navigation in project detail.
     fn key_section_select(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
-        let has_roadmap = self.projects.get(proj_idx).is_some_and(|p| !p.roadmap.is_empty());
+        let has_roadmap = self
+            .projects
+            .get(proj_idx)
+            .is_some_and(|p| !p.roadmap.is_empty());
         let sections: Vec<SectionCursor> = if has_roadmap {
-            vec![SectionCursor::Roadmap, SectionCursor::Sessions, SectionCursor::Browser]
+            vec![
+                SectionCursor::Roadmap,
+                SectionCursor::Sessions,
+                SectionCursor::Browser,
+            ]
         } else {
             vec![SectionCursor::Sessions, SectionCursor::Browser]
         };
@@ -5178,10 +5921,10 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Down => {
-                if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor) {
-                    if pos + 1 < sections.len() {
-                        self.section_cursor = sections[pos + 1];
-                    }
+                if let Some(pos) = sections.iter().position(|&s| s == self.section_cursor)
+                    && pos + 1 < sections.len()
+                {
+                    self.section_cursor = sections[pos + 1];
                 }
             }
             KeyCode::Right | KeyCode::Enter => {
@@ -5205,7 +5948,11 @@ KeyCode::Char('i') => {
     }
 
     fn key_detail_roadmap(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
-        let roadmap_len = self.projects.get(proj_idx).map(|p| p.roadmap.len()).unwrap_or(0);
+        let roadmap_len = self
+            .projects
+            .get(proj_idx)
+            .map(|p| p.roadmap.len())
+            .unwrap_or(0);
         if roadmap_len == 0 {
             self.detail_focus = DetailFocus::SectionSelect;
             self.section_cursor = SectionCursor::Sessions;
@@ -5233,42 +5980,56 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('s') => {
                 // Cycle feature status forward
-                if let Some(proj) = self.projects.get_mut(proj_idx) {
-                    if let Some(item) = proj.roadmap.get_mut(self.roadmap_selected) {
-                        let old = item.status;
-                        item.status = old.cycle_forward();
-                        if item.status != old {
-                            if let Some(ref plan_file) = proj.meta.plan_file {
-                                let plan_path = proj.path.join(plan_file);
-                                let title = item.title.clone();
-                                let new_status = item.status;
-                                if let Err(e) = orrch_core::update_feature_status_in_plan(&plan_path, &title, new_status) {
-                                    self.notify(format!("Failed to update plan: {e}"));
-                                } else {
-                                    self.notify(format!("{}: {} → {}", title, old.label(), new_status.label()));
-                                }
-                            }
+                if let Some(proj) = self.projects.get_mut(proj_idx)
+                    && let Some(item) = proj.roadmap.get_mut(self.roadmap_selected)
+                {
+                    let old = item.status;
+                    item.status = old.cycle_forward();
+                    if item.status != old
+                        && let Some(ref plan_file) = proj.meta.plan_file
+                    {
+                        let plan_path = proj.path.join(plan_file);
+                        let title = item.title.clone();
+                        let new_status = item.status;
+                        if let Err(e) = orrch_core::update_feature_status_in_plan(
+                            &plan_path, &title, new_status,
+                        ) {
+                            self.notify(format!("Failed to update plan: {e}"));
+                        } else {
+                            self.notify(format!(
+                                "{}: {} → {}",
+                                title,
+                                old.label(),
+                                new_status.label()
+                            ));
                         }
                     }
                 }
             }
             KeyCode::Char('S') => {
                 // Cycle feature status backward
-                if let Some(proj) = self.projects.get_mut(proj_idx) {
-                    if let Some(item) = proj.roadmap.get_mut(self.roadmap_selected) {
-                        let old = item.status;
-                        item.status = old.cycle_backward();
-                        if item.status != old {
-                            if let Some(ref plan_file) = proj.meta.plan_file {
-                                let plan_path = proj.path.join(plan_file);
-                                let title = item.title.clone();
-                                let new_status = item.status;
-                                if let Err(e) = orrch_core::update_feature_status_in_plan(&plan_path, &title, new_status) {
-                                    self.notify(format!("Failed to update plan: {e}"));
-                                } else {
-                                    self.notify(format!("{}: {} → {}", title, old.label(), new_status.label()));
-                                }
-                            }
+                if let Some(proj) = self.projects.get_mut(proj_idx)
+                    && let Some(item) = proj.roadmap.get_mut(self.roadmap_selected)
+                {
+                    let old = item.status;
+                    item.status = old.cycle_backward();
+                    if item.status != old
+                        && let Some(ref plan_file) = proj.meta.plan_file
+                    {
+                        let plan_path = proj.path.join(plan_file);
+                        let title = item.title.clone();
+                        let new_status = item.status;
+                        if let Err(e) = orrch_core::update_feature_status_in_plan(
+                            &plan_path, &title, new_status,
+                        ) {
+                            self.notify(format!("Failed to update plan: {e}"));
+                        } else {
+                            self.notify(format!(
+                                "{}: {} → {}",
+                                title,
+                                old.label(),
+                                new_status.label()
+                            ));
                         }
                     }
                 }
@@ -5313,7 +6074,9 @@ KeyCode::Char('i') => {
         let session_count = if let Some(proj) = self.projects.get(proj_idx) {
             self.sessions_for_project(&proj.path).len()
                 + self.external_sessions_for_project(&proj.path).len()
-        } else { 0 };
+        } else {
+            0
+        };
 
         match key {
             KeyCode::Up => {
@@ -5353,8 +6116,10 @@ KeyCode::Char('i') => {
                         let externals = self.external_sessions_for_project(&proj.path);
                         if let Some(ext) = externals.get(ext_idx) {
                             let pid = ext.pid;
-                            self.ext_log_cache = orrch_core::session_log::format_session_log(pid, 50);
-                            self.ext_log_scroll = self.ext_log_cache.lines().count().saturating_sub(1);
+                            self.ext_log_cache =
+                                orrch_core::session_log::format_session_log(pid, 50);
+                            self.ext_log_scroll =
+                                self.ext_log_cache.lines().count().saturating_sub(1);
                             self.sub = SubView::ExternalSessionView(pid);
                         }
                     }
@@ -5403,7 +6168,9 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Enter => {
-                if let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                if let Some((is_phase, phase_idx, feat_idx)) =
+                    self.devmap_item_at(proj_idx, self.devmap_selected)
+                {
                     if is_phase {
                         // Toggle phase expansion
                         if self.devmap_phase_idx == phase_idx {
@@ -5413,17 +6180,16 @@ KeyCode::Char('i') => {
                         }
                     } else {
                         // Quick-spawn: launch develop-feature session for this feature
-                        if let Some(proj) = self.projects.get(proj_idx) {
-                            if let Some(phase) = proj.plan_phases.get(phase_idx) {
-                                if let Some(feat) = phase.features.get(feat_idx) {
-                                    self.spawn_project_idx = proj_idx;
-                                    self.spawn_goal_text = feat.title.clone();
-                                    self.spawn_goal_from_roadmap = None;
-                                    self.spawn_agent_idx = 0;
-                                    self.spawn_workforce_idx = 0;
-                                    self.sub = SubView::SpawnGoal;
-                                }
-                            }
+                        if let Some(proj) = self.projects.get(proj_idx)
+                            && let Some(phase) = proj.plan_phases.get(phase_idx)
+                            && let Some(feat) = phase.features.get(feat_idx)
+                        {
+                            self.spawn_project_idx = proj_idx;
+                            self.spawn_goal_text = feat.title.clone();
+                            self.spawn_goal_from_roadmap = None;
+                            self.spawn_agent_idx = 0;
+                            self.spawn_workforce_idx = 0;
+                            self.sub = SubView::SpawnGoal;
                         }
                     }
                 }
@@ -5437,7 +6203,9 @@ KeyCode::Char('i') => {
             }
             // Task 47: Add Feature popup
             KeyCode::Char('a') => {
-                if let Some((_is_phase, _phase_idx, _)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                if let Some((_is_phase, _phase_idx, _)) =
+                    self.devmap_item_at(proj_idx, self.devmap_selected)
+                {
                     // 'a' works on both phase headers and features (adds to the selected/containing phase)
                     self.add_feature_title.clear();
                     self.add_feature_desc.clear();
@@ -5447,19 +6215,21 @@ KeyCode::Char('i') => {
             }
             // Task 3: Mark currently selected feature as user-verified.
             KeyCode::Char('V') => {
-                if let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
-                    if !is_phase {
-                        let resolved = self.projects.get(proj_idx).and_then(|proj| {
-                            let plan_file = proj.meta.plan_file.as_ref()?;
-                            let plan_path = proj.path.join(plan_file);
-                            let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
-                            Some((plan_path, feat.title.clone()))
-                        });
-                        if let Some((plan_path, title)) = resolved {
-                            if orrch_core::plan_parser::mark_verified_in_plan(&plan_path, &title).is_ok() {
-                                self.reload_project_plan(proj_idx);
-                            }
-                        }
+                if let Some((is_phase, phase_idx, feat_idx)) =
+                    self.devmap_item_at(proj_idx, self.devmap_selected)
+                    && !is_phase
+                {
+                    let resolved = self.projects.get(proj_idx).and_then(|proj| {
+                        let plan_file = proj.meta.plan_file.as_ref()?;
+                        let plan_path = proj.path.join(plan_file);
+                        let feat = proj.plan_phases.get(phase_idx)?.features.get(feat_idx)?;
+                        Some((plan_path, feat.title.clone()))
+                    });
+                    if let Some((plan_path, title)) = resolved
+                        && orrch_core::plan_parser::mark_verified_in_plan(&plan_path, &title)
+                            .is_ok()
+                    {
+                        self.reload_project_plan(proj_idx);
                     }
                 }
             }
@@ -5471,14 +6241,18 @@ KeyCode::Char('i') => {
     /// Move the currently selected feature in the dev map.
     #[allow(dead_code)]
     fn devmap_move_feature(&mut self, proj_idx: usize, direction: orrch_core::MoveDirection) {
-        let Some((is_phase, phase_idx, feat_idx)) = self.devmap_item_at(proj_idx, self.devmap_selected) else {
+        let Some((is_phase, phase_idx, feat_idx)) =
+            self.devmap_item_at(proj_idx, self.devmap_selected)
+        else {
             return;
         };
         if is_phase {
             return; // can't move phase headers
         }
         let plan_path = {
-            let Some(proj) = self.projects.get(proj_idx) else { return; };
+            let Some(proj) = self.projects.get(proj_idx) else {
+                return;
+            };
             let Some(ref plan_file) = proj.meta.plan_file else {
                 self.notify("No PLAN.md".into());
                 return;
@@ -5510,7 +6284,9 @@ KeyCode::Char('i') => {
 
     /// Reload plan phases for a single project from disk.
     fn reload_project_plan(&mut self, proj_idx: usize) {
-        let Some(proj) = self.projects.get_mut(proj_idx) else { return; };
+        let Some(proj) = self.projects.get_mut(proj_idx) else {
+            return;
+        };
         if let Some(ref plan_file) = proj.meta.plan_file {
             let plan_path = proj.path.join(plan_file);
             if let Ok(content) = std::fs::read_to_string(&plan_path) {
@@ -5536,7 +6312,9 @@ KeyCode::Char('i') => {
                 }
                 let desc = self.add_feature_desc.trim().to_string();
                 // Determine which phase we're in
-                let phase_idx = if let Some((_is_phase, pidx, _)) = self.devmap_item_at(proj_idx, self.devmap_selected) {
+                let phase_idx = if let Some((_is_phase, pidx, _)) =
+                    self.devmap_item_at(proj_idx, self.devmap_selected)
+                {
                     pidx
                 } else if let Some(proj) = self.projects.get(proj_idx) {
                     // Default to last phase
@@ -5570,18 +6348,18 @@ KeyCode::Char('i') => {
                 }
                 self.sub = SubView::ProjectDetail(proj_idx);
             }
-            KeyCode::Backspace => {
-                match self.add_feature_field {
-                    0 => { self.add_feature_title.pop(); }
-                    _ => { self.add_feature_desc.pop(); }
+            KeyCode::Backspace => match self.add_feature_field {
+                0 => {
+                    self.add_feature_title.pop();
                 }
-            }
-            KeyCode::Char(c) => {
-                match self.add_feature_field {
-                    0 => self.add_feature_title.push(c),
-                    _ => self.add_feature_desc.push(c),
+                _ => {
+                    self.add_feature_desc.pop();
                 }
-            }
+            },
+            KeyCode::Char(c) => match self.add_feature_field {
+                0 => self.add_feature_title.push(c),
+                _ => self.add_feature_desc.push(c),
+            },
             _ => {}
         }
         Ok(())
@@ -5597,7 +6375,11 @@ KeyCode::Char('i') => {
                 self.add_mcp_field = (self.add_mcp_field + 1) % 6;
             }
             KeyCode::BackTab => {
-                self.add_mcp_field = if self.add_mcp_field == 0 { 5 } else { self.add_mcp_field - 1 };
+                self.add_mcp_field = if self.add_mcp_field == 0 {
+                    5
+                } else {
+                    self.add_mcp_field - 1
+                };
             }
             KeyCode::Enter => {
                 if self.add_mcp_field == 2 {
@@ -5615,7 +6397,11 @@ KeyCode::Char('i') => {
                 let transport = if self.add_mcp_transport == 0 {
                     orrch_library::McpTransport::Stdio {
                         command: self.add_mcp_command.trim().to_string(),
-                        args: self.add_mcp_args.split_whitespace().map(|s| s.to_string()).collect(),
+                        args: self
+                            .add_mcp_args
+                            .split_whitespace()
+                            .map(|s| s.to_string())
+                            .collect(),
                         env: std::collections::HashMap::new(),
                     }
                 } else {
@@ -5623,7 +6409,8 @@ KeyCode::Char('i') => {
                         url: self.add_mcp_command.trim().to_string(),
                     }
                 };
-                let assigned_roles: Vec<String> = self.add_mcp_roles
+                let assigned_roles: Vec<String> = self
+                    .add_mcp_roles
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
@@ -5654,12 +6441,22 @@ KeyCode::Char('i') => {
             }
             KeyCode::Backspace => {
                 match self.add_mcp_field {
-                    0 => { self.add_mcp_name.pop(); }
-                    1 => { self.add_mcp_desc.pop(); }
+                    0 => {
+                        self.add_mcp_name.pop();
+                    }
+                    1 => {
+                        self.add_mcp_desc.pop();
+                    }
                     2 => {} // transport is a toggle
-                    3 => { self.add_mcp_command.pop(); }
-                    4 => { self.add_mcp_args.pop(); }
-                    5 => { self.add_mcp_roles.pop(); }
+                    3 => {
+                        self.add_mcp_command.pop();
+                    }
+                    4 => {
+                        self.add_mcp_args.pop();
+                    }
+                    5 => {
+                        self.add_mcp_roles.pop();
+                    }
                     _ => {}
                 }
             }
@@ -5744,7 +6541,9 @@ KeyCode::Char('i') => {
                                             &new_display,
                                             &self.projects_dir,
                                         ) {
-                                            self.notify(format!("Rename OK; cross-ref update warning: {e}"));
+                                            self.notify(format!(
+                                                "Rename OK; cross-ref update warning: {e}"
+                                            ));
                                         }
                                     } else if current_tab == WorkforceTab::Workflows {
                                         // Best-effort: update the internal `name:` frontmatter
@@ -5754,9 +6553,8 @@ KeyCode::Char('i') => {
 
                                     self.reload_all_library_data();
                                     // Keep selection at same index
-                                    self.wf_selected = item_idx.min(
-                                        self.wf_items_for_tab().len().saturating_sub(1),
-                                    );
+                                    self.wf_selected = item_idx
+                                        .min(self.wf_items_for_tab().len().saturating_sub(1));
                                 }
                                 Err(e) => self.notify(format!("Rename failed: {e}")),
                             }
@@ -5784,33 +6582,33 @@ KeyCode::Char('i') => {
         match key {
             KeyCode::Enter => {
                 let new_title = self.rename_buffer.trim().to_string();
-                if !new_title.is_empty() {
-                    if let Some(idea) = self.ideas.get(item_idx).cloned() {
-                        let dir = idea.path.parent().unwrap_or(std::path::Path::new("."));
-                        // Slugify: lowercase, spaces→dashes, strip non-alnum-dash
-                        let slug: String = new_title.to_lowercase()
-                            .chars()
-                            .map(|c| if c == ' ' { '-' } else { c })
-                            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-                            .collect();
-                        let new_filename = format!("{slug}.md");
-                        let new_path = dir.join(&new_filename);
-                        if new_path == idea.path {
-                            self.notify("Name unchanged".into());
-                        } else if new_path.exists() {
-                            self.notify(format!("File already exists: {new_filename}"));
-                        } else {
-                            match std::fs::rename(&idea.path, &new_path) {
-                                Ok(()) => {
-                                    self.notify(format!("Renamed to {new_filename}"));
-                                    let vault = orrch_core::vault::vault_dir(&self.projects_dir);
-                                    self.ideas = orrch_core::vault::load_ideas(&vault);
-                                    self.idea_selected = item_idx.min(
-                                        self.ideas.len().saturating_sub(1),
-                                    );
-                                }
-                                Err(e) => self.notify(format!("Rename failed: {e}")),
+                if !new_title.is_empty()
+                    && let Some(idea) = self.ideas.get(item_idx).cloned()
+                {
+                    let dir = idea.path.parent().unwrap_or(std::path::Path::new("."));
+                    // Slugify: lowercase, spaces→dashes, strip non-alnum-dash
+                    let slug: String = new_title
+                        .to_lowercase()
+                        .chars()
+                        .map(|c| if c == ' ' { '-' } else { c })
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                        .collect();
+                    let new_filename = format!("{slug}.md");
+                    let new_path = dir.join(&new_filename);
+                    if new_path == idea.path {
+                        self.notify("Name unchanged".into());
+                    } else if new_path.exists() {
+                        self.notify(format!("File already exists: {new_filename}"));
+                    } else {
+                        match std::fs::rename(&idea.path, &new_path) {
+                            Ok(()) => {
+                                self.notify(format!("Renamed to {new_filename}"));
+                                let vault = orrch_core::vault::vault_dir(&self.projects_dir);
+                                self.ideas = orrch_core::vault::load_ideas(&vault);
+                                self.idea_selected =
+                                    item_idx.min(self.ideas.len().saturating_sub(1));
                             }
+                            Err(e) => self.notify(format!("Rename failed: {e}")),
                         }
                     }
                 }
@@ -5835,22 +6633,21 @@ KeyCode::Char('i') => {
         match key {
             KeyCode::Enter => {
                 let new_name = self.rename_buffer.trim().to_string();
-                if !new_name.is_empty() {
-                    if let Some(proj) = self.projects.get(proj_idx) {
-                        let old_path = proj.path.clone();
-                        let new_path = old_path.parent()
-                            .map(|p| p.join(&new_name));
-                        if let Some(new_path) = new_path {
-                            if new_path.exists() {
-                                self.notify(format!("Directory already exists: {new_name}"));
-                            } else {
-                                match std::fs::rename(&old_path, &new_path) {
-                                    Ok(()) => {
-                                        self.notify(format!("Renamed to {new_name}"));
-                                        self.reload_projects();
-                                    }
-                                    Err(e) => self.notify(format!("Rename failed: {e}")),
+                if !new_name.is_empty()
+                    && let Some(proj) = self.projects.get(proj_idx)
+                {
+                    let old_path = proj.path.clone();
+                    let new_path = old_path.parent().map(|p| p.join(&new_name));
+                    if let Some(new_path) = new_path {
+                        if new_path.exists() {
+                            self.notify(format!("Directory already exists: {new_name}"));
+                        } else {
+                            match std::fs::rename(&old_path, &new_path) {
+                                Ok(()) => {
+                                    self.notify(format!("Renamed to {new_name}"));
+                                    self.reload_projects();
                                 }
+                                Err(e) => self.notify(format!("Rename failed: {e}")),
                             }
                         }
                     }
@@ -5872,7 +6669,12 @@ KeyCode::Char('i') => {
     }
 
     /// 94d: Rename a plan feature inline.
-    fn key_rename_plan_feature(&mut self, key: KeyCode, phase_idx: usize, feat_idx: usize) -> Result<()> {
+    fn key_rename_plan_feature(
+        &mut self,
+        key: KeyCode,
+        phase_idx: usize,
+        feat_idx: usize,
+    ) -> Result<()> {
         match key {
             KeyCode::Enter => {
                 let new_title = self.rename_buffer.trim().to_string();
@@ -5880,12 +6682,21 @@ KeyCode::Char('i') => {
                     let proj_idx = self.plans_current_project_idx();
                     if let Some(idx) = proj_idx {
                         let plan_info = self.projects.get(idx).and_then(|proj| {
-                            let plan_path = proj.path.join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
-                            let old_title = proj.plan_phases.get(phase_idx)?.features.get(feat_idx).map(|f| f.title.clone())?;
+                            let plan_path = proj
+                                .path
+                                .join(proj.meta.plan_file.as_deref().unwrap_or("PLAN.md"));
+                            let old_title = proj
+                                .plan_phases
+                                .get(phase_idx)?
+                                .features
+                                .get(feat_idx)
+                                .map(|f| f.title.clone())?;
                             Some((plan_path, old_title))
                         });
                         if let Some((plan_path, old_title)) = plan_info {
-                            match orrch_core::rename_feature_in_plan(&plan_path, &old_title, &new_title) {
+                            match orrch_core::rename_feature_in_plan(
+                                &plan_path, &old_title, &new_title,
+                            ) {
                                 Ok(_) => {
                                     self.notify(format!("Renamed to {new_title}"));
                                     self.plans_reload_project(Some(idx));
@@ -5991,7 +6802,9 @@ KeyCode::Char('i') => {
 
     /// Count the total number of visible items in the dev map flat list.
     pub fn devmap_flat_count(&self, proj_idx: usize) -> usize {
-        let Some(proj) = self.projects.get(proj_idx) else { return 0; };
+        let Some(proj) = self.projects.get(proj_idx) else {
+            return 0;
+        };
         let mut count = 0;
         for (i, phase) in proj.plan_phases.iter().enumerate() {
             count += 1; // phase header
@@ -6005,7 +6818,9 @@ KeyCode::Char('i') => {
     /// Given a flat index, return (is_phase_header, phase_index, feature_index_within_phase).
     /// For phase headers, feature_index is 0 (unused).
     fn devmap_item_at(&self, proj_idx: usize, flat_idx: usize) -> Option<(bool, usize, usize)> {
-        let Some(proj) = self.projects.get(proj_idx) else { return None; };
+        let Some(proj) = self.projects.get(proj_idx) else {
+            return None;
+        };
         let mut pos = 0;
         for (i, phase) in proj.plan_phases.iter().enumerate() {
             if pos == flat_idx {
@@ -6055,15 +6870,19 @@ KeyCode::Char('i') => {
             KeyCode::Right => {
                 if self.browser_in_child {
                     // Navigate into the selected child directory
-                    if let Some(entry) = self.browser_child_entries.get(self.browser_child_selected).cloned() {
-                        if entry.is_dir {
-                            self.browser_path = entry.path;
-                            self.browser_parent_entries = orrch_core::list_directory(&self.browser_path);
-                            self.browser_parent_selected = 0;
-                            self.browser_in_child = false;
-                            self.browser_refresh_child();
-                            self.browser_refresh_preview();
-                        }
+                    if let Some(entry) = self
+                        .browser_child_entries
+                        .get(self.browser_child_selected)
+                        .cloned()
+                        && entry.is_dir
+                    {
+                        self.browser_path = entry.path;
+                        self.browser_parent_entries =
+                            orrch_core::list_directory(&self.browser_path);
+                        self.browser_parent_selected = 0;
+                        self.browser_in_child = false;
+                        self.browser_refresh_child();
+                        self.browser_refresh_preview();
                     }
                 } else if !self.browser_child_entries.is_empty() {
                     // Move focus to child column
@@ -6078,24 +6897,29 @@ KeyCode::Char('i') => {
                     self.browser_refresh_preview();
                 } else {
                     // Navigate up one directory (if not at root)
-                    if self.browser_path != self.browser_root {
-                        if let Some(parent) = self.browser_path.parent() {
-                            self.browser_path = parent.to_path_buf();
-                            self.browser_parent_entries = orrch_core::list_directory(&self.browser_path);
-                            self.browser_parent_selected = 0;
-                            self.browser_in_child = false;
-                            self.browser_refresh_child();
-                            self.browser_refresh_preview();
-                        }
+                    if self.browser_path != self.browser_root
+                        && let Some(parent) = self.browser_path.parent()
+                    {
+                        self.browser_path = parent.to_path_buf();
+                        self.browser_parent_entries =
+                            orrch_core::list_directory(&self.browser_path);
+                        self.browser_parent_selected = 0;
+                        self.browser_in_child = false;
+                        self.browser_refresh_child();
+                        self.browser_refresh_preview();
                     }
                 }
             }
             KeyCode::Enter => {
                 // Open file in editor (only for editable files)
                 let entry = if self.browser_in_child {
-                    self.browser_child_entries.get(self.browser_child_selected).cloned()
+                    self.browser_child_entries
+                        .get(self.browser_child_selected)
+                        .cloned()
                 } else {
-                    self.browser_parent_entries.get(self.browser_parent_selected).cloned()
+                    self.browser_parent_entries
+                        .get(self.browser_parent_selected)
+                        .cloned()
                 };
                 if let Some(entry) = entry {
                     if entry.is_editable {
@@ -6110,7 +6934,8 @@ KeyCode::Char('i') => {
                     } else if entry.is_dir {
                         // Enter on a dir = navigate into it
                         self.browser_path = entry.path;
-                        self.browser_parent_entries = orrch_core::list_directory(&self.browser_path);
+                        self.browser_parent_entries =
+                            orrch_core::list_directory(&self.browser_path);
                         self.browser_parent_selected = 0;
                         self.browser_in_child = false;
                         self.browser_refresh_child();
@@ -6127,14 +6952,14 @@ KeyCode::Char('i') => {
         if key == KeyCode::Esc {
             // Return to project detail if we came from one, otherwise list
             // Check if any project detail was active before by looking at session's project
-            if let SubView::SessionFocus(idx) = self.sub {
-                if let Some(session) = self.pm.sessions().get(idx) {
-                    let proj_path = session.project_dir.clone();
-                    if let Some(pidx) = self.projects.iter().position(|p| p.path == proj_path) {
-                        self.sub = SubView::ProjectDetail(pidx);
-                        self.detail_focus = DetailFocus::Sessions;
-                        return Ok(());
-                    }
+            if let SubView::SessionFocus(idx) = self.sub
+                && let Some(session) = self.pm.sessions().get(idx)
+            {
+                let proj_path = session.project_dir.clone();
+                if let Some(pidx) = self.projects.iter().position(|p| p.path == proj_path) {
+                    self.sub = SubView::ProjectDetail(pidx);
+                    self.detail_focus = DetailFocus::Sessions;
+                    return Ok(());
                 }
             }
             self.sub = SubView::List;
@@ -6161,15 +6986,17 @@ KeyCode::Char('i') => {
             KeyCode::Esc => {
                 if let SubView::ExternalSessionView(pid) = self.sub {
                     for ext in self.pm.external_sessions() {
-                        if ext.pid == pid {
-                            if let Some(pidx) = self.projects.iter().position(|p| {
+                        if ext.pid == pid
+                            && let Some(pidx) = self.projects.iter().position(|p| {
                                 ext.project_dir == p.path.to_string_lossy().as_ref()
-                                    || ext.project_dir.starts_with(p.path.to_string_lossy().as_ref())
-                            }) {
-                                self.sub = SubView::ProjectDetail(pidx);
-                                self.detail_focus = DetailFocus::Sessions;
-                                return Ok(());
-                            }
+                                    || ext
+                                        .project_dir
+                                        .starts_with(p.path.to_string_lossy().as_ref())
+                            })
+                        {
+                            self.sub = SubView::ProjectDetail(pidx);
+                            self.detail_focus = DetailFocus::Sessions;
+                            return Ok(());
                         }
                     }
                 }
@@ -6186,7 +7013,9 @@ KeyCode::Char('i') => {
             }
             KeyCode::Down => {
                 let total = self.ext_log_cache.lines().count();
-                if self.ext_log_scroll < total { self.ext_log_scroll += 1; }
+                if self.ext_log_scroll < total {
+                    self.ext_log_scroll += 1;
+                }
             }
             KeyCode::Home => self.ext_log_scroll = 0,
             KeyCode::End => {
@@ -6209,7 +7038,8 @@ KeyCode::Char('i') => {
                     if let Some(text) = crate::editor::clipboard_get() {
                         self.spawn_goal_from_roadmap = None;
                         // Single-line input: replace newlines with spaces
-                        self.spawn_goal_text.push_str(&text.replace('\n', " ").replace('\r', ""));
+                        self.spawn_goal_text
+                            .push_str(&text.replace('\n', " ").replace('\r', ""));
                     }
                     return Ok(());
                 }
@@ -6240,13 +7070,23 @@ KeyCode::Char('i') => {
                         self.spawn_goal_from_roadmap = next;
                         if let Some(idx) = next {
                             let open = proj.open_roadmap_items();
-                            if let Some(item) = open.get(idx) { self.spawn_goal_text = item.title.clone(); }
-                        } else { self.spawn_goal_text.clear(); }
+                            if let Some(item) = open.get(idx) {
+                                self.spawn_goal_text = item.title.clone();
+                            }
+                        } else {
+                            self.spawn_goal_text.clear();
+                        }
                     }
                 }
             }
-            KeyCode::Backspace => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.pop(); }
-            KeyCode::Char(c) => { self.spawn_goal_from_roadmap = None; self.spawn_goal_text.push(c); }
+            KeyCode::Backspace => {
+                self.spawn_goal_from_roadmap = None;
+                self.spawn_goal_text.pop();
+            }
+            KeyCode::Char(c) => {
+                self.spawn_goal_from_roadmap = None;
+                self.spawn_goal_text.push(c);
+            }
             _ => {}
         }
         Ok(())
@@ -6265,9 +7105,11 @@ KeyCode::Char('i') => {
             KeyCode::Enter => {
                 // If a workforce is selected, pre-select Hypervisor agent
                 if self.spawn_workforce_idx > 0 {
-                    self.spawn_agent_idx = self.agent_profiles.iter()
+                    self.spawn_agent_idx = self
+                        .agent_profiles
+                        .iter()
                         .position(|p| p.name == "Hypervisor")
-                        .map(|i| i + 1)  // +1 because 0 = no agent
+                        .map(|i| i + 1) // +1 because 0 = no agent
                         .unwrap_or(0);
                 } else {
                     self.spawn_agent_idx = 0;
@@ -6304,7 +7146,10 @@ KeyCode::Char('i') => {
             KeyCode::Tab => {
                 // Cycle through CLI backends
                 let cli = BackendKind::cli_backends();
-                let cur_idx = cli.iter().position(|b| *b == self.spawn_backend).unwrap_or(0);
+                let cur_idx = cli
+                    .iter()
+                    .position(|b| *b == self.spawn_backend)
+                    .unwrap_or(0);
                 self.spawn_backend = cli[(cur_idx + 1) % cli.len()];
             }
             KeyCode::Enter => {
@@ -6373,9 +7218,8 @@ KeyCode::Char('i') => {
 
     fn key_spawn_host(&mut self, key: KeyCode) -> Result<()> {
         // Host list: [0] = local, [1..] = remote_hosts (non-local only)
-        let remote_hosts: Vec<&orrch_core::remote::RemoteHost> = self.remote_hosts.iter()
-            .filter(|h| !h.is_local)
-            .collect();
+        let remote_hosts: Vec<&orrch_core::remote::RemoteHost> =
+            self.remote_hosts.iter().filter(|h| !h.is_local).collect();
         let host_count = 1 + remote_hosts.len(); // local + remotes
 
         match key {
@@ -6389,14 +7233,19 @@ KeyCode::Char('i') => {
             KeyCode::Enter => {
                 let proj = match self.projects.get(self.spawn_project_idx) {
                     Some(p) => (p.path.clone(), p.name.clone()),
-                    None => { self.sub = SubView::List; return Ok(()); }
+                    None => {
+                        self.sub = SubView::List;
+                        return Ok(());
+                    }
                 };
                 {
                     let (path, proj_name) = proj;
                     let backend = self.spawn_backend;
                     let raw_goal = if self.spawn_goal_text.is_empty() {
                         CONTINUE_DEV_PROMPT.to_string()
-                    } else { self.spawn_goal_text.clone() };
+                    } else {
+                        self.spawn_goal_text.clone()
+                    };
 
                     let goal = if self.spawn_workforce_idx > 0 {
                         // Deterministic workflow dispatch: invoke the
@@ -6420,7 +7269,9 @@ KeyCode::Char('i') => {
                         // Agent-only path (existing behavior)
                         if let Some(profile) = self.agent_profiles.get(self.spawn_agent_idx - 1) {
                             profile.as_preamble(&raw_goal)
-                        } else { raw_goal }
+                        } else {
+                            raw_goal
+                        }
                     } else {
                         raw_goal
                     };
@@ -6433,7 +7284,12 @@ KeyCode::Char('i') => {
 
                     if self.spawn_host_idx == 0 {
                         // Local spawn
-                        let _ = self.spawn_session_with_engine(&path, backend, resolved.as_ref(), Some(&goal));
+                        let _ = self.spawn_session_with_engine(
+                            &path,
+                            backend,
+                            resolved.as_ref(),
+                            Some(&goal),
+                        );
                     } else {
                         // Remote spawn
                         if let Some(host) = remote_hosts.get(self.spawn_host_idx - 1) {
@@ -6453,8 +7309,13 @@ KeyCode::Char('i') => {
                             let proj_name2 = proj_name.clone();
                             tokio::spawn(async move {
                                 let _ = orrch_core::remote::spawn_remote_session(
-                                    &host, &proj_name2, &backend_label, &goal2, &flags,
-                                ).await;
+                                    &host,
+                                    &proj_name2,
+                                    &backend_label,
+                                    &goal2,
+                                    &flags,
+                                )
+                                .await;
                             });
                             // ENG-006: remote env injection happens on the
                             // remote spawn side later; for now we surface the
@@ -6487,26 +7348,90 @@ KeyCode::Char('i') => {
                 // don't pick a "Cycle scope" that silently no-ops).
                 let pidx = self.selected_project_index();
                 if pidx.is_some() {
-                    items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
-                    items.push(ActionItem { key: 'N', label: "Spawn all open roadmap items".into(), action: ActionKind::SpawnAll });
-                    items.push(ActionItem { key: 'L', label: "Start loop (continuous workflow)".into(), action: ActionKind::StartLoop });
-                    items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
-                    items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
-                    items.push(ActionItem { key: 's', label: "Toggle hot/cold".into(), action: ActionKind::CycleTemp });
-                    items.push(ActionItem { key: 'i', label: "Toggle ignored".into(), action: ActionKind::IgnoreProject });
-                    items.push(ActionItem { key: 'l', label: "Cycle lifecycle stage".into(), action: ActionKind::CycleLifecycle });
-                    items.push(ActionItem { key: 'D', label: "Deprecate project".into(), action: ActionKind::DeprecateProject });
-                    items.push(ActionItem { key: 'C', label: "Mark complete (v1)".into(), action: ActionKind::CompleteProject });
-                    items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
+                    items.push(ActionItem {
+                        key: 'n',
+                        label: "Spawn session".into(),
+                        action: ActionKind::SpawnSession,
+                    });
+                    items.push(ActionItem {
+                        key: 'N',
+                        label: "Spawn all open roadmap items".into(),
+                        action: ActionKind::SpawnAll,
+                    });
+                    items.push(ActionItem {
+                        key: 'L',
+                        label: "Start loop (continuous workflow)".into(),
+                        action: ActionKind::StartLoop,
+                    });
+                    items.push(ActionItem {
+                        key: 't',
+                        label: "Cycle color tag".into(),
+                        action: ActionKind::CycleTag,
+                    });
+                    items.push(ActionItem {
+                        key: 'S',
+                        label: "Cycle scope".into(),
+                        action: ActionKind::CycleScope,
+                    });
+                    items.push(ActionItem {
+                        key: 's',
+                        label: "Toggle hot/cold".into(),
+                        action: ActionKind::CycleTemp,
+                    });
+                    items.push(ActionItem {
+                        key: 'i',
+                        label: "Toggle ignored".into(),
+                        action: ActionKind::IgnoreProject,
+                    });
+                    items.push(ActionItem {
+                        key: 'l',
+                        label: "Cycle lifecycle stage".into(),
+                        action: ActionKind::CycleLifecycle,
+                    });
+                    items.push(ActionItem {
+                        key: 'D',
+                        label: "Deprecate project".into(),
+                        action: ActionKind::DeprecateProject,
+                    });
+                    items.push(ActionItem {
+                        key: 'C',
+                        label: "Mark complete (v1)".into(),
+                        action: ActionKind::CompleteProject,
+                    });
+                    items.push(ActionItem {
+                        key: 'g',
+                        label: "Git commit+push (Claude)".into(),
+                        action: ActionKind::GitCommit,
+                    });
                     if let Some(idx) = pidx {
-                        items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(idx) });
+                        items.push(ActionItem {
+                            key: 'I',
+                            label: "Integrate inbox → plan".into(),
+                            action: ActionKind::IntegrateInbox(idx),
+                        });
                     }
                 }
                 // Always-available global actions
-                items.push(ActionItem { key: 'P', label: "Create new project".into(), action: ActionKind::NewProject });
-                items.push(ActionItem { key: 'f', label: "Write feedback".into(), action: ActionKind::WriteFeedback });
-                items.push(ActionItem { key: 'r', label: "Reload project list".into(), action: ActionKind::ReloadProjects });
-                items.push(ActionItem { key: 'G', label: "Git commit ALL projects".into(), action: ActionKind::GitCommitAll });
+                items.push(ActionItem {
+                    key: 'P',
+                    label: "Create new project".into(),
+                    action: ActionKind::NewProject,
+                });
+                items.push(ActionItem {
+                    key: 'f',
+                    label: "Write feedback".into(),
+                    action: ActionKind::WriteFeedback,
+                });
+                items.push(ActionItem {
+                    key: 'r',
+                    label: "Reload project list".into(),
+                    action: ActionKind::ReloadProjects,
+                });
+                items.push(ActionItem {
+                    key: 'G',
+                    label: "Git commit ALL projects".into(),
+                    action: ActionKind::GitCommitAll,
+                });
                 // ENG-006: global default engine — the `global_default` layer
                 // the resolver reads. Cycles library engines + "(none)".
                 let cur_engine = orrch_core::Config::load()
@@ -6520,24 +7445,68 @@ KeyCode::Char('i') => {
             }
             (_, SubView::ProjectDetail(idx)) => {
                 let idx = *idx;
-                items.push(ActionItem { key: 'n', label: "Spawn session".into(), action: ActionKind::SpawnSession });
-                items.push(ActionItem { key: 'f', label: "Write project feedback".into(), action: ActionKind::WriteProjectFeedback(idx) });
-                items.push(ActionItem { key: 'm', label: "Append to master plan".into(), action: ActionKind::MasterPlanAppend(idx) });
-                items.push(ActionItem { key: 'S', label: "Cycle scope".into(), action: ActionKind::CycleScope });
-                items.push(ActionItem { key: 't', label: "Cycle color tag".into(), action: ActionKind::CycleTag });
-                items.push(ActionItem { key: 'g', label: "Git commit+push (Claude)".into(), action: ActionKind::GitCommit });
-                items.push(ActionItem { key: 'I', label: "Integrate inbox → plan".into(), action: ActionKind::IntegrateInbox(idx) });
+                items.push(ActionItem {
+                    key: 'n',
+                    label: "Spawn session".into(),
+                    action: ActionKind::SpawnSession,
+                });
+                items.push(ActionItem {
+                    key: 'f',
+                    label: "Write project feedback".into(),
+                    action: ActionKind::WriteProjectFeedback(idx),
+                });
+                items.push(ActionItem {
+                    key: 'm',
+                    label: "Append to master plan".into(),
+                    action: ActionKind::MasterPlanAppend(idx),
+                });
+                items.push(ActionItem {
+                    key: 'S',
+                    label: "Cycle scope".into(),
+                    action: ActionKind::CycleScope,
+                });
+                items.push(ActionItem {
+                    key: 't',
+                    label: "Cycle color tag".into(),
+                    action: ActionKind::CycleTag,
+                });
+                items.push(ActionItem {
+                    key: 'g',
+                    label: "Git commit+push (Claude)".into(),
+                    action: ActionKind::GitCommit,
+                });
+                items.push(ActionItem {
+                    key: 'I',
+                    label: "Integrate inbox → plan".into(),
+                    action: ActionKind::IntegrateInbox(idx),
+                });
             }
             (Panel::Design, SubView::List) => {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     let fname = item.filename.clone();
                     if item.status == FeedbackStatus::Draft {
-                        items.push(ActionItem { key: 's', label: "Submit feedback".into(), action: ActionKind::SubmitFeedback(fname.clone()) });
-                        items.push(ActionItem { key: 'r', label: "Resume editing".into(), action: ActionKind::ResumeFeedback(fname) });
+                        items.push(ActionItem {
+                            key: 's',
+                            label: "Submit feedback".into(),
+                            action: ActionKind::SubmitFeedback(fname.clone()),
+                        });
+                        items.push(ActionItem {
+                            key: 'r',
+                            label: "Resume editing".into(),
+                            action: ActionKind::ResumeFeedback(fname),
+                        });
                     }
-                    items.push(ActionItem { key: 'd', label: "Delete feedback".into(), action: ActionKind::DeleteFeedback(self.feedback_selected) });
+                    items.push(ActionItem {
+                        key: 'd',
+                        label: "Delete feedback".into(),
+                        action: ActionKind::DeleteFeedback(self.feedback_selected),
+                    });
                 }
-                items.push(ActionItem { key: 'f', label: "Write new feedback".into(), action: ActionKind::WriteFeedback });
+                items.push(ActionItem {
+                    key: 'f',
+                    label: "Write new feedback".into(),
+                    action: ActionKind::WriteFeedback,
+                });
             }
             _ => {}
         }
@@ -6624,11 +7593,25 @@ KeyCode::Char('i') => {
                 if let Some(pidx) = pidx {
                     let (items, path, name) = {
                         let proj = &self.projects[pidx];
-                        (proj.open_roadmap_items().iter().map(|i| i.title.clone()).collect::<Vec<_>>(), proj.path.clone(), proj.name.clone())
+                        (
+                            proj.open_roadmap_items()
+                                .iter()
+                                .map(|i| i.title.clone())
+                                .collect::<Vec<_>>(),
+                            proj.path.clone(),
+                            proj.name.clone(),
+                        )
                     };
                     let count = items.len();
                     let mut spawned = 0;
-                    for goal in items { if self.spawn_session(&path, BackendKind::Claude, Some(&goal)).is_ok() { spawned += 1; } }
+                    for goal in items {
+                        if self
+                            .spawn_session(&path, BackendKind::Claude, Some(&goal))
+                            .is_ok()
+                        {
+                            spawned += 1;
+                        }
+                    }
                     self.notify(format!("{name}: {spawned}/{count} pipelines"));
                 }
             }
@@ -6664,9 +7647,15 @@ KeyCode::Char('i') => {
                 self.new_project_error = None;
                 self.sub = SubView::NewProjectName;
             }
-            ActionKind::WriteFeedback => { self.request_vim(VimKind::GlobalFeedback); }
-            ActionKind::WriteProjectFeedback(idx) => { self.request_vim(VimKind::ProjectFeedback(idx)); }
-            ActionKind::MasterPlanAppend(idx) => { self.request_vim(VimKind::MasterPlanAppend(idx)); }
+            ActionKind::WriteFeedback => {
+                self.request_vim(VimKind::GlobalFeedback);
+            }
+            ActionKind::WriteProjectFeedback(idx) => {
+                self.request_vim(VimKind::ProjectFeedback(idx));
+            }
+            ActionKind::MasterPlanAppend(idx) => {
+                self.request_vim(VimKind::MasterPlanAppend(idx));
+            }
             ActionKind::CycleTag => {
                 if let Some(pidx) = pidx {
                     let proj = &mut self.projects[pidx];
@@ -6688,7 +7677,11 @@ KeyCode::Char('i') => {
             ActionKind::CycleTemp => {
                 if let Some(pidx) = pidx {
                     let proj = &mut self.projects[pidx];
-                    proj.temperature = match proj.temperature { Temperature::Hot => Temperature::Cold, Temperature::Cold => Temperature::Hot, Temperature::Ignored => Temperature::Cold };
+                    proj.temperature = match proj.temperature {
+                        Temperature::Hot => Temperature::Cold,
+                        Temperature::Cold => Temperature::Hot,
+                        Temperature::Ignored => Temperature::Cold,
+                    };
                     proj.save_temperature();
                     let msg = format!("{}: {}", proj.name, proj.temperature.label());
                     self.categorize_projects();
@@ -6708,7 +7701,11 @@ KeyCode::Char('i') => {
             ActionKind::IgnoreProject => {
                 if let Some(pidx) = pidx {
                     let proj = &mut self.projects[pidx];
-                    proj.temperature = if proj.temperature == Temperature::Ignored { Temperature::Cold } else { Temperature::Ignored };
+                    proj.temperature = if proj.temperature == Temperature::Ignored {
+                        Temperature::Cold
+                    } else {
+                        Temperature::Ignored
+                    };
                     proj.save_temperature();
                     let msg = format!("{}: {}", proj.name, proj.temperature.label());
                     self.categorize_projects();
@@ -6716,12 +7713,19 @@ KeyCode::Char('i') => {
                 }
             }
             ActionKind::DeprecateProject => {
-                if let Some(pidx) = pidx { self.sub = SubView::ConfirmDeprecate(pidx); }
+                if let Some(pidx) = pidx {
+                    self.sub = SubView::ConfirmDeprecate(pidx);
+                }
             }
             ActionKind::CompleteProject => {
-                if let Some(pidx) = pidx { self.sub = SubView::ConfirmComplete(pidx); }
+                if let Some(pidx) = pidx {
+                    self.sub = SubView::ConfirmComplete(pidx);
+                }
             }
-            ActionKind::ReloadProjects => { self.reload_projects(); self.notify("Reloaded".into()); }
+            ActionKind::ReloadProjects => {
+                self.reload_projects();
+                self.notify("Reloaded".into());
+            }
             ActionKind::GitCommit => {
                 if let Some(pidx) = pidx {
                     let (name, path) = {
@@ -6735,7 +7739,9 @@ KeyCode::Char('i') => {
                         self.notify(format!("{name}: nothing to commit"));
                     } else {
                         match orrch_core::git::spawn_commit_session(&path, &name) {
-                            Ok(session) => self.notify(format!("{name}: committing via Claude ({session})")),
+                            Ok(session) => {
+                                self.notify(format!("{name}: committing via Claude ({session})"))
+                            }
                             Err(e) => self.notify(format!("{name}: git failed — {e}")),
                         }
                     }
@@ -6747,7 +7753,11 @@ KeyCode::Char('i') => {
                     self.notify("No projects need committing".into());
                 } else {
                     let names: Vec<_> = spawned.iter().map(|(n, _)| n.as_str()).collect();
-                    self.notify(format!("Committing {} projects: {}", spawned.len(), names.join(", ")));
+                    self.notify(format!(
+                        "Committing {} projects: {}",
+                        spawned.len(),
+                        names.join(", ")
+                    ));
                 }
             }
             ActionKind::CycleDefaultEngine => {
@@ -6788,14 +7798,22 @@ KeyCode::Char('i') => {
                     }
                 }
             }
-            ActionKind::KillSession(sid) => { self.pm.kill_session(&sid); }
-            ActionKind::SubmitFeedback(_) => { self.open_feedback_confirm(); }
+            ActionKind::KillSession(sid) => {
+                self.pm.kill_session(&sid);
+            }
+            ActionKind::SubmitFeedback(_) => {
+                self.open_feedback_confirm();
+            }
             ActionKind::ResumeFeedback(_) => {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     let path = item.path.clone();
                     let kind = VimKind::GlobalFeedback;
                     let title = self.vim_title(&kind);
-                    self.vim_request = Some(VimRequest { file: path, kind, title });
+                    self.vim_request = Some(VimRequest {
+                        file: path,
+                        kind,
+                        title,
+                    });
                 }
             }
             ActionKind::DeleteFeedback(idx) => {
@@ -6821,7 +7839,8 @@ KeyCode::Char('i') => {
             }
 
             // Auto-detect target projects (same as current routing)
-            let auto_routes = orrch_core::feedback::identify_target_projects_pub(&text, &self.projects_dir);
+            let auto_routes =
+                orrch_core::feedback::identify_target_projects_pub(&text, &self.projects_dir);
 
             // Build the editable route list: auto-detected are enabled, all others disabled
             let mut routes: Vec<(String, PathBuf, bool)> = Vec::new();
@@ -6845,7 +7864,9 @@ KeyCode::Char('i') => {
 
     fn key_feedback_confirm(&mut self, key: KeyCode, item_idx: usize) -> Result<()> {
         match key {
-            KeyCode::Esc => { self.sub = SubView::List; }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
             KeyCode::Up => {
                 if self.confirm_route_selected > 0 {
                     self.confirm_route_selected -= 1;
@@ -6858,11 +7879,12 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('p') => {
                 // Toggle plan mode in the confirmation overlay
-                self.confirm_feedback_type = if self.confirm_feedback_type == orrch_core::FeedbackType::Plan {
-                    orrch_core::FeedbackType::Feedback
-                } else {
-                    orrch_core::FeedbackType::Plan
-                };
+                self.confirm_feedback_type =
+                    if self.confirm_feedback_type == orrch_core::FeedbackType::Plan {
+                        orrch_core::FeedbackType::Feedback
+                    } else {
+                        orrch_core::FeedbackType::Plan
+                    };
             }
             KeyCode::Char(' ') | KeyCode::Tab => {
                 // Toggle selected route on/off
@@ -6872,7 +7894,9 @@ KeyCode::Char('i') => {
             }
             KeyCode::Enter => {
                 // Confirm: process via Claude
-                let enabled_routes: Vec<(String, PathBuf)> = self.confirm_routes.iter()
+                let enabled_routes: Vec<(String, PathBuf)> = self
+                    .confirm_routes
+                    .iter()
                     .filter(|(_, _, enabled)| *enabled)
                     .map(|(name, path, _)| (name.clone(), path.clone()))
                     .collect();
@@ -6884,7 +7908,8 @@ KeyCode::Char('i') => {
                     let projects_dir = self.projects_dir.clone();
                     let text = self.confirm_feedback_text.clone();
 
-                    let route_names: Vec<String> = enabled_routes.iter().map(|(n, _)| n.clone()).collect();
+                    let route_names: Vec<String> =
+                        enabled_routes.iter().map(|(n, _)| n.clone()).collect();
                     let fb_type = self.confirm_feedback_type;
 
                     // Spawn Claude to process the feedback via /interpret-user-instructions
@@ -6904,7 +7929,9 @@ KeyCode::Char('i') => {
                                 Some(&session_name),
                             );
                             self.reload_feedback();
-                            self.notify(format!("Sent to Claude ({session_name}) — check Processing section"));
+                            self.notify(format!(
+                                "Sent to Claude ({session_name}) — check Processing section"
+                            ));
                             self.sub = SubView::List;
                         }
                         Err(e) => {
@@ -6929,7 +7956,9 @@ KeyCode::Char('i') => {
         ];
 
         match key {
-            KeyCode::Esc | KeyCode::Left => { self.sub = SubView::List; }
+            KeyCode::Esc | KeyCode::Left => {
+                self.sub = SubView::List;
+            }
             KeyCode::Up => {
                 // OPT-004: Up at top → exit menu (never trap)
                 if self.app_menu_selected == 0 {
@@ -6947,7 +7976,10 @@ KeyCode::Char('i') => {
                 self.sub = SubView::List;
                 match self.app_menu_selected {
                     0 => self.should_quit = true,
-                    1 => { self.reload_projects(); self.notify("Reloaded".into()); }
+                    1 => {
+                        self.reload_projects();
+                        self.notify("Reloaded".into());
+                    }
                     2 => {
                         let spawned = orrch_core::git::spawn_commit_all(&self.projects_dir);
                         let count = spawned.len();
@@ -6958,13 +7990,20 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('r') => { self.sub = SubView::List; self.reload_projects(); self.notify("Reloaded".into()); }
+            KeyCode::Char('r') => {
+                self.sub = SubView::List;
+                self.reload_projects();
+                self.notify("Reloaded".into());
+            }
             KeyCode::Char('g') => {
                 self.sub = SubView::List;
                 let spawned = orrch_core::git::spawn_commit_all(&self.projects_dir);
                 self.notify(format!("Committing {} projects", spawned.len()));
             }
-            KeyCode::Char('v') => { self.sub = SubView::List; self.notify("orrchestrator v0.1.0".into()); }
+            KeyCode::Char('v') => {
+                self.sub = SubView::List;
+                self.notify("orrchestrator v0.1.0".into());
+            }
             _ => {}
         }
         Ok(())
@@ -7047,7 +8086,11 @@ KeyCode::Char('i') => {
                 // Activate the inspector prompt input. Keystrokes thereafter
                 // accumulate into session_prompt_buffer until Enter (send)
                 // or Esc (cancel).
-                if self.managed_sessions.get(self.session_tab_selected).is_some() {
+                if self
+                    .managed_sessions
+                    .get(self.session_tab_selected)
+                    .is_some()
+                {
                     self.session_prompt_active = true;
                     self.session_prompt_buffer.clear();
                     self.session_prompt_caret = 0;
@@ -7056,12 +8099,12 @@ KeyCode::Char('i') => {
             KeyCode::Char('T') => {
                 // Jump to the first WaitingForInput / Dead session.
                 use orrch_core::windows::SessionStatus;
-                if let Some((idx, _)) = self
-                    .managed_sessions
-                    .iter()
-                    .enumerate()
-                    .find(|(_, s)| matches!(s.status, SessionStatus::WaitingForInput | SessionStatus::Dead))
-                {
+                if let Some((idx, _)) = self.managed_sessions.iter().enumerate().find(|(_, s)| {
+                    matches!(
+                        s.status,
+                        SessionStatus::WaitingForInput | SessionStatus::Dead
+                    )
+                }) {
                     self.session_tab_selected = idx;
                 }
             }
@@ -7084,7 +8127,10 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Char('L') => {
-                let log_dir = self.projects_dir.join("orrchestrator").join(".session-logs");
+                let log_dir = self
+                    .projects_dir
+                    .join("orrchestrator")
+                    .join(".session-logs");
                 self.session_logs = orrch_core::windows::load_session_logs(&log_dir, 50);
                 self.session_logs_selected = 0;
                 self.session_log_view = !self.session_log_view;
@@ -7201,14 +8247,14 @@ KeyCode::Char('i') => {
         // Hypervise list. Single Left moves the prompt-buffer caret.
         if code == KeyCode::Left {
             let now = Instant::now();
-            if let Some(prev) = self.expanded_pending_esc {
-                if now.duration_since(prev) <= LEFT_DOUBLE_TAP_WINDOW {
-                    self.expanded_pending_esc = None;
-                    self.session_prompt_buffer.clear();
-                    self.session_prompt_caret = 0;
-                    self.sub = SubView::List;
-                    return Ok(());
-                }
+            if let Some(prev) = self.expanded_pending_esc
+                && now.duration_since(prev) <= LEFT_DOUBLE_TAP_WINDOW
+            {
+                self.expanded_pending_esc = None;
+                self.session_prompt_buffer.clear();
+                self.session_prompt_caret = 0;
+                self.sub = SubView::List;
+                return Ok(());
             }
             self.expanded_pending_esc = Some(now);
             // Also do the caret move — the second-Left exit takes
@@ -7302,8 +8348,12 @@ KeyCode::Char('i') => {
                     self.session_log_scroll = 0;
                 }
             }
-            KeyCode::PageUp => { self.session_log_scroll = self.session_log_scroll.saturating_sub(10); }
-            KeyCode::PageDown => { self.session_log_scroll += 10; }
+            KeyCode::PageUp => {
+                self.session_log_scroll = self.session_log_scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.session_log_scroll += 10;
+            }
             _ => {}
         }
         Ok(())
@@ -7316,19 +8366,23 @@ KeyCode::Char('i') => {
             }
             KeyCode::Enter => {
                 let text = self.steer_buf.trim().to_string();
-                if !text.is_empty() {
-                    if let Some(s) = self.managed_sessions.get(session_idx) {
-                        let cat = s.category;
-                        let idx = s.index;
-                        orrch_core::windows::send_keys_to_session(cat, idx, &text);
-                        self.notify(format!("Sent to {}: {}", s.name, text));
-                    }
+                if !text.is_empty()
+                    && let Some(s) = self.managed_sessions.get(session_idx)
+                {
+                    let cat = s.category;
+                    let idx = s.index;
+                    orrch_core::windows::send_keys_to_session(cat, idx, &text);
+                    self.notify(format!("Sent to {}: {}", s.name, text));
                 }
                 self.steer_buf.clear();
                 self.sub = SubView::List;
             }
-            KeyCode::Backspace => { self.steer_buf.pop(); }
-            KeyCode::Char(c) => { self.steer_buf.push(c); }
+            KeyCode::Backspace => {
+                self.steer_buf.pop();
+            }
+            KeyCode::Char(c) => {
+                self.steer_buf.push(c);
+            }
             _ => {}
         }
         Ok(())
@@ -7344,7 +8398,11 @@ KeyCode::Char('i') => {
             KeyCode::Enter => {
                 let input = self.logo_path_input.trim().to_string();
                 if let Some(proj) = self.projects.get_mut(proj_idx) {
-                    proj.logo_path = if input.is_empty() { None } else { Some(input.clone()) };
+                    proj.logo_path = if input.is_empty() {
+                        None
+                    } else {
+                        Some(input.clone())
+                    };
                     proj.save_logo_path();
                     let msg = if input.is_empty() {
                         format!("{}: logo cleared", proj.name)
@@ -7356,8 +8414,12 @@ KeyCode::Char('i') => {
                 self.logo_path_input.clear();
                 self.sub = SubView::ProjectDetail(proj_idx);
             }
-            KeyCode::Backspace => { self.logo_path_input.pop(); }
-            KeyCode::Char(c) => { self.logo_path_input.push(c); }
+            KeyCode::Backspace => {
+                self.logo_path_input.pop();
+            }
+            KeyCode::Char(c) => {
+                self.logo_path_input.push(c);
+            }
             _ => {}
         }
         Ok(())
@@ -7375,11 +8437,16 @@ KeyCode::Char('i') => {
         match key {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 // Find the session category by name and kill it
-                let maybe = self.managed_sessions.iter().find(|s| s.name == name).map(|s| s.category);
+                let maybe = self
+                    .managed_sessions
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|s| s.category);
                 if let Some(cat) = maybe {
                     orrch_core::windows::kill_session(cat, &name);
                     self.managed_sessions = orrch_core::windows::list_all_sessions();
-                    self.session_tab_selected = self.session_tab_selected
+                    self.session_tab_selected = self
+                        .session_tab_selected
                         .min(self.managed_sessions.len().saturating_sub(1));
                     self.notify(format!("Killed {name}"));
                 }
@@ -7413,7 +8480,8 @@ KeyCode::Char('i') => {
                 // Find all pending entries (split on "---" and look for "Executed: pending")
                 for entry in content.split("\n---\n") {
                     if entry.contains("Executed: pending") {
-                        let preview: String = entry.lines()
+                        let preview: String = entry
+                            .lines()
                             .filter(|l| !l.trim().is_empty())
                             .take(5)
                             .collect::<Vec<_>>()
@@ -7434,7 +8502,8 @@ KeyCode::Char('i') => {
         if let Ok(content) = std::fs::read_to_string(&ws_ib) {
             for entry in content.split("\n---\n") {
                 if entry.contains("Executed: pending") {
-                    let preview: String = entry.lines()
+                    let preview: String = entry
+                        .lines()
                         .filter(|l| !l.trim().is_empty())
                         .take(5)
                         .collect::<Vec<_>>()
@@ -7470,7 +8539,11 @@ KeyCode::Char('i') => {
                         // Send correction to Claude
                         let correction = self.commit_correction_text.clone();
                         let projects_dir = self.projects_dir.clone();
-                        match spawn_correction_processor(&correction, &self.commit_packages, &projects_dir) {
+                        match spawn_correction_processor(
+                            &correction,
+                            &self.commit_packages,
+                            &projects_dir,
+                        ) {
                             Ok(session_name) => {
                                 self.commit_correction_session = Some(session_name.clone());
                                 self.commit_typing_correction = false;
@@ -7482,8 +8555,12 @@ KeyCode::Char('i') => {
                         }
                     }
                 }
-                KeyCode::Backspace => { self.commit_correction_text.pop(); }
-                KeyCode::Char(c) => { self.commit_correction_text.push(c); }
+                KeyCode::Backspace => {
+                    self.commit_correction_text.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.commit_correction_text.push(c);
+                }
                 _ => {}
             }
             return Ok(());
@@ -7507,7 +8584,9 @@ KeyCode::Char('i') => {
                     self.reload_feedback();
                     self.reload_projects();
                     let count = self.commit_packages.len();
-                    self.notify(format!("Committed {count} instruction package(s) to projects"));
+                    self.notify(format!(
+                        "Committed {count} instruction package(s) to projects"
+                    ));
                 }
                 self.sub = SubView::List;
             }
@@ -7519,7 +8598,9 @@ KeyCode::Char('i') => {
             KeyCode::Char('d') => {
                 // Deny — remove all pending entries from project instructions_inbox.md files, return to draft
                 let removed = self.deny_commit(feedback_idx);
-                self.notify(format!("Denied — removed {removed} entries, returned to draft"));
+                self.notify(format!(
+                    "Denied — removed {removed} entries, returned to draft"
+                ));
                 self.sub = SubView::List;
             }
             _ => {}
@@ -7545,20 +8626,17 @@ KeyCode::Char('i') => {
             }
         }
 
-        match key {
-            KeyCode::Esc => {
-                // Cancel waiting — go back to review
-                if let Some(ref session) = self.commit_correction_session {
-                    let _ = std::process::Command::new("tmux")
-                        .args(["kill-session", "-t", session])
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status();
-                }
-                self.commit_correction_session = None;
-                self.sub = SubView::CommitReview(feedback_idx);
+        if key == KeyCode::Esc {
+            // Cancel waiting — go back to review
+            if let Some(ref session) = self.commit_correction_session {
+                let _ = std::process::Command::new("tmux")
+                    .args(["kill-session", "-t", session])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
             }
-            _ => {}
+            self.commit_correction_session = None;
+            self.sub = SubView::CommitReview(feedback_idx);
         }
         Ok(())
     }
@@ -7570,7 +8648,9 @@ KeyCode::Char('i') => {
 
         // Build a set of entry texts that belong to THIS processing run
         // (the ones displayed in the commit review overlay)
-        let package_texts: Vec<String> = self.commit_packages.iter()
+        let package_texts: Vec<String> = self
+            .commit_packages
+            .iter()
             .map(|pkg| pkg.entry_full.trim().to_string())
             .collect();
 
@@ -7581,14 +8661,19 @@ KeyCode::Char('i') => {
                 continue; // already processed this project
             }
             let inbox_path = pkg.project_dir.join("instructions_inbox.md");
-            let Ok(content) = std::fs::read_to_string(&inbox_path) else { continue };
+            let Ok(content) = std::fs::read_to_string(&inbox_path) else {
+                continue;
+            };
 
             let mut kept = Vec::new();
             let mut current_entry = String::new();
             for line in content.lines() {
                 if line == "---" && !current_entry.is_empty() {
                     let trimmed = current_entry.trim().to_string();
-                    if package_texts.iter().any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str())) {
+                    if package_texts
+                        .iter()
+                        .any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str()))
+                    {
                         removed += 1;
                     } else {
                         kept.push(current_entry.clone());
@@ -7602,7 +8687,10 @@ KeyCode::Char('i') => {
             // Handle last entry (no trailing ---)
             if !current_entry.trim().is_empty() {
                 let trimmed = current_entry.trim().to_string();
-                if package_texts.iter().any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str())) {
+                if package_texts
+                    .iter()
+                    .any(|pt| trimmed.contains(pt.as_str()) || pt.contains(trimmed.as_str()))
+                {
                     removed += 1;
                 } else {
                     kept.push(current_entry);
@@ -7638,7 +8726,9 @@ KeyCode::Char('i') => {
 
     fn key_new_project_name(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Esc => { self.sub = SubView::List; }
+            KeyCode::Esc => {
+                self.sub = SubView::List;
+            }
             KeyCode::Enter => {
                 let name = self.new_project_name.trim().to_string();
                 if name.is_empty() {
@@ -7646,8 +8736,11 @@ KeyCode::Char('i') => {
                     return Ok(());
                 }
                 // Validate: no spaces, no special chars except hyphens/underscores
-                if name.contains(|c: char| c.is_whitespace() || "/$@!#%^&*()+=[]{}|;:',<>?\"".contains(c)) {
-                    self.new_project_error = Some("Use lowercase letters, numbers, hyphens only".into());
+                if name.contains(|c: char| {
+                    c.is_whitespace() || "/$@!#%^&*()+=[]{}|;:',<>?\"".contains(c)
+                }) {
+                    self.new_project_error =
+                        Some("Use lowercase letters, numbers, hyphens only".into());
                     return Ok(());
                 }
                 let target = self.projects_dir.join(&name);
@@ -7658,8 +8751,14 @@ KeyCode::Char('i') => {
                 self.new_project_error = None;
                 self.sub = SubView::NewProjectScope;
             }
-            KeyCode::Backspace => { self.new_project_name.pop(); self.new_project_error = None; }
-            KeyCode::Char(c) => { self.new_project_name.push(c); self.new_project_error = None; }
+            KeyCode::Backspace => {
+                self.new_project_name.pop();
+                self.new_project_error = None;
+            }
+            KeyCode::Char(c) => {
+                self.new_project_name.push(c);
+                self.new_project_error = None;
+            }
             _ => {}
         }
         Ok(())
@@ -7668,7 +8767,9 @@ KeyCode::Char('i') => {
     fn key_new_project_scope(&mut self, key: KeyCode) -> Result<()> {
         use orrch_core::Scope;
         match key {
-            KeyCode::Esc => { self.sub = SubView::NewProjectName; }
+            KeyCode::Esc => {
+                self.sub = SubView::NewProjectName;
+            }
             KeyCode::Tab | KeyCode::Down => {
                 self.new_project_scope = match self.new_project_scope {
                     Scope::Personal => Scope::Private,
@@ -7695,7 +8796,9 @@ KeyCode::Char('i') => {
 
     fn key_new_project_confirm(&mut self, key: KeyCode) -> Result<()> {
         match key {
-            KeyCode::Esc => { self.sub = SubView::NewProjectScope; }
+            KeyCode::Esc => {
+                self.sub = SubView::NewProjectScope;
+            }
             KeyCode::Char('y') | KeyCode::Enter => {
                 let name = self.new_project_name.trim().to_string();
                 let path = self.projects_dir.join(&name);
@@ -7720,7 +8823,9 @@ KeyCode::Char('i') => {
                 }
                 self.sub = SubView::List;
             }
-            KeyCode::Char('n') => { self.sub = SubView::NewProjectName; }
+            KeyCode::Char('n') => {
+                self.sub = SubView::NewProjectName;
+            }
             _ => {}
         }
         Ok(())
@@ -7760,11 +8865,19 @@ KeyCode::Char('i') => {
         match kind {
             VimKind::GlobalFeedback => "[orrchestrator] Feedback".into(),
             VimKind::ProjectFeedback(idx) => {
-                let name = self.projects.get(*idx).map(|p| p.name.as_str()).unwrap_or("?");
+                let name = self
+                    .projects
+                    .get(*idx)
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?");
                 format!("[orrchestrator] {name} Feedback")
             }
             VimKind::MasterPlanAppend(idx) => {
-                let name = self.projects.get(*idx).map(|p| p.name.as_str()).unwrap_or("?");
+                let name = self
+                    .projects
+                    .get(*idx)
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?");
                 format!("[orrchestrator] {name} Master Plan")
             }
             VimKind::NewIdea => "[orrchestrator] New Idea".into(),
@@ -7780,9 +8893,7 @@ KeyCode::Char('i') => {
                 let vault = orrch_core::vault::vault_dir(&self.projects_dir);
                 orrch_core::vault::save_idea(&vault, "").ok()
             }
-            VimKind::ProjectFeedback(_) => {
-                orrch_core::create_draft(&self.projects_dir).ok()
-            }
+            VimKind::ProjectFeedback(_) => orrch_core::create_draft(&self.projects_dir).ok(),
             VimKind::MasterPlanAppend(_) => {
                 orrch_core::create_append_draft(&self.projects_dir).ok()
             }
@@ -7840,14 +8951,25 @@ KeyCode::Char('i') => {
                     let path = proj.path.clone();
                     let mp_path = path.join("MASTER_PLAN.md");
                     let ts = orrch_core::feedback::chrono_lite_timestamp();
-                    let header = if !mp_path.exists() { format!("# {name} — Master Plan\n") } else { String::new() };
+                    let header = if !mp_path.exists() {
+                        format!("# {name} — Master Plan\n")
+                    } else {
+                        String::new()
+                    };
                     let appendix = format!("{header}\n---\n\n## Append: {ts}\n\n{}\n", text.trim());
                     use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&mp_path) {
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&mp_path)
+                    {
                         let _ = f.write_all(appendix.as_bytes());
                     }
                     let _ = orrch_core::feedback::append_to_inbox_direct(
-                        &format!("[Master Plan]\n{}", text.trim()), &path, &ts);
+                        &format!("[Master Plan]\n{}", text.trim()),
+                        &path,
+                        &ts,
+                    );
                     self.reload_projects();
                     self.notify(format!("Appended to {name} master plan"));
                 }
@@ -7897,10 +9019,10 @@ KeyCode::Char('i') => {
     pub fn reload_feedback(&mut self) {
         // Check for processing items that have completed (tmux session gone)
         for item in &self.feedback_items {
-            if item.status == FeedbackStatus::Processing {
-                if orrch_core::check_processing_complete(&item.filename, &self.projects_dir) {
-                    orrch_core::mark_as_processed(&item.filename, &self.projects_dir);
-                }
+            if item.status == FeedbackStatus::Processing
+                && orrch_core::check_processing_complete(&item.filename, &self.projects_dir)
+            {
+                orrch_core::mark_as_processed(&item.filename, &self.projects_dir);
             }
         }
         self.feedback_items = orrch_core::load_feedback_items(&self.projects_dir);
@@ -7933,96 +9055,98 @@ KeyCode::Char('i') => {
             }
             KeyCode::Char('r') => {
                 // Resume editing — open in nvim
-                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Draft {
-                        let path = item.path.clone();
-                        let kind = VimKind::GlobalFeedback;
-                        let title = self.vim_title(&kind);
-                        self.vim_request = Some(VimRequest {
-                            file: path,
-                            kind,
-                            title,
-                        });
-                    }
+                if let Some(item) = self.feedback_items.get(self.feedback_selected)
+                    && item.status == FeedbackStatus::Draft
+                {
+                    let path = item.path.clone();
+                    let kind = VimKind::GlobalFeedback;
+                    let title = self.vim_title(&kind);
+                    self.vim_request = Some(VimRequest {
+                        file: path,
+                        kind,
+                        title,
+                    });
                 }
             }
             KeyCode::Char('p') => {
                 // Toggle plan mode on selected draft
-                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Draft {
-                        let filename = item.filename.clone();
-                        let new_type = if item.feedback_type == orrch_core::FeedbackType::Plan {
-                            orrch_core::FeedbackType::Feedback
-                        } else {
-                            orrch_core::FeedbackType::Plan
-                        };
-                        orrch_core::set_feedback_type(&filename, &self.projects_dir, new_type);
-                        self.reload_feedback();
-                        self.notify(format!("→ {}", new_type.label()));
-                    }
+                if let Some(item) = self.feedback_items.get(self.feedback_selected)
+                    && item.status == FeedbackStatus::Draft
+                {
+                    let filename = item.filename.clone();
+                    let new_type = if item.feedback_type == orrch_core::FeedbackType::Plan {
+                        orrch_core::FeedbackType::Feedback
+                    } else {
+                        orrch_core::FeedbackType::Plan
+                    };
+                    orrch_core::set_feedback_type(&filename, &self.projects_dir, new_type);
+                    self.reload_feedback();
+                    self.notify(format!("→ {}", new_type.label()));
                 }
             }
             KeyCode::Char('c') => {
                 // Open commit review overlay for processed feedback
-                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status == FeedbackStatus::Processed {
-                        self.open_commit_review(self.feedback_selected);
-                    }
+                if let Some(item) = self.feedback_items.get(self.feedback_selected)
+                    && item.status == FeedbackStatus::Processed
+                {
+                    self.open_commit_review(self.feedback_selected);
                 }
             }
             KeyCode::Char('u') => {
                 // Recall — kill tmux if running, remove pending entries, return to draft
-                if let Some(item) = self.feedback_items.get(self.feedback_selected) {
-                    if item.status != FeedbackStatus::Draft {
-                        // Kill tmux session if still alive
-                        if let Some(ref session) = item.tmux_session {
-                            let _ = std::process::Command::new("tmux")
-                                .args(["kill-session", "-t", session.as_str()])
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .status();
-                        }
-                        let filename = item.filename.clone();
-                        let routes = item.routes.clone();
+                if let Some(item) = self.feedback_items.get(self.feedback_selected)
+                    && item.status != FeedbackStatus::Draft
+                {
+                    // Kill tmux session if still alive
+                    if let Some(ref session) = item.tmux_session {
+                        let _ = std::process::Command::new("tmux")
+                            .args(["kill-session", "-t", session.as_str()])
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .status();
+                    }
+                    let filename = item.filename.clone();
+                    let routes = item.routes.clone();
 
-                        // Scan routed projects and remove entries with "Executed: pending"
-                        let mut removed = 0;
-                        for route_name in &routes {
-                            if let Some(proj) = self.projects.iter().find(|p| p.name == *route_name) {
-                                let inbox_path = proj.path.join("instructions_inbox.md");
-                                if let Ok(content) = std::fs::read_to_string(&inbox_path) {
-                                    let mut kept = Vec::new();
-                                    for entry in content.split("\n---\n") {
-                                        if entry.contains("Executed: pending") {
-                                            removed += 1;
-                                        } else {
-                                            kept.push(entry.to_string());
-                                        }
-                                    }
-                                    let new_content = kept.join("\n---\n");
-                                    if new_content.trim().is_empty() {
-                                        let _ = std::fs::remove_file(&inbox_path);
+                    // Scan routed projects and remove entries with "Executed: pending"
+                    let mut removed = 0;
+                    for route_name in &routes {
+                        if let Some(proj) = self.projects.iter().find(|p| p.name == *route_name) {
+                            let inbox_path = proj.path.join("instructions_inbox.md");
+                            if let Ok(content) = std::fs::read_to_string(&inbox_path) {
+                                let mut kept = Vec::new();
+                                for entry in content.split("\n---\n") {
+                                    if entry.contains("Executed: pending") {
+                                        removed += 1;
                                     } else {
-                                        let _ = std::fs::write(&inbox_path, new_content);
+                                        kept.push(entry.to_string());
                                     }
+                                }
+                                let new_content = kept.join("\n---\n");
+                                if new_content.trim().is_empty() {
+                                    let _ = std::fs::remove_file(&inbox_path);
+                                } else {
+                                    let _ = std::fs::write(&inbox_path, new_content);
                                 }
                             }
                         }
-
-                        // Return to draft
-                        let feedback_dir = self.projects_dir.join(".feedback");
-                        let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
-                        if let Some(meta) = status_map.get_mut(&filename) {
-                            meta.status = FeedbackStatus::Draft;
-                            meta.routes.clear();
-                            meta.submitted_at = None;
-                            meta.tmux_session = None;
-                        }
-                        orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
-                        self.reload_feedback();
-                        self.reload_projects();
-                        self.notify(format!("Recalled — {removed} pending entries removed, returned to draft"));
                     }
+
+                    // Return to draft
+                    let feedback_dir = self.projects_dir.join(".feedback");
+                    let mut status_map = orrch_core::feedback::load_status_map_pub(&feedback_dir);
+                    if let Some(meta) = status_map.get_mut(&filename) {
+                        meta.status = FeedbackStatus::Draft;
+                        meta.routes.clear();
+                        meta.submitted_at = None;
+                        meta.tmux_session = None;
+                    }
+                    orrch_core::feedback::save_status_map_pub(&feedback_dir, &status_map);
+                    self.reload_feedback();
+                    self.reload_projects();
+                    self.notify(format!(
+                        "Recalled — {removed} pending entries removed, returned to draft"
+                    ));
                 }
             }
             KeyCode::Char('d') => {
@@ -8035,19 +9159,25 @@ KeyCode::Char('i') => {
                 if let Some(item) = self.feedback_items.get(self.feedback_selected) {
                     match item.status {
                         FeedbackStatus::Draft => self.open_feedback_confirm(),
-                        FeedbackStatus::Processed => self.open_commit_review(self.feedback_selected),
+                        FeedbackStatus::Processed => {
+                            self.open_commit_review(self.feedback_selected)
+                        }
                         _ => {}
                     }
                 }
             }
             KeyCode::Up => {
-                if self.feedback_selected == 0 { self.focus_depth = 0; }
-                else { self.feedback_selected -= 1; }
-            }
-            KeyCode::Down => {
-                if !self.feedback_items.is_empty() && self.feedback_selected < self.feedback_items.len() - 1 {
-                    self.feedback_selected += 1;
+                if self.feedback_selected == 0 {
+                    self.focus_depth = 0;
+                } else {
+                    self.feedback_selected -= 1;
                 }
+            }
+            KeyCode::Down
+                if !self.feedback_items.is_empty()
+                    && self.feedback_selected < self.feedback_items.len() - 1 =>
+            {
+                self.feedback_selected += 1;
             }
             _ => {}
         }
@@ -8055,16 +9185,16 @@ KeyCode::Char('i') => {
     }
 
     fn key_confirm_delete_feedback(&mut self, key: KeyCode, idx: usize) -> Result<()> {
-        if key == KeyCode::Char('y') || key == KeyCode::Char('Y') {
-            if let Some(item) = self.feedback_items.get(idx) {
-                let filename = item.filename.clone();
-                orrch_core::delete_feedback(&filename, &self.projects_dir);
-                self.reload_feedback();
-                if self.feedback_selected > 0 && self.feedback_selected >= self.feedback_items.len() {
-                    self.feedback_selected = self.feedback_items.len().saturating_sub(1);
-                }
-                self.notify("Deleted".into());
+        if (key == KeyCode::Char('y') || key == KeyCode::Char('Y'))
+            && let Some(item) = self.feedback_items.get(idx)
+        {
+            let filename = item.filename.clone();
+            orrch_core::delete_feedback(&filename, &self.projects_dir);
+            self.reload_feedback();
+            if self.feedback_selected > 0 && self.feedback_selected >= self.feedback_items.len() {
+                self.feedback_selected = self.feedback_items.len().saturating_sub(1);
             }
+            self.notify("Deleted".into());
         }
         self.sub = SubView::List;
         Ok(())
@@ -8074,12 +9204,16 @@ KeyCode::Char('i') => {
         match key {
             KeyCode::Enter => {
                 for (_, path) in &self.routing_result.clone() {
-                    let _ = self.spawn_session(path, BackendKind::Claude, Some(CONTINUE_DEV_PROMPT));
+                    let _ =
+                        self.spawn_session(path, BackendKind::Claude, Some(CONTINUE_DEV_PROMPT));
                 }
                 self.routing_result.clear();
                 self.sub = SubView::List;
             }
-            KeyCode::Esc => { self.routing_result.clear(); self.sub = SubView::List; }
+            KeyCode::Esc => {
+                self.routing_result.clear();
+                self.sub = SubView::List;
+            }
             _ => {}
         }
         Ok(())
@@ -8087,7 +9221,10 @@ KeyCode::Char('i') => {
 
     fn key_confirm_deprecate(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         if key == KeyCode::Char('y') || key == KeyCode::Char('Y') {
-            let proj_data = self.projects.get(proj_idx).map(|p| (p.name.clone(), p.path.clone()));
+            let proj_data = self
+                .projects
+                .get(proj_idx)
+                .map(|p| (p.name.clone(), p.path.clone()));
             if let Some((name, src)) = proj_data {
                 let dest = self.projects_dir.join("deprecated").join(&name);
                 let _ = std::fs::create_dir_all(self.projects_dir.join("deprecated"));
@@ -8097,7 +9234,9 @@ KeyCode::Char('i') => {
                     self.notify(format!("Move failed: {e}"));
                 } else {
                     self.reload_projects();
-                    self.project_selected = self.project_selected.min(self.projects.len().saturating_sub(1));
+                    self.project_selected = self
+                        .project_selected
+                        .min(self.projects.len().saturating_sub(1));
                     self.notify(format!("{name} → deprecated/"));
                 }
             }
@@ -8108,10 +9247,15 @@ KeyCode::Char('i') => {
 
     fn key_confirm_complete(&mut self, key: KeyCode, proj_idx: usize) -> Result<()> {
         if key == KeyCode::Char('y') || key == KeyCode::Char('Y') {
-            let proj_data = self.projects.get(proj_idx).map(|p| (p.name.clone(), p.path.clone()));
+            let proj_data = self
+                .projects
+                .get(proj_idx)
+                .map(|p| (p.name.clone(), p.path.clone()));
             if let Some((name, path)) = proj_data {
                 if path.join("v1").exists() {
-                    self.notify(format!("{name} already has v1/ — use versioning-init for v2"));
+                    self.notify(format!(
+                        "{name} already has v1/ — use versioning-init for v2"
+                    ));
                 } else {
                     match orrch_core::package_as_v1(&path) {
                         Ok(()) => {
@@ -8127,7 +9271,10 @@ KeyCode::Char('i') => {
         Ok(())
     }
 
-    pub fn retrospect_stats_for(&mut self, project_dir: &str) -> Option<orrch_retrospect::store::StoreStats> {
+    pub fn retrospect_stats_for(
+        &mut self,
+        project_dir: &str,
+    ) -> Option<orrch_retrospect::store::StoreStats> {
         self.error_stores.get_mut(project_dir).map(|s| s.stats())
     }
 
@@ -8151,11 +9298,17 @@ KeyCode::Char('i') => {
                 }
             }
             KeyCode::Enter => {
-                if let Some((script, display)) = self.workflow_choices.get(self.workflow_picker_idx).cloned() {
+                if let Some((script, display)) =
+                    self.workflow_choices.get(self.workflow_picker_idx).cloned()
+                {
                     if let Some(pidx) = self.selected_project_index() {
                         let path = self.projects[pidx].path.clone();
                         let name = self.projects[pidx].name.clone();
-                        match orrch_core::windows::spawn_workflow(&path, &script, "continue development") {
+                        match orrch_core::windows::spawn_workflow(
+                            &path,
+                            &script,
+                            "continue development",
+                        ) {
                             Ok(window) => {
                                 self.notify(format!("{name}: {display} → tmux:{window}"));
                             }
@@ -8211,9 +9364,7 @@ fn count_orphaned_editor_windows() -> usize {
         .args(["-f", r#"\[orrchestrator\]"#])
         .output();
     match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout).lines().count()
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).lines().count(),
         _ => 0,
     }
 }
@@ -8229,22 +9380,33 @@ fn spawn_correction_processor(
 
     let mut context = String::new();
     for pkg in packages {
-        context.push_str(&format!("\n### Project: {}\n{}\n", pkg.project_name, pkg.entry_full));
+        context.push_str(&format!(
+            "\n### Project: {}\n{}\n",
+            pkg.project_name, pkg.entry_full
+        ));
     }
 
     let prompt_path = feedback_dir.join(".correction-prompt.md");
-    std::fs::write(&prompt_path, format!(
-        "Correct feedback routing. Current pending entries:\n{context}\n\nUser correction: {correction}\n\n\
+    std::fs::write(
+        &prompt_path,
+        format!(
+            "Correct feedback routing. Current pending entries:\n{context}\n\nUser correction: {correction}\n\n\
          Find 'Executed: pending' entries in project instructions_inbox.md files, apply corrections. \
          Do NOT touch entries without 'Executed: pending'. Do NOT create new project directories.",
-    ))?;
+        ),
+    )?;
 
     let cmd = format!(
         "cd {} && prompt=$(cat {}) && claude --dangerously-skip-permissions \"$prompt\" && rm -f {}",
-        projects_dir.display(), prompt_path.display(), prompt_path.display(),
+        projects_dir.display(),
+        prompt_path.display(),
+        prompt_path.display(),
     );
 
-    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     orrch_core::windows::spawn_in_category(
         orrch_core::windows::SessionCategory::Proc,
         &format!("fix-{}", ts % 100000),
@@ -8279,7 +9441,7 @@ fn tmux_spawn_session(session_name: &str, runner_path: &Path) -> anyhow::Result<
 }
 
 fn default_projects_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     PathBuf::from(home).join("projects")
 }
 
@@ -8322,10 +9484,17 @@ fn scan_md_dir(dir: &Path) -> Vec<(String, PathBuf)> {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "md") {
                 let name = if let Ok(content) = std::fs::read_to_string(&path) {
-                    extract_md_name(&content)
-                        .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string())
+                    extract_md_name(&content).unwrap_or_else(|| {
+                        path.file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                    })
                 } else {
-                    path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+                    path.file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
                 };
                 items.push((name, path));
             }
@@ -8352,7 +9521,11 @@ pub fn scan_skills_dir_filtered(dir: &Path) -> Vec<(String, PathBuf)> {
 /// menu. Checks YAML frontmatter `internal: true` first; falls back to a
 /// stem-pattern match for back-compat.
 fn is_internal_skill_path(path: &Path) -> bool {
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
+    let stem = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
     // Pattern fallback — covers files that haven't yet had `internal: true`
     // appended to their frontmatter.
     if stem.starts_with("agent-") || stem == "develop-feature" || stem == "develop-aio" {
@@ -8405,27 +9578,27 @@ fn extract_md_name(content: &str) -> Option<String> {
     let mut h2: Option<String> = None;
     for line in content.lines() {
         let t = line.trim();
-        if h1.is_none() {
-            if let Some(h) = t.strip_prefix("# ") {
-                if !h.starts_with('#') {
-                    let heading = h.trim();
-                    if !heading.is_empty() {
-                        h1 = Some(heading.to_string());
-                    }
-                }
+        if h1.is_none()
+            && let Some(h) = t.strip_prefix("# ")
+            && !h.starts_with('#')
+        {
+            let heading = h.trim();
+            if !heading.is_empty() {
+                h1 = Some(heading.to_string());
             }
         }
-        if h2.is_none() {
-            if let Some(h) = t.strip_prefix("## ") {
-                if !h.starts_with('#') {
-                    let heading = h.trim();
-                    if !heading.is_empty() {
-                        h2 = Some(heading.to_string());
-                    }
-                }
+        if h2.is_none()
+            && let Some(h) = t.strip_prefix("## ")
+            && !h.starts_with('#')
+        {
+            let heading = h.trim();
+            if !heading.is_empty() {
+                h2 = Some(heading.to_string());
             }
         }
-        if h1.is_some() { break; } // h1 is best, stop early
+        if h1.is_some() {
+            break;
+        } // h1 is best, stop early
     }
 
     h1.or(h2)
@@ -8471,7 +9644,7 @@ fn spawn_feedback_processor(
 /// OPT-014: Convert a snake/kebab-case filename stem into a human-readable
 /// Title Case name (e.g. `project_manager` → `Project Manager`).
 fn title_case_from_stem(stem: &str) -> String {
-    stem.split(|c: char| c == '_' || c == '-')
+    stem.split(['_', '-'])
         .filter(|w| !w.is_empty())
         .map(|w| {
             let mut chars = w.chars();
@@ -8576,17 +9749,28 @@ fn update_agent_cross_references(
                         return line.to_string();
                     }
                     let cells: Vec<&str> = line.split('|').collect();
-                    let new_cells: Vec<String> = cells.iter().map(|c| {
-                        if c.trim() == old_display_name {
-                            changed = true;
-                            // Preserve any leading/trailing spaces inside the cell.
-                            let leading_ws: String = c.chars().take_while(|ch| ch.is_whitespace()).collect();
-                            let trailing_ws: String = c.chars().rev().take_while(|ch| ch.is_whitespace()).collect::<String>().chars().rev().collect();
-                            format!("{leading_ws}{new_display_name}{trailing_ws}")
-                        } else {
-                            c.to_string()
-                        }
-                    }).collect();
+                    let new_cells: Vec<String> = cells
+                        .iter()
+                        .map(|c| {
+                            if c.trim() == old_display_name {
+                                changed = true;
+                                // Preserve any leading/trailing spaces inside the cell.
+                                let leading_ws: String =
+                                    c.chars().take_while(|ch| ch.is_whitespace()).collect();
+                                let trailing_ws: String = c
+                                    .chars()
+                                    .rev()
+                                    .take_while(|ch| ch.is_whitespace())
+                                    .collect::<String>()
+                                    .chars()
+                                    .rev()
+                                    .collect();
+                                format!("{leading_ws}{new_display_name}{trailing_ws}")
+                            } else {
+                                c.to_string()
+                            }
+                        })
+                        .collect();
                     new_cells.join("|")
                 })
                 .collect::<Vec<_>>()
@@ -8632,22 +9816,31 @@ mod app_tests {
             return;
         }
         let filtered = scan_skills_dir_filtered(&skills_dir);
-        let names: Vec<&str> = filtered.iter().map(|(_, p)| {
-            p.file_stem().and_then(|s| s.to_str()).unwrap_or("")
-        }).collect();
+        let names: Vec<&str> = filtered
+            .iter()
+            .map(|(_, p)| p.file_stem().and_then(|s| s.to_str()).unwrap_or(""))
+            .collect();
         // T8 acceptance: agent-pm and develop-feature must NOT appear.
-        assert!(!names.iter().any(|n| *n == "agent-pm"),
-            "agent-pm should be filtered; got: {names:?}");
-        assert!(!names.iter().any(|n| *n == "develop-feature"),
-            "develop-feature should be filtered; got: {names:?}");
-        assert!(!names.iter().any(|n| *n == "develop-aio"),
-            "develop-aio should be filtered; got: {names:?}");
+        assert!(
+            !names.contains(&"agent-pm"),
+            "agent-pm should be filtered; got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"develop-feature"),
+            "develop-feature should be filtered; got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"develop-aio"),
+            "develop-aio should be filtered; got: {names:?}"
+        );
         // Non-internal skills (e.g. release, scope) MUST still appear.
         // Only assert positive presence if those skills exist on disk.
         for expected in ["release", "scope"] {
             if skills_dir.join(format!("{expected}.md")).exists() {
-                assert!(names.iter().any(|n| *n == expected),
-                    "non-internal '{expected}' skill must still appear; got: {names:?}");
+                assert!(
+                    names.contains(&expected),
+                    "non-internal '{expected}' skill must still appear; got: {names:?}"
+                );
             }
         }
     }
@@ -8662,35 +9855,50 @@ mod app_tests {
 
     #[test]
     fn tmux_spec_for_ctrl_letter() {
-        let spec = key_to_tmux_spec(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        ).unwrap();
+        let spec = key_to_tmux_spec(KeyCode::Char('c'), KeyModifiers::CONTROL).unwrap();
         assert_eq!(spec, "C-c");
         // Uppercase letter under Ctrl should still send lowercase form.
-        let spec = key_to_tmux_spec(
-            KeyCode::Char('C'),
-            KeyModifiers::CONTROL,
-        ).unwrap();
+        let spec = key_to_tmux_spec(KeyCode::Char('C'), KeyModifiers::CONTROL).unwrap();
         assert_eq!(spec, "C-c");
     }
 
     #[test]
     fn tmux_spec_for_alt_combos() {
         let spec = key_to_tmux_spec(KeyCode::Char('x'), KeyModifiers::ALT).unwrap();
-        assert_eq!(spec, "LITERAL:x", "alt+printable still goes literal — tmux uses M- prefix only with named keys via send-keys");
+        assert_eq!(
+            spec, "LITERAL:x",
+            "alt+printable still goes literal — tmux uses M- prefix only with named keys via send-keys"
+        );
         let spec = key_to_tmux_spec(KeyCode::Up, KeyModifiers::ALT).unwrap();
         assert_eq!(spec, "M-Up");
     }
 
     #[test]
     fn tmux_spec_for_special_keys() {
-        assert_eq!(key_to_tmux_spec(KeyCode::Enter, KeyModifiers::NONE).unwrap(), "Enter");
-        assert_eq!(key_to_tmux_spec(KeyCode::Tab, KeyModifiers::NONE).unwrap(), "Tab");
-        assert_eq!(key_to_tmux_spec(KeyCode::Backspace, KeyModifiers::NONE).unwrap(), "BSpace");
-        assert_eq!(key_to_tmux_spec(KeyCode::Esc, KeyModifiers::NONE).unwrap(), "Escape");
-        assert_eq!(key_to_tmux_spec(KeyCode::F(5), KeyModifiers::NONE).unwrap(), "F5");
-        assert_eq!(key_to_tmux_spec(KeyCode::PageUp, KeyModifiers::NONE).unwrap(), "PPage");
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::Enter, KeyModifiers::NONE).unwrap(),
+            "Enter"
+        );
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::Tab, KeyModifiers::NONE).unwrap(),
+            "Tab"
+        );
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::Backspace, KeyModifiers::NONE).unwrap(),
+            "BSpace"
+        );
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::Esc, KeyModifiers::NONE).unwrap(),
+            "Escape"
+        );
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::F(5), KeyModifiers::NONE).unwrap(),
+            "F5"
+        );
+        assert_eq!(
+            key_to_tmux_spec(KeyCode::PageUp, KeyModifiers::NONE).unwrap(),
+            "PPage"
+        );
     }
 
     #[test]
@@ -8700,7 +9908,10 @@ mod app_tests {
         let spec = key_to_tmux_spec(KeyCode::Char('A'), KeyModifiers::SHIFT).unwrap();
         assert_eq!(spec, "LITERAL:A");
         let spec = key_to_tmux_spec(KeyCode::Char('~'), KeyModifiers::NONE).unwrap();
-        assert_eq!(spec, "LITERAL:~", "tilde must go through -l mode to avoid tmux interpretation");
+        assert_eq!(
+            spec, "LITERAL:~",
+            "tilde must go through -l mode to avoid tmux interpretation"
+        );
     }
 
     #[test]
@@ -8746,11 +9957,17 @@ mod app_tests {
 
     #[test]
     fn title_case_from_stem_snake_and_kebab() {
-        assert_eq!(super::title_case_from_stem("project_manager"), "Project Manager");
+        assert_eq!(
+            super::title_case_from_stem("project_manager"),
+            "Project Manager"
+        );
         assert_eq!(super::title_case_from_stem("ui-designer"), "Ui Designer");
         assert_eq!(super::title_case_from_stem("solo"), "Solo");
         assert_eq!(super::title_case_from_stem(""), "");
-        assert_eq!(super::title_case_from_stem("__leading_underscore"), "Leading Underscore");
+        assert_eq!(
+            super::title_case_from_stem("__leading_underscore"),
+            "Leading Underscore"
+        );
     }
 
     #[test]
@@ -8761,7 +9978,10 @@ mod app_tests {
         std::fs::write(&path, original).unwrap();
         super::update_frontmatter_name(&path, "New Name").expect("rewrite ok");
         let after = std::fs::read_to_string(&path).unwrap();
-        assert!(after.contains("name: New Name"), "expected new name, got:\n{after}");
+        assert!(
+            after.contains("name: New Name"),
+            "expected new name, got:\n{after}"
+        );
         assert!(!after.contains("name: Old Name"));
         assert!(after.contains("role: Foo"));
         assert!(after.contains("body text"));
@@ -8790,7 +10010,8 @@ mod app_tests {
         std::fs::write(
             &agent_path,
             "---\nname: Old Agent\nrole: Test\n---\n\nbody\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         // Workforce that references the old agent name.
         let wf_path = orrch.join("workforces").join("test_team.md");
@@ -8810,21 +10031,26 @@ A sentence mentioning Old Agent in prose should be left alone.
 ";
         std::fs::write(&wf_path, wf_content).unwrap();
 
-        super::update_agent_cross_references(
-            &agent_path,
-            "Old Agent",
-            "Foo Bar",
-            &projects_dir,
-        ).expect("cross-ref ok");
+        super::update_agent_cross_references(&agent_path, "Old Agent", "Foo Bar", &projects_dir)
+            .expect("cross-ref ok");
 
         // Agent file's `name:` is rewritten.
         let agent_after = std::fs::read_to_string(&agent_path).unwrap();
-        assert!(agent_after.contains("name: Foo Bar"), "agent name: not rewritten:\n{agent_after}");
+        assert!(
+            agent_after.contains("name: Foo Bar"),
+            "agent name: not rewritten:\n{agent_after}"
+        );
 
         // Workforce table cell is rewritten, prose line is NOT.
         let wf_after = std::fs::read_to_string(&wf_path).unwrap();
-        assert!(wf_after.contains("| a1 | Foo Bar | yes |"), "table cell not rewritten:\n{wf_after}");
-        assert!(wf_after.contains("| a2 | Other Person | no |"), "unrelated row clobbered:\n{wf_after}");
+        assert!(
+            wf_after.contains("| a1 | Foo Bar | yes |"),
+            "table cell not rewritten:\n{wf_after}"
+        );
+        assert!(
+            wf_after.contains("| a2 | Other Person | no |"),
+            "unrelated row clobbered:\n{wf_after}"
+        );
         assert!(
             wf_after.contains("A sentence mentioning Old Agent in prose"),
             "prose mention of Old Agent should not be rewritten:\n{wf_after}",

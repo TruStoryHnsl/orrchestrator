@@ -23,9 +23,8 @@ fn free_port() -> u16 {
 }
 
 fn write_self_signed(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
-    let cert =
-        rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])
-            .expect("generate cert");
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])
+        .expect("generate cert");
     let cert_path = dir.join("fullchain.pem");
     let key_path = dir.join("privkey.pem");
     std::fs::write(&cert_path, cert.cert.pem()).expect("write cert");
@@ -139,7 +138,7 @@ async fn auth_via_query_param_succeeds_via_proxy_simulation() {
     let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
     let resp = reqwest::Client::new()
-        .get(&format!("http://127.0.0.1:{port}/?token=super-secret"))
+        .get(format!("http://127.0.0.1:{port}/?token=super-secret"))
         .send()
         .await
         .expect("request");
@@ -205,24 +204,15 @@ async fn config_from_env_parses_trusted_cidrs() {
     use orrch_webui::Cidr;
     let _g = env_lock();
     unsafe {
-        std::env::set_var(
-            "ORRCH_WEBUI_TRUSTED_CIDRS",
-            "100.64.0.0/10, 192.168.1.0/24",
-        );
+        std::env::set_var("ORRCH_WEBUI_TRUSTED_CIDRS", "100.64.0.0/10, 192.168.1.0/24");
         std::env::set_var("ORRCH_WEBUI_BIND", "0.0.0.0");
     }
 
     let cfg = WebUiConfig::from_env();
     assert_eq!(cfg.local_bind, "0.0.0.0");
     assert_eq!(cfg.trusted_cidrs.len(), 2);
-    assert_eq!(
-        cfg.trusted_cidrs[0],
-        Cidr::parse("100.64.0.0/10").unwrap(),
-    );
-    assert_eq!(
-        cfg.trusted_cidrs[1],
-        Cidr::parse("192.168.1.0/24").unwrap(),
-    );
+    assert_eq!(cfg.trusted_cidrs[0], Cidr::parse("100.64.0.0/10").unwrap(),);
+    assert_eq!(cfg.trusted_cidrs[1], Cidr::parse("192.168.1.0/24").unwrap(),);
 
     unsafe {
         std::env::remove_var("ORRCH_WEBUI_TRUSTED_CIDRS");
@@ -244,7 +234,9 @@ async fn config_from_env_skips_invalid_trusted_cidrs() {
     // Only the valid CIDR survives; the garbage entries are dropped.
     assert_eq!(cfg.trusted_cidrs.len(), 1);
 
-    unsafe { std::env::remove_var("ORRCH_WEBUI_TRUSTED_CIDRS"); }
+    unsafe {
+        std::env::remove_var("ORRCH_WEBUI_TRUSTED_CIDRS");
+    }
 }
 
 #[tokio::test]
@@ -269,7 +261,7 @@ async fn server_starts_on_zero_zero_zero_zero() {
     let _srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
     let resp = reqwest::Client::new()
-        .get(&format!("http://127.0.0.1:{port}/"))
+        .get(format!("http://127.0.0.1:{port}/"))
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -295,15 +287,21 @@ async fn dual_http_listeners_serve_same_router() {
     let srv = WebUiServer::start_with_config(cfg).await.expect("start");
 
     // public_http_url should be populated with the bound address.
-    assert!(srv.public_http_url.is_some(), "public_http_url should be set");
+    assert!(
+        srv.public_http_url.is_some(),
+        "public_http_url should be set"
+    );
     let public_url = srv.public_http_url.clone().unwrap();
-    assert!(public_url.starts_with("http://"), "expected http:// prefix, got {public_url}");
+    assert!(
+        public_url.starts_with("http://"),
+        "expected http:// prefix, got {public_url}"
+    );
 
     let client = reqwest::Client::new();
 
     // Local listener — always on.
     let local_resp = client
-        .get(&format!("http://127.0.0.1:{local_port}/"))
+        .get(format!("http://127.0.0.1:{local_port}/"))
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -312,7 +310,7 @@ async fn dual_http_listeners_serve_same_router() {
 
     // Public listener — same router, same content.
     let public_resp = client
-        .get(&format!("http://127.0.0.1:{public_port}/"))
+        .get(format!("http://127.0.0.1:{public_port}/"))
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -343,7 +341,7 @@ async fn public_http_listener_honors_auth_token() {
     let client = reqwest::Client::new();
     // Loopback bypass — both listeners must return 200 even without token.
     let local_resp = client
-        .get(&format!("http://127.0.0.1:{local_port}/"))
+        .get(format!("http://127.0.0.1:{local_port}/"))
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -351,7 +349,7 @@ async fn public_http_listener_honors_auth_token() {
     assert_eq!(local_resp.status(), 200);
 
     let public_resp = client
-        .get(&format!("http://127.0.0.1:{public_port}/"))
+        .get(format!("http://127.0.0.1:{public_port}/"))
         .timeout(Duration::from_secs(5))
         .send()
         .await

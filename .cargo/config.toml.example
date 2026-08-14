@@ -6,15 +6,16 @@
 #      a debug rebuild on a multi-crate workspace).
 
 [build]
-# Ryzen 7 3700X = 8 logical cores. Cap codegen jobs at 6 so two cores stay
-# free for the editor / running TUI while cargo-watch rebuilds. Remove this
-# line (or raise it) for fastest possible CI/release builds.
+# Cap codegen jobs so some cores stay free for the editor / running TUI
+# while cargo-watch rebuilds. Tune to your core count; remove for fastest
+# CI/release builds.
 jobs = 6
 
 [target.x86_64-unknown-linux-gnu]
 # clang + mold: mold is the fastest linker available and dramatically beats
 # the default GNU bfd ld on this multi-crate workspace's link step.
-# Both installed on this box (/usr/bin/clang, /usr/bin/mold 2.41).
+# Requires clang + mold on PATH. Copy this file to .cargo/config.toml to
+# enable it locally; without it, cargo uses the default toolchain/linker.
 # Fallback: if mold is ever missing, swap `-fuse-ld=mold` for `-fuse-ld=lld`.
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]

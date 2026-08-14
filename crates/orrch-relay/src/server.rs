@@ -5,8 +5,8 @@ use crate::clock::SystemClock;
 use crate::engine::{Engine, OpenAiEngine};
 use crate::scheduler::{Scheduler, SchedulerPolicy};
 use crate::worker::Worker;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -47,11 +47,19 @@ impl RelayConfig {
 
 /// Build state and the worker (not yet spawned).
 pub fn build_state(cfg: &RelayConfig) -> RelayState {
-    let embedder: Arc<dyn Embedder> =
-        Arc::new(OllamaEmbedder::new(cfg.embedder_url.clone(), cfg.embedder_model.clone()));
-    let engine: Arc<dyn Engine> =
-        Arc::new(OpenAiEngine::new(cfg.engine_url.clone(), cfg.engine_key.clone()));
+    let embedder: Arc<dyn Embedder> = Arc::new(OllamaEmbedder::new(
+        cfg.embedder_url.clone(),
+        cfg.embedder_model.clone(),
+    ));
+    let engine: Arc<dyn Engine> = Arc::new(OpenAiEngine::new(
+        cfg.engine_url.clone(),
+        cfg.engine_key.clone(),
+    ));
     let sched = Arc::new(Mutex::new(Scheduler::new(cfg.policy.clone(), SystemClock)));
     let worker = Arc::new(Worker::new(sched, engine));
-    RelayState { embedder, worker, next_id: Arc::new(AtomicU64::new(0)) }
+    RelayState {
+        embedder,
+        worker,
+        next_id: Arc::new(AtomicU64::new(0)),
+    }
 }

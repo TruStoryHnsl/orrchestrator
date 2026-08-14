@@ -1,5 +1,5 @@
 use crate::model::{EventRecord, LibraryRow};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
 
 /// Insert (or replace) one event row.
@@ -29,7 +29,14 @@ pub fn insert_library_item(conn: &Connection, row: &LibraryRow) -> rusqlite::Res
     conn.execute(
         "INSERT OR REPLACE INTO library_items \
          (kind, name, description, tags, path, body_hash) VALUES (?1,?2,?3,?4,?5,?6)",
-        params![row.kind, row.name, row.description, row.tags.join(","), row.path, row.body_hash],
+        params![
+            row.kind,
+            row.name,
+            row.description,
+            row.tags.join(","),
+            row.path,
+            row.body_hash
+        ],
     )?;
     // Keep the content-table FTS index in sync. We insert using the rowid of
     // the library_items row so FTS5 can resolve content back from the table.
@@ -43,8 +50,16 @@ pub fn insert_library_item(conn: &Connection, row: &LibraryRow) -> rusqlite::Res
 
 /// Record a source file's mtime + content hash so incremental rebuilds can
 /// skip unchanged files.
-pub fn record_source_file(conn: &Connection, path: &str, mtime: i64, content: &str) -> rusqlite::Result<()> {
-    let hash: String = Sha256::digest(content.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+pub fn record_source_file(
+    conn: &Connection,
+    path: &str,
+    mtime: i64,
+    content: &str,
+) -> rusqlite::Result<()> {
+    let hash: String = Sha256::digest(content.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     conn.execute(
         "INSERT OR REPLACE INTO source_files (path, mtime, hash) VALUES (?1,?2,?3)",
         params![path, mtime, hash],
@@ -77,9 +92,11 @@ mod tests {
         init_schema(&conn).unwrap();
         insert_event(&conn, &sample_event()).unwrap();
         let (kind, eid): (String, String) = conn
-            .query_row("SELECT kind, entity_id FROM events WHERE id='e1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT kind, entity_id FROM events WHERE id='e1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(kind, "bug_opened");
         assert_eq!(eid, "b1");
@@ -102,7 +119,11 @@ mod tests {
         )
         .unwrap();
         let hits: i64 = conn
-            .query_row("SELECT count(*) FROM library_fts WHERE library_fts MATCH 'review'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM library_fts WHERE library_fts MATCH 'review'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(hits, 1);
     }

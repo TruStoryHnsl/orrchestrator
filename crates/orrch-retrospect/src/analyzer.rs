@@ -63,18 +63,30 @@ pub fn analyze_ecosystem(projects_dir: &Path) -> EcosystemAnalysis {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() { continue; }
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        if name.starts_with('.') || name == "deprecated" { continue; }
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if name.starts_with('.') || name == "deprecated" {
+            continue;
+        }
 
         let retrospect_dir = path.join(".retrospect");
-        if !retrospect_dir.exists() { continue; }
+        if !retrospect_dir.exists() {
+            continue;
+        }
 
         projects_scanned += 1;
         let mut store = ErrorStore::new(&path);
         let stats = store.stats();
 
-        if stats.total_occurrences == 0 { continue; }
+        if stats.total_occurrences == 0 {
+            continue;
+        }
 
         total_errors += stats.total_occurrences;
 
@@ -82,14 +94,21 @@ pub fn analyze_ecosystem(projects_dir: &Path) -> EcosystemAnalysis {
         let records = load_all_records(&path);
         let mut fp_groups: HashMap<String, Vec<&ErrorRecord>> = HashMap::new();
         for rec in &records {
-            fp_groups.entry(rec.fingerprint.clone()).or_default().push(rec);
+            fp_groups
+                .entry(rec.fingerprint.clone())
+                .or_default()
+                .push(rec);
         }
 
         let mut recurring = Vec::new();
         for (fp, recs) in &fp_groups {
             let first = recs[0];
             let resolved = recs.iter().any(|r| r.resolved);
-            let resolution = recs.iter().rev().find(|r| r.resolved).and_then(|r| r.resolution.clone());
+            let resolution = recs
+                .iter()
+                .rev()
+                .find(|r| r.resolved)
+                .and_then(|r| r.resolution.clone());
 
             *category_counts.entry(first.category).or_insert(0) += recs.len();
 
@@ -105,15 +124,17 @@ pub fn analyze_ecosystem(projects_dir: &Path) -> EcosystemAnalysis {
             recurring.push(class.clone());
 
             // Track cross-project patterns
-            let global = global_fp_map.entry(fp.clone()).or_insert_with(|| ErrorClass {
-                category: first.category,
-                fingerprint: fp.clone(),
-                sample_context: first.raw_context.chars().take(200).collect(),
-                occurrence_count: 0,
-                resolved,
-                resolution,
-                seen_in_projects: Vec::new(),
-            });
+            let global = global_fp_map
+                .entry(fp.clone())
+                .or_insert_with(|| ErrorClass {
+                    category: first.category,
+                    fingerprint: fp.clone(),
+                    sample_context: first.raw_context.chars().take(200).collect(),
+                    occurrence_count: 0,
+                    resolved,
+                    resolution,
+                    seen_in_projects: Vec::new(),
+                });
             global.occurrence_count += recs.len();
             if !global.seen_in_projects.contains(&name) {
                 global.seen_in_projects.push(name.clone());
@@ -132,9 +153,14 @@ pub fn analyze_ecosystem(projects_dir: &Path) -> EcosystemAnalysis {
         let mut resolution_times = Vec::new();
         for recs in fp_groups.values() {
             let first_time = recs.iter().map(|r| r.timestamp).fold(f64::MAX, f64::min);
-            if let Some(res) = recs.iter().find(|r| r.resolved && r.resolution_timestamp.is_some()) {
+            if let Some(res) = recs
+                .iter()
+                .find(|r| r.resolved && r.resolution_timestamp.is_some())
+            {
                 let rt = res.resolution_timestamp.unwrap() - first_time;
-                if rt > 0.0 { resolution_times.push(rt); }
+                if rt > 0.0 {
+                    resolution_times.push(rt);
+                }
             }
         }
         let avg_resolution_time = if resolution_times.is_empty() {
@@ -155,7 +181,8 @@ pub fn analyze_ecosystem(projects_dir: &Path) -> EcosystemAnalysis {
     }
 
     // Filter cross-project patterns: fingerprints seen in 2+ projects
-    let cross_project: Vec<ErrorClass> = global_fp_map.into_values()
+    let cross_project: Vec<ErrorClass> = global_fp_map
+        .into_values()
         .filter(|c| c.seen_in_projects.len() >= 2)
         .collect();
 
@@ -178,7 +205,8 @@ fn load_all_records(project_dir: &Path) -> Vec<ErrorRecord> {
     let Ok(contents) = std::fs::read_to_string(&store_path) else {
         return Vec::new();
     };
-    contents.lines()
+    contents
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| serde_json::from_str::<ErrorRecord>(l).ok())
         .collect()

@@ -25,11 +25,18 @@ pub struct TeeWriter<W: Write> {
 
 impl<W: Write> TeeWriter<W> {
     pub fn new(local: W, tx: broadcast::Sender<Vec<u8>>, max_pending: usize) -> Self {
-        Self { local, tx, pending: Vec::with_capacity(4096), max_pending }
+        Self {
+            local,
+            tx,
+            pending: Vec::with_capacity(4096),
+            max_pending,
+        }
     }
 
     fn broadcast_pending(&mut self) {
-        if self.pending.is_empty() { return; }
+        if self.pending.is_empty() {
+            return;
+        }
         let receivers = self.tx.receiver_count();
         let len = self.pending.len();
         let payload = std::mem::replace(&mut self.pending, Vec::with_capacity(4096));

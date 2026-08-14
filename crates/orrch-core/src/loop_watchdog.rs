@@ -85,19 +85,35 @@ impl Default for WatchdogConfig {
 pub enum LoopHealth {
     Healthy,
     /// A session has gone silent past the liveness timeout (sid + stale-for ns).
-    Hung { sid: String, stale_nanos: u128 },
+    Hung {
+        sid: String,
+        stale_nanos: u128,
+    },
     /// No PLAN/commit progress across M windows.
-    Stuck { no_progress_windows: u32 },
+    Stuck {
+        no_progress_windows: u32,
+    },
     /// Spawn→die churn without progress (restart storm / retry storm).
-    Thrash { spawns: u32, deaths: u32 },
+    Thrash {
+        spawns: u32,
+        deaths: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Intervention {
     /// Kill the named hung session and let the controller re-spawn (LOOP-004).
-    KillRestart { loop_id: String, sid: String, reason: String },
+    KillRestart {
+        loop_id: String,
+        sid: String,
+        reason: String,
+    },
     /// Apply exponential back-off before the loop may spawn again.
-    BackOff { loop_id: String, wait: std::time::Duration, reason: String },
+    BackOff {
+        loop_id: String,
+        wait: std::time::Duration,
+        reason: String,
+    },
     /// Pause the loop with a diagnosed fault (drives controller → Paused).
     PauseWithFault { loop_id: String, fault: String },
     /// Surface to the user — beyond autonomous remediation.
@@ -119,7 +135,11 @@ pub struct LoopWatchdog<C: Clock> {
 
 impl<C: Clock> LoopWatchdog<C> {
     pub fn new(config: WatchdogConfig, clock: std::sync::Arc<C>) -> Self {
-        Self { config, clock, intervention_streak: HashMap::new() }
+        Self {
+            config,
+            clock,
+            intervention_streak: HashMap::new(),
+        }
     }
 
     /// Classify one loop's health from its view + the current clock. Pure given
@@ -129,11 +149,13 @@ impl<C: Clock> LoopWatchdog<C> {
         // Liveness: any live (non-dead) session silent past T.
         let mut worst: Option<(String, u128)> = None;
         for s in &lv.sessions {
-            if s.dead { continue; }
+            if s.dead {
+                continue;
+            }
             let last = s.last_output.unwrap_or(s.spawned_at);
             let stale = now.0.saturating_sub(last.0);
             if stale > self.config.liveness_timeout.as_nanos()
-                && worst.as_ref().map_or(true, |(_, w)| stale > *w)
+                && worst.as_ref().is_none_or(|(_, w)| stale > *w)
             {
                 worst = Some((s.sid.clone(), stale));
             }
@@ -147,11 +169,16 @@ impl<C: Clock> LoopWatchdog<C> {
             && lv.plan_items_checked_in_window == 0
             && lv.commits_in_window == 0
         {
-            return LoopHealth::Thrash { spawns: lv.spawns_in_window, deaths: lv.deaths_in_window };
+            return LoopHealth::Thrash {
+                spawns: lv.spawns_in_window,
+                deaths: lv.deaths_in_window,
+            };
         }
         // Stuck: M consecutive no-progress windows.
         if lv.no_progress_windows >= self.config.stuck_windows {
-            return LoopHealth::Stuck { no_progress_windows: lv.no_progress_windows };
+            return LoopHealth::Stuck {
+                no_progress_windows: lv.no_progress_windows,
+            };
         }
         LoopHealth::Healthy
     }
@@ -180,34 +207,55 @@ impl<C: Clock> LoopWatchdog<C> {
                     // Escalation ladder per consecutive intervention:
                     //   1 → BackOff, 2 → PauseWithFault, ≥3 → Escalate.
                     let streak = self.bump(&lv.loop_id);
-                    let fault = format!("restart storm: {spawns} spawn / {deaths} die, no progress");
+                    let fault =
+                        format!("restart storm: {spawns} spawn / {deaths} die, no progress");
                     match streak {
                         1 => Some(Intervention::BackOff {
                             loop_id: lv.loop_id.clone(),
                             wait: self.backoff(streak),
                             reason: fault,
                         }),
-                        2 => Some(Intervention::PauseWithFault { loop_id: lv.loop_id.clone(), fault }),
-                        _ => Some(Intervention::Escalate { loop_id: lv.loop_id.clone(), fault }),
+                        2 => Some(Intervention::PauseWithFault {
+                            loop_id: lv.loop_id.clone(),
+                            fault,
+                        }),
+                        _ => Some(Intervention::Escalate {
+                            loop_id: lv.loop_id.clone(),
+                            fault,
+                        }),
                     }
                 }
-                LoopHealth::Stuck { no_progress_windows } => {
+                LoopHealth::Stuck {
+                    no_progress_windows,
+                } => {
                     let streak = self.bump(&lv.loop_id);
                     let fault = format!("no progress across {no_progress_windows} windows");
                     if streak <= 1 {
-                        Some(Intervention::BackOff { loop_id: lv.loop_id.clone(), wait: self.backoff(streak), reason: fault })
+                        Some(Intervention::BackOff {
+                            loop_id: lv.loop_id.clone(),
+                            wait: self.backoff(streak),
+                            reason: fault,
+                        })
                     } else {
-                        Some(Intervention::PauseWithFault { loop_id: lv.loop_id.clone(), fault })
+                        Some(Intervention::PauseWithFault {
+                            loop_id: lv.loop_id.clone(),
+                            fault,
+                        })
                     }
                 }
             };
-            if let Some(i) = intervention { out.push(i); }
+            if let Some(i) = intervention {
+                out.push(i);
+            }
         }
         out
     }
 
     fn bump(&mut self, loop_id: &str) -> u32 {
-        let e = self.intervention_streak.entry(loop_id.to_string()).or_insert(0);
+        let e = self
+            .intervention_streak
+            .entry(loop_id.to_string())
+            .or_insert(0);
         *e += 1;
         *e
     }
@@ -236,7 +284,12 @@ mod tests {
     }
 
     fn healthy_session(sid: &str, last_output: Tstamp) -> SessionView {
-        SessionView { sid: sid.into(), last_output: Some(last_output), spawned_at: Tstamp(0), dead: false }
+        SessionView {
+            sid: sid.into(),
+            last_output: Some(last_output),
+            spawned_at: Tstamp(0),
+            dead: false,
+        }
     }
 
     // (1) A live session whose last output is older than the liveness timeout
@@ -245,7 +298,8 @@ mod tests {
     fn stale_session_is_hung_and_killed_restarted() {
         let cfg = WatchdogConfig::default(); // liveness_timeout = 600s
         // now = liveness + 1s. last_output = 0 => stale = liveness + 1s > T.
-        let now_ns = cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
+        let now_ns =
+            cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
         let clock = clock_at(now_ns);
         let mut wd = LoopWatchdog::new(cfg, clock);
 
@@ -261,7 +315,10 @@ mod tests {
 
         // classify
         match wd.classify(&lv) {
-            LoopHealth::Hung { ref sid, stale_nanos } => {
+            LoopHealth::Hung {
+                ref sid,
+                stale_nanos,
+            } => {
                 assert_eq!(sid, "S1");
                 assert!(stale_nanos > cfg.liveness_timeout.as_nanos());
             }
@@ -272,7 +329,11 @@ mod tests {
         let out = wd.evaluate(&WatchdogView { loops: vec![lv] });
         assert_eq!(out.len(), 1);
         match &out[0] {
-            Intervention::KillRestart { loop_id, sid, reason } => {
+            Intervention::KillRestart {
+                loop_id,
+                sid,
+                reason,
+            } => {
                 assert_eq!(loop_id, "L1");
                 assert_eq!(sid, "S1");
                 assert!(reason.contains("no output"));
@@ -285,7 +346,8 @@ mod tests {
     #[test]
     fn fresh_session_not_hung() {
         let cfg = WatchdogConfig::default();
-        let now_ns = cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
+        let now_ns =
+            cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
         let clock = clock_at(now_ns);
         let wd = LoopWatchdog::new(cfg, clock);
 
@@ -306,7 +368,8 @@ mod tests {
     #[test]
     fn dead_session_excluded_from_liveness() {
         let cfg = WatchdogConfig::default();
-        let now_ns = cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
+        let now_ns =
+            cfg.liveness_timeout.as_nanos() as u64 + Duration::from_secs(1).as_nanos() as u64;
         let clock = clock_at(now_ns);
         let wd = LoopWatchdog::new(cfg, clock);
 
@@ -353,9 +416,15 @@ mod tests {
         }
 
         // 1st evaluate => BackOff carrying a fault reason, wait = base * 2^0.
-        let out = wd.evaluate(&WatchdogView { loops: vec![thrash("L1")] });
+        let out = wd.evaluate(&WatchdogView {
+            loops: vec![thrash("L1")],
+        });
         match &out[0] {
-            Intervention::BackOff { loop_id, wait, reason } => {
+            Intervention::BackOff {
+                loop_id,
+                wait,
+                reason,
+            } => {
                 assert_eq!(loop_id, "L1");
                 assert_eq!(*wait, cfg.backoff_base);
                 assert!(reason.contains("restart storm"));
@@ -364,7 +433,9 @@ mod tests {
         }
 
         // 2nd consecutive => PauseWithFault.
-        let out = wd.evaluate(&WatchdogView { loops: vec![thrash("L1")] });
+        let out = wd.evaluate(&WatchdogView {
+            loops: vec![thrash("L1")],
+        });
         match &out[0] {
             Intervention::PauseWithFault { loop_id, fault } => {
                 assert_eq!(loop_id, "L1");
@@ -374,7 +445,9 @@ mod tests {
         }
 
         // 3rd consecutive => Escalate.
-        let out = wd.evaluate(&WatchdogView { loops: vec![thrash("L1")] });
+        let out = wd.evaluate(&WatchdogView {
+            loops: vec![thrash("L1")],
+        });
         match &out[0] {
             Intervention::Escalate { loop_id, .. } => assert_eq!(loop_id, "L1"),
             other => panic!("expected Escalate, got {other:?}"),
@@ -392,7 +465,7 @@ mod tests {
             loop_id: "L1".into(),
             sessions: vec![],
             spawns_in_window: 5,
-            deaths_in_window: 5, // high churn...
+            deaths_in_window: 5,             // high churn...
             plan_items_checked_in_window: 1, // ...but progress happened
             commits_in_window: 0,
             no_progress_windows: 0,
@@ -419,7 +492,10 @@ mod tests {
         };
         assert_eq!(wd.classify(&lv), LoopHealth::Healthy);
         let out = wd.evaluate(&WatchdogView { loops: vec![lv] });
-        assert!(out.is_empty(), "healthy loop must emit no interventions, got {out:?}");
+        assert!(
+            out.is_empty(),
+            "healthy loop must emit no interventions, got {out:?}"
+        );
     }
 
     // Stuck: M consecutive no-progress windows => BackOff then PauseWithFault.
@@ -441,12 +517,18 @@ mod tests {
 
         assert_eq!(
             wd.classify(&stuck("L1")),
-            LoopHealth::Stuck { no_progress_windows: 5 }
+            LoopHealth::Stuck {
+                no_progress_windows: 5
+            }
         );
 
-        let out = wd.evaluate(&WatchdogView { loops: vec![stuck("L1")] });
+        let out = wd.evaluate(&WatchdogView {
+            loops: vec![stuck("L1")],
+        });
         assert!(matches!(out[0], Intervention::BackOff { .. }));
-        let out = wd.evaluate(&WatchdogView { loops: vec![stuck("L1")] });
+        let out = wd.evaluate(&WatchdogView {
+            loops: vec![stuck("L1")],
+        });
         assert!(matches!(out[0], Intervention::PauseWithFault { .. }));
     }
 
@@ -478,11 +560,18 @@ mod tests {
 
         // streak -> 1 (BackOff)
         assert!(matches!(
-            wd.evaluate(&WatchdogView { loops: vec![stuck.clone()] })[0],
+            wd.evaluate(&WatchdogView {
+                loops: vec![stuck.clone()]
+            })[0],
             Intervention::BackOff { .. }
         ));
         // healthy resets streak
-        assert!(wd.evaluate(&WatchdogView { loops: vec![healthy] }).is_empty());
+        assert!(
+            wd.evaluate(&WatchdogView {
+                loops: vec![healthy]
+            })
+            .is_empty()
+        );
         // back to stuck => streak restarts at 1 => BackOff again, not Pause
         assert!(matches!(
             wd.evaluate(&WatchdogView { loops: vec![stuck] })[0],

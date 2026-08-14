@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::context_location::{artifact_path, Artifact};
+use crate::context_location::{Artifact, artifact_path};
 
 #[derive(Debug, Default, Clone)]
 pub struct MigrationReport {
@@ -43,14 +43,14 @@ fn migrate_one(artifact: Artifact, legacy: PathBuf, report: &mut MigrationReport
             // Fix 2: canonical present + legacy present + byte-equal → interrupted migration;
             // complete the deferred rename so the next run is fully clean.
             let backup = migrated_backup_path(&legacy);
-            if !backup.exists() {
-                if let Err(err) = std::fs::rename(&legacy, &backup) {
-                    tracing::warn!(
-                        "context migration: deferred rename failed {} → {}: {err}",
-                        legacy.display(),
-                        backup.display()
-                    );
-                }
+            if !backup.exists()
+                && let Err(err) = std::fs::rename(&legacy, &backup)
+            {
+                tracing::warn!(
+                    "context migration: deferred rename failed {} → {}: {err}",
+                    legacy.display(),
+                    backup.display()
+                );
             }
             report.skipped += 1;
         } else {
@@ -63,15 +63,15 @@ fn migrate_one(artifact: Artifact, legacy: PathBuf, report: &mut MigrationReport
         return;
     }
 
-    if let Some(parent) = canonical.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                "context migration: could not create canonical parent {}: {err}",
-                parent.display()
-            );
-            report.skipped += 1;
-            return;
-        }
+    if let Some(parent) = canonical.parent()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!(
+            "context migration: could not create canonical parent {}: {err}",
+            parent.display()
+        );
+        report.skipped += 1;
+        return;
     }
 
     if let Err(err) = std::fs::copy(&legacy, &canonical) {
@@ -141,14 +141,14 @@ fn migrated_backup_path(path: &Path) -> PathBuf {
 
 fn append_manifest_line(artifact: Artifact, legacy: &Path, canonical: &Path, backup: &Path) {
     let log_path = crate::config::data_dir().join("context_migration.log");
-    if let Some(parent) = log_path.parent() {
-        if let Err(err) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                "context migration: could not create log parent {}: {err}",
-                parent.display()
-            );
-            return;
-        }
+    if let Some(parent) = log_path.parent()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!(
+            "context migration: could not create log parent {}: {err}",
+            parent.display()
+        );
+        return;
     }
 
     let line = format!(
@@ -247,9 +247,11 @@ mod tests {
             std::fs::read(migrated_backup_path(&legacy)).unwrap(),
             br#"[{"id":"one"}]"#
         );
-        assert!(crate::config::data_dir()
-            .join("context_migration.log")
-            .exists());
+        assert!(
+            crate::config::data_dir()
+                .join("context_migration.log")
+                .exists()
+        );
     }
 
     #[test]
@@ -326,7 +328,10 @@ mod tests {
         // Now simulate what Fix 1 actually does (removing the bad canonical):
         // removing canonical unblocks the next migrate_context() run so it retries cleanly.
         std::fs::remove_file(&canonical).unwrap();
-        assert!(!canonical.exists(), "canonical removed — simulating Fix 1 cleanup");
+        assert!(
+            !canonical.exists(),
+            "canonical removed — simulating Fix 1 cleanup"
+        );
 
         // Next run should migrate successfully from the still-intact legacy.
         let report2 = migrate_context();
@@ -367,7 +372,10 @@ mod tests {
         // Fix 2 must have completed the deferred rename.
         let backup = migrated_backup_path(&legacy);
         assert!(backup.exists(), "legacy must be renamed to .migrated.bak");
-        assert!(!legacy.exists(), "original legacy path must be gone after rename");
+        assert!(
+            !legacy.exists(),
+            "original legacy path must be gone after rename"
+        );
 
         // Canonical must be untouched.
         assert_eq!(

@@ -45,10 +45,7 @@ pub fn hide_context(project_dir: &Path) -> io::Result<HideReport> {
         if existing != body {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!(
-                    "refusing to clobber differing {}",
-                    claude_hidden.display()
-                ),
+                format!("refusing to clobber differing {}", claude_hidden.display()),
             ));
         }
     }
@@ -181,8 +178,16 @@ mod tests {
         );
         assert!(!proj.path().join("PLAN.md").exists());
         assert!(proj.path().join(".orrch/PLAN.md").exists());
-        assert!(rep.moved.iter().any(|p| p == &PathBuf::from(".orrch/PLAN.md")));
-        assert!(rep.moved.iter().any(|p| p == &PathBuf::from(".orrch/DEVLOG.md")));
+        assert!(
+            rep.moved
+                .iter()
+                .any(|p| p == &PathBuf::from(".orrch/PLAN.md"))
+        );
+        assert!(
+            rep.moved
+                .iter()
+                .any(|p| p == &PathBuf::from(".orrch/DEVLOG.md"))
+        );
 
         let rev = reveal_context(proj.path()).unwrap();
         assert!(!rev.already_hidden);

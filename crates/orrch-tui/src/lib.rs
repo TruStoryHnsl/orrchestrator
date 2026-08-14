@@ -10,4 +10,4 @@ pub mod ui;
 pub use app::{App, SubView};
 pub use brand::{LOGO_PNG, PALETTE as BRAND_PALETTE};
 pub use egui_window::launch_egui_window;
-pub use orrch_webedit::{launch_webedit_server, ServerHandle as WebeditServerHandle};
+pub use orrch_webedit::{ServerHandle as WebeditServerHandle, launch_webedit_server};

@@ -139,8 +139,8 @@ impl WebUiConfig {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(DEFAULT_TLS_PORT);
-                let bind = std::env::var("ORRCH_WEBUI_TLS_BIND")
-                    .unwrap_or_else(|_| "0.0.0.0".to_string());
+                let bind =
+                    std::env::var("ORRCH_WEBUI_TLS_BIND").unwrap_or_else(|_| "0.0.0.0".to_string());
                 Some(TlsConfig {
                     cert_path: PathBuf::from(cert),
                     key_path: PathBuf::from(key),
@@ -286,10 +286,13 @@ impl WebUiServer {
         // HTTP listener. Default bind is 127.0.0.1 (operator-only); set
         // `ORRCH_WEBUI_BIND` to expose on other interfaces (e.g. tailnet).
         // Auth bypass for the bound host is governed by `trusted_cidrs`.
-        let bind_ip: std::net::IpAddr = cfg.local_bind.parse()
+        let bind_ip: std::net::IpAddr = cfg
+            .local_bind
+            .parse()
             .with_context(|| format!("invalid ORRCH_WEBUI_BIND: {}", cfg.local_bind))?;
         let local_addr = SocketAddr::new(bind_ip, cfg.local_port);
-        let listener = tokio::net::TcpListener::bind(local_addr).await
+        let listener = tokio::net::TcpListener::bind(local_addr)
+            .await
             .with_context(|| format!("WebUI HTTP bind failed on {local_addr}"))?;
         let actual_port = listener.local_addr()?.port();
 
@@ -299,7 +302,9 @@ impl WebUiServer {
                 listener,
                 local_router.into_make_service_with_connect_info::<SocketAddr>(),
             )
-            .with_graceful_shutdown(async { let _ = shutdown_rx.await; })
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
             .await
             .ok();
         });
@@ -311,9 +316,11 @@ impl WebUiServer {
         // (canonical port for a tailnet/LAN domain) at once.
         let public_http_url = if let Some(public_http) = cfg.public_http.clone() {
             let bind_str = format!("{}:{}", public_http.bind, public_http.port);
-            let bind_addr: SocketAddr = bind_str.parse()
+            let bind_addr: SocketAddr = bind_str
+                .parse()
                 .with_context(|| format!("invalid public-http bind addr: {bind_str}"))?;
-            let public_listener = tokio::net::TcpListener::bind(bind_addr).await
+            let public_listener = tokio::net::TcpListener::bind(bind_addr)
+                .await
                 .with_context(|| format!("WebUI public-HTTP bind failed on {bind_addr}"))?;
             let public_addr = public_listener.local_addr()?;
 
@@ -343,17 +350,19 @@ impl WebUiServer {
             let _ = rustls::crypto::ring::default_provider().install_default();
 
             let bind_str = format!("{}:{}", tls.bind, tls.port);
-            let bind_addr: SocketAddr = bind_str.parse()
+            let bind_addr: SocketAddr = bind_str
+                .parse()
                 .with_context(|| format!("invalid TLS bind addr: {bind_str}"))?;
-            let rustls_cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(
-                &tls.cert_path,
-                &tls.key_path,
-            )
-            .await
-            .with_context(|| format!(
-                "loading TLS cert/key from {} and {}",
-                tls.cert_path.display(), tls.key_path.display()
-            ))?;
+            let rustls_cfg =
+                axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert_path, &tls.key_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "loading TLS cert/key from {} and {}",
+                            tls.cert_path.display(),
+                            tls.key_path.display()
+                        )
+                    })?;
 
             let tls_router = router.clone();
             tokio::spawn(async move {
@@ -366,7 +375,11 @@ impl WebUiServer {
             });
             tracing::info!("WebUI TLS listening on https://{bind_addr}");
 
-            Some(cfg.public_url.clone().unwrap_or_else(|| format!("https://{bind_addr}")))
+            Some(
+                cfg.public_url
+                    .clone()
+                    .unwrap_or_else(|| format!("https://{bind_addr}")),
+            )
         } else {
             // No TLS configured: public_url, if set, still gets surfaced
             // (e.g. when the user has put a separate reverse proxy in front
@@ -396,7 +409,8 @@ impl WebUiServer {
     /// Consume and return the "new client connected" flag, if set.
     /// The main loop calls this every tick; if true it forces a full redraw.
     pub fn take_redraw_request(&self) -> bool {
-        self.redraw_flag.swap(false, std::sync::atomic::Ordering::Relaxed)
+        self.redraw_flag
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn update_state(&self, state: WebAppState) {
@@ -404,7 +418,8 @@ impl WebUiServer {
     }
 
     pub fn drain_actions(&self) -> Vec<WebAction> {
-        self.action_queue.lock()
+        self.action_queue
+            .lock()
             .map(|mut q| q.drain(..).collect())
             .unwrap_or_default()
     }
@@ -412,7 +427,9 @@ impl WebUiServer {
     /// Drain all pending keystrokes from WebUI clients (non-blocking).
     /// Returns a Vec of byte sequences — each sequence is one keypress or paste.
     pub fn drain_input(&self) -> Vec<Vec<u8>> {
-        let Ok(mut rx) = self.input_rx.lock() else { return Vec::new(); };
+        let Ok(mut rx) = self.input_rx.lock() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         while let Ok(bytes) = rx.try_recv() {
             out.push(bytes);

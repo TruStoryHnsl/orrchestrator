@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::assets;
 use crate::shell::ShellBridge;
-use crate::state::{state_hash, WebAction, WebAppState};
+use crate::state::{WebAction, WebAppState, state_hash};
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -184,14 +184,19 @@ async fn auth_middleware(
         // Set a cookie if the token came in via query string so subsequent
         // requests can omit it. SameSite=Lax + HttpOnly + Secure on https.
         let scheme_is_https = req.uri().scheme_str() == Some("https")
-            || req.headers().get("x-forwarded-proto")
-                .and_then(|v| v.to_str().ok()) == Some("https");
+            || req
+                .headers()
+                .get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok())
+                == Some("https");
         let mut response = next.run(req).await;
         if scheme_is_https {
             // Best-effort cookie set — drop on header insertion failure.
             if let Ok(cookie) = format!(
                 "orrch_token={token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000"
-            ).parse() {
+            )
+            .parse()
+            {
                 response.headers_mut().append(header::SET_COOKIE, cookie);
             }
         }
@@ -215,21 +220,27 @@ fn is_loopback(ip: IpAddr) -> bool {
 
 fn request_has_token(req: &Request<axum::body::Body>, expected: &str) -> bool {
     // Authorization: Bearer <token>
-    if let Some(h) = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
-        if let Some(rest) = h.strip_prefix("Bearer ") {
-            if constant_time_eq(rest.trim(), expected) {
-                return true;
-            }
-        }
+    if let Some(h) = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        && let Some(rest) = h.strip_prefix("Bearer ")
+        && constant_time_eq(rest.trim(), expected)
+    {
+        return true;
     }
     // Cookie: orrch_token=<token>
-    if let Some(cookies) = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+    if let Some(cookies) = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+    {
         for piece in cookies.split(';') {
             let kv = piece.trim();
-            if let Some(value) = kv.strip_prefix("orrch_token=") {
-                if constant_time_eq(value, expected) {
-                    return true;
-                }
+            if let Some(value) = kv.strip_prefix("orrch_token=")
+                && constant_time_eq(value, expected)
+            {
+                return true;
             }
         }
     }
@@ -281,20 +292,41 @@ fn percent_decode(input: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
-
 // `/` serves the terminal mirror — that's the primary, reliable 1-to-1
 // TUI display. The native UI is secondary at `/ui`.
-async fn serve_index() -> impl IntoResponse { html(assets::TERMINAL_HTML) }
-async fn serve_landing() -> impl IntoResponse { html(assets::INDEX_HTML) }
-async fn serve_terminal() -> impl IntoResponse { html(assets::TERMINAL_HTML) }
-async fn serve_ui() -> impl IntoResponse { html(assets::UI_HTML) }
-async fn serve_main_css() -> impl IntoResponse { css(assets::MAIN_CSS) }
-async fn serve_ws_js() -> impl IntoResponse { js(assets::WS_JS) }
-async fn serve_layout_js() -> impl IntoResponse { js(assets::LAYOUT_JS) }
-async fn serve_intentions_js() -> impl IntoResponse { js(assets::INTENTIONS_JS) }
-async fn serve_sessions_js() -> impl IntoResponse { js(assets::SESSIONS_JS) }
-async fn serve_mobile_js() -> impl IntoResponse { js(assets::MOBILE_JS) }
-async fn serve_shell_js() -> impl IntoResponse { js(assets::SHELL_JS) }
+async fn serve_index() -> impl IntoResponse {
+    html(assets::TERMINAL_HTML)
+}
+async fn serve_landing() -> impl IntoResponse {
+    html(assets::INDEX_HTML)
+}
+async fn serve_terminal() -> impl IntoResponse {
+    html(assets::TERMINAL_HTML)
+}
+async fn serve_ui() -> impl IntoResponse {
+    html(assets::UI_HTML)
+}
+async fn serve_main_css() -> impl IntoResponse {
+    css(assets::MAIN_CSS)
+}
+async fn serve_ws_js() -> impl IntoResponse {
+    js(assets::WS_JS)
+}
+async fn serve_layout_js() -> impl IntoResponse {
+    js(assets::LAYOUT_JS)
+}
+async fn serve_intentions_js() -> impl IntoResponse {
+    js(assets::INTENTIONS_JS)
+}
+async fn serve_sessions_js() -> impl IntoResponse {
+    js(assets::SESSIONS_JS)
+}
+async fn serve_mobile_js() -> impl IntoResponse {
+    js(assets::MOBILE_JS)
+}
+async fn serve_shell_js() -> impl IntoResponse {
+    js(assets::SHELL_JS)
+}
 
 /// Terminal WebSocket: streams TUI output (broadcast bytes) to the client
 /// and receives keystrokes back.
@@ -317,7 +349,8 @@ async fn terminal_ws_handler(socket: WebSocket, srv: ServerState) {
 
     // Signal the main loop to emit a full redraw so this new client sees
     // the current screen rather than whatever partial diffs come next.
-    srv.redraw_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    srv.redraw_flag
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 
     // Outbound: TUI broadcast → WebSocket
     let send_task = tokio::spawn(async move {
@@ -326,11 +359,7 @@ async fn terminal_ws_handler(socket: WebSocket, srv: ServerState) {
             match term_rx.recv().await {
                 Ok(chunk) => {
                     bytes_sent += chunk.len();
-                    tracing::info!(
-                        "WS send {} bytes (total {})",
-                        chunk.len(),
-                        bytes_sent
-                    );
+                    tracing::info!("WS send {} bytes (total {})", chunk.len(), bytes_sent);
                     if ws_sink.send(Message::Binary(chunk.into())).await.is_err() {
                         tracing::warn!("WS send failed, disconnecting");
                         break;
@@ -356,7 +385,9 @@ async fn terminal_ws_handler(socket: WebSocket, srv: ServerState) {
         while let Some(Ok(msg)) = ws_stream.next().await {
             match msg {
                 Message::Binary(bytes) => {
-                    if input_tx.send(bytes.to_vec()).is_err() { break; }
+                    if input_tx.send(bytes.to_vec()).is_err() {
+                        break;
+                    }
                 }
                 Message::Close(_) => break,
                 _ => {} // ignore Text, Ping, Pong
@@ -381,19 +412,25 @@ async fn state_ws_handler(mut socket: WebSocket, srv: ServerState) {
     // Send initial state unconditionally
     let snapshot = rx.borrow_and_update().clone();
     let mut last_hash = state_hash(&snapshot);
-    if let Ok(json) = serde_json::to_string(&snapshot) {
-        if socket.send(Message::Text(json.into())).await.is_err() { return; }
+    if let Ok(json) = serde_json::to_string(&snapshot)
+        && socket.send(Message::Text(json.into())).await.is_err()
+    {
+        return;
     }
 
     // Then watch for changes
     loop {
-        if rx.changed().await.is_err() { return; }
+        if rx.changed().await.is_err() {
+            return;
+        }
         let snapshot = rx.borrow_and_update().clone();
         let hash = state_hash(&snapshot);
         if hash != last_hash {
             last_hash = hash;
-            if let Ok(json) = serde_json::to_string(&snapshot) {
-                if socket.send(Message::Text(json.into())).await.is_err() { return; }
+            if let Ok(json) = serde_json::to_string(&snapshot)
+                && socket.send(Message::Text(json.into())).await.is_err()
+            {
+                return;
             }
         }
     }
@@ -523,7 +560,8 @@ async fn get_shell_size(State(srv): State<ServerState>) -> impl IntoResponse {
             (header::CACHE_CONTROL, "no-store"),
         ],
         body.to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 /// `POST /shell/resize` body: `{"cols": N, "rows": N}`.
@@ -554,7 +592,8 @@ async fn post_shell_resize(
             (header::CACHE_CONTROL, "no-store"),
         ],
         body.to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 async fn get_size(State(srv): State<ServerState>) -> impl IntoResponse {
@@ -566,14 +605,15 @@ async fn get_size(State(srv): State<ServerState>) -> impl IntoResponse {
             (header::CACHE_CONTROL, "no-store"),
         ],
         body.to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 async fn handle_action(State(srv): State<ServerState>, Json(body): Json<Value>) -> StatusCode {
-    if let Ok(action) = serde_json::from_value::<WebAction>(body) {
-        if let Ok(mut q) = srv.action_queue.lock() {
-            q.push_back(action);
-        }
+    if let Ok(action) = serde_json::from_value::<WebAction>(body)
+        && let Ok(mut q) = srv.action_queue.lock()
+    {
+        q.push_back(action);
     }
     StatusCode::OK
 }
@@ -585,7 +625,8 @@ fn html(s: &'static str) -> Response {
             (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
         ],
         s,
-    ).into_response()
+    )
+        .into_response()
 }
 fn css(s: &'static str) -> Response {
     (
@@ -594,7 +635,8 @@ fn css(s: &'static str) -> Response {
             (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
         ],
         s,
-    ).into_response()
+    )
+        .into_response()
 }
 fn js(s: &'static str) -> Response {
     (
@@ -603,9 +645,9 @@ fn js(s: &'static str) -> Response {
             (header::CACHE_CONTROL, "no-store, no-cache, must-revalidate"),
         ],
         s,
-    ).into_response()
+    )
+        .into_response()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -695,13 +737,13 @@ mod tests {
     #[test]
     fn cidr_tailnet_cgnat_contains_typical_addrs() {
         let cidr = Cidr::parse("100.64.0.0/10").unwrap();
-        // Real Tailscale-assigned IPs from this tailnet
+        // Addresses inside the Tailscale CGNAT range must match.
+        assert!(cidr.contains("100.64.0.1".parse().unwrap()));
+        assert!(cidr.contains("100.100.100.100".parse().unwrap()));
         assert!(cidr.contains("100.64.0.2".parse().unwrap()));
-        assert!(cidr.contains("100.64.0.2".parse().unwrap()));
-        assert!(cidr.contains("100.64.0.2".parse().unwrap()));
-        // Public IP must not match
+        // A public IP outside the range must not match.
         assert!(!cidr.contains("203.0.113.10".parse().unwrap()));
-        // LAN IP must not match
+        // A LAN IP must not match.
         assert!(!cidr.contains("192.168.1.10".parse().unwrap()));
     }
 

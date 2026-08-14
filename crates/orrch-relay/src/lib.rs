@@ -1,14 +1,14 @@
 //! orrch-relay — MoE-aware, affinity-batched inference scheduler.
 pub mod affinity;
-pub mod metrics;
 pub mod clock;
 pub mod engine;
 pub mod gateway;
+pub mod metrics;
+pub mod runner;
 pub mod scheduler;
 pub mod server;
 pub mod types;
 pub mod worker;
-pub mod runner;
 pub use types::*;
 
 /// Start the relay: build state, spawn worker, serve the gateway. Returns when

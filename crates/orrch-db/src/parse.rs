@@ -30,7 +30,10 @@ pub fn parse_event(content: &str, project: &str) -> Option<EventRecord> {
     }
     let note = body.trim();
     if !note.is_empty() {
-        payload.insert("note".to_string(), serde_json::Value::String(note.to_string()));
+        payload.insert(
+            "note".to_string(),
+            serde_json::Value::String(note.to_string()),
+        );
     }
 
     Some(EventRecord {
@@ -71,7 +74,12 @@ PLAN.md lines starting with a green-circle emoji panic the slicer.";
         assert_eq!(ev.session_id.as_deref(), Some("T8"));
         assert_eq!(ev.payload["severity"], "high");
         assert_eq!(ev.payload["title"], "Parser crashes on 4-byte emoji");
-        assert!(ev.payload["note"].as_str().unwrap().contains("green-circle"));
+        assert!(
+            ev.payload["note"]
+                .as_str()
+                .unwrap()
+                .contains("green-circle")
+        );
     }
 
     #[test]

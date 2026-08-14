@@ -38,20 +38,26 @@ fn mtime_secs(path: &Path) -> i64 {
 }
 
 fn project_slug(dir: &Path) -> String {
-    dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()
+    dir.file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default()
 }
 
 /// Ingest one project's `.orrch/events/*.md` into the connection.
 fn ingest_project_events(conn: &Connection, dir: &Path) -> rusqlite::Result<()> {
     let slug = project_slug(dir);
     let events_dir = dir.join(".orrch").join("events");
-    let Ok(entries) = fs::read_dir(&events_dir) else { return Ok(()); };
+    let Ok(entries) = fs::read_dir(&events_dir) else {
+        return Ok(());
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|e| e != "md") {
             continue;
         }
-        let Ok(content) = fs::read_to_string(&path) else { continue };
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
         if let Some(ev) = parse_event(&content, &slug) {
             insert_event(conn, &ev)?;
         }
@@ -64,14 +70,20 @@ fn ingest_project_events(conn: &Connection, dir: &Path) -> rusqlite::Result<()> 
 fn ingest_library(conn: &Connection, root: &Path) -> rusqlite::Result<()> {
     for (kind, subdir) in LIBRARY_KINDS {
         let dir = root.join(subdir);
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_none_or(|e| e != "md") {
                 continue;
             }
-            let Ok(content) = fs::read_to_string(&path) else { continue };
-            let Some((fm, body)) = parse_frontmatter_pub(&content) else { continue };
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some((fm, body)) = parse_frontmatter_pub(&content) else {
+                continue;
+            };
             let name = match extract_field_pub(&fm, "name") {
                 Some(n) => n,
                 None => continue,
@@ -82,7 +94,10 @@ fn ingest_library(conn: &Connection, root: &Path) -> rusqlite::Result<()> {
                 description: extract_field_pub(&fm, "description").unwrap_or_default(),
                 tags: extract_list_pub(&fm, "tags"),
                 path: path.to_string_lossy().to_string(),
-                body_hash: Sha256::digest(body.as_bytes()).iter().map(|b| format!("{b:02x}")).collect(),
+                body_hash: Sha256::digest(body.as_bytes())
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect(),
             };
             insert_library_item(conn, &row)?;
             record_source_file(conn, &path.to_string_lossy(), mtime_secs(&path), &content)?;
@@ -136,14 +151,19 @@ mod tests {
         let db = tmp.path().join("orrch.db");
         let conn = rebuild_all(
             &db,
-            &RebuildSources { project_dirs: vec![proj], library_root: lib },
+            &RebuildSources {
+                project_dirs: vec![proj],
+                library_root: lib,
+            },
         )
         .unwrap();
 
         let (status, title): (String, String) = conn
-            .query_row("SELECT status, title FROM bugs WHERE bug_id='b1'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT status, title FROM bugs WHERE bug_id='b1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!(status, "open");
         assert_eq!(title, "Boom");
@@ -155,10 +175,15 @@ mod tests {
         let db = tmp.path().join("orrch.db");
         let conn = rebuild_all(
             &db,
-            &RebuildSources { project_dirs: vec![], library_root: tmp.path().join("nope") },
+            &RebuildSources {
+                project_dirs: vec![],
+                library_root: tmp.path().join("nope"),
+            },
         )
         .unwrap();
-        let n: i64 = conn.query_row("SELECT count(*) FROM events", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM events", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 0);
     }
 }

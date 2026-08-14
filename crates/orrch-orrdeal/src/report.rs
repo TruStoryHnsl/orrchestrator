@@ -5,12 +5,26 @@ use crate::registry::{Registry, Target, TargetStatus};
 fn caps_summary(t: &Target) -> String {
     let c = &t.capabilities;
     let mut on = Vec::new();
-    if c.camera { on.push("cam"); }
-    if c.mic { on.push("mic"); }
-    if c.gpu { on.push("gpu"); }
-    if c.filesystem { on.push("fs"); }
-    if c.public_web_host { on.push("web-host"); }
-    if on.is_empty() { "-".into() } else { on.join("+") }
+    if c.camera {
+        on.push("cam");
+    }
+    if c.mic {
+        on.push("mic");
+    }
+    if c.gpu {
+        on.push("gpu");
+    }
+    if c.filesystem {
+        on.push("fs");
+    }
+    if c.public_web_host {
+        on.push("web-host");
+    }
+    if on.is_empty() {
+        "-".into()
+    } else {
+        on.join("+")
+    }
 }
 
 fn status_mark(s: TargetStatus) -> &'static str {

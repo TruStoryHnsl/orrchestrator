@@ -57,11 +57,7 @@ impl SolutionTracker {
             .push(text.to_string());
 
         let now = Instant::now();
-        let last_err = self
-            .last_error_time
-            .get(session_id)
-            .copied()
-            .unwrap_or(now);
+        let last_err = self.last_error_time.get(session_id).copied().unwrap_or(now);
 
         if now.duration_since(last_err).as_secs_f64() < self.resolution_cooldown_secs {
             return Vec::new();
@@ -82,8 +78,9 @@ impl SolutionTracker {
 
         if let Some(pending) = self.pending.remove(session_id) {
             for (fp, _) in pending {
-                let resolution =
-                    format!("Auto-resolved after continued output. Post-error context:\n{truncated}");
+                let resolution = format!(
+                    "Auto-resolved after continued output. Post-error context:\n{truncated}"
+                );
                 store.mark_resolved(&fp, &resolution);
                 resolved_fps.push(fp);
             }

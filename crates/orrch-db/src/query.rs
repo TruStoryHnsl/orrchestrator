@@ -16,7 +16,11 @@ pub fn library_items_by_kind(conn: &Connection, kind: &str) -> rusqlite::Result<
                 kind: r.get(0)?,
                 name: r.get(1)?,
                 description: r.get(2)?,
-                tags: if tags.is_empty() { vec![] } else { tags.split(',').map(|s| s.to_string()).collect() },
+                tags: if tags.is_empty() {
+                    vec![]
+                } else {
+                    tags.split(',').map(|s| s.to_string()).collect()
+                },
                 path: r.get(4)?,
                 body_hash: r.get(5)?,
             })
@@ -40,7 +44,11 @@ pub fn library_search(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Li
                 kind: r.get(0)?,
                 name: r.get(1)?,
                 description: r.get(2)?,
-                tags: if tags.is_empty() { vec![] } else { tags.split(',').map(|s| s.to_string()).collect() },
+                tags: if tags.is_empty() {
+                    vec![]
+                } else {
+                    tags.split(',').map(|s| s.to_string()).collect()
+                },
                 path: r.get(4)?,
                 body_hash: r.get(5)?,
             })
@@ -75,9 +83,9 @@ pub fn open_bugs(conn: &Connection, project: &str) -> rusqlite::Result<Vec<BugRo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fold::fold_bugs;
     use crate::ingest::{insert_event, insert_library_item};
     use crate::model::{EntityType, EventKind, EventRecord, LibraryRow};
-    use crate::fold::fold_bugs;
     use crate::schema::init_schema;
 
     fn db() -> Connection {
@@ -89,11 +97,18 @@ mod tests {
     #[test]
     fn search_finds_library_item() {
         let conn = db();
-        insert_library_item(&conn, &LibraryRow {
-            kind: "skill".into(), name: "release".into(),
-            description: "create a SemVer release".into(),
-            tags: vec!["versioning".into()], path: "/r.md".into(), body_hash: "h".into(),
-        }).unwrap();
+        insert_library_item(
+            &conn,
+            &LibraryRow {
+                kind: "skill".into(),
+                name: "release".into(),
+                description: "create a SemVer release".into(),
+                tags: vec!["versioning".into()],
+                path: "/r.md".into(),
+                body_hash: "h".into(),
+            },
+        )
+        .unwrap();
         let hits = library_search(&conn, "SemVer").unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "release");
@@ -103,15 +118,48 @@ mod tests {
     fn open_bugs_excludes_resolved() {
         let conn = db();
         let mk = |id: &str, eid: &str, ts: &str, k: EventKind, p: serde_json::Value| EventRecord {
-            id: id.into(), project: "p".into(), ts: ts.into(), kind: k,
-            entity_type: EntityType::Bug, entity_id: eid.into(), session_id: None, payload: p,
+            id: id.into(),
+            project: "p".into(),
+            ts: ts.into(),
+            kind: k,
+            entity_type: EntityType::Bug,
+            entity_id: eid.into(),
+            session_id: None,
+            payload: p,
         };
-        insert_event(&conn, &mk("1", "open1", "2026-01-01T00:00:00Z", EventKind::BugOpened,
-            serde_json::json!({"title":"A","severity":"low"}))).unwrap();
-        insert_event(&conn, &mk("2", "done1", "2026-01-01T00:00:00Z", EventKind::BugOpened,
-            serde_json::json!({"title":"B","severity":"low"}))).unwrap();
-        insert_event(&conn, &mk("3", "done1", "2026-01-02T00:00:00Z", EventKind::BugResolved,
-            serde_json::json!({"resolution":"fixed"}))).unwrap();
+        insert_event(
+            &conn,
+            &mk(
+                "1",
+                "open1",
+                "2026-01-01T00:00:00Z",
+                EventKind::BugOpened,
+                serde_json::json!({"title":"A","severity":"low"}),
+            ),
+        )
+        .unwrap();
+        insert_event(
+            &conn,
+            &mk(
+                "2",
+                "done1",
+                "2026-01-01T00:00:00Z",
+                EventKind::BugOpened,
+                serde_json::json!({"title":"B","severity":"low"}),
+            ),
+        )
+        .unwrap();
+        insert_event(
+            &conn,
+            &mk(
+                "3",
+                "done1",
+                "2026-01-02T00:00:00Z",
+                EventKind::BugResolved,
+                serde_json::json!({"resolution":"fixed"}),
+            ),
+        )
+        .unwrap();
         fold_bugs(&conn).unwrap();
 
         let open = open_bugs(&conn, "p").unwrap();

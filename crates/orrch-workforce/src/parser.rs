@@ -1,5 +1,5 @@
 use crate::operation::{Operation, Step, TriggerCondition};
-use crate::template::{Workforce, AgentNode, Connection, DataFlow, Team, TeamRef, TeamStep};
+use crate::template::{AgentNode, Connection, DataFlow, Team, TeamRef, TeamStep, Workforce};
 
 /// Parse YAML frontmatter delimited by `---` lines.
 /// Returns (frontmatter_text, body_text).
@@ -133,7 +133,12 @@ pub fn parse_workforce_markdown(content: &str) -> Option<Workforce> {
         // Skip header/separator rows in pipe tables. Detect by "---" (separator),
         // by header keywords for the active section, or by leading `|` with a
         // header-like first cell ("Order", "ID", "From").
-        if trimmed.starts_with('|') && (trimmed.contains("---") || trimmed.contains("ID") || trimmed.contains("From") || trimmed.contains("Order")) {
+        if trimmed.starts_with('|')
+            && (trimmed.contains("---")
+                || trimmed.contains("ID")
+                || trimmed.contains("From")
+                || trimmed.contains("Order"))
+        {
             continue;
         }
 
@@ -283,7 +288,11 @@ pub fn parse_team_markdown(content: &str) -> Option<Team> {
                     let user_facing = parts[2].to_lowercase() == "yes";
                     let nested_workforce = if parts.len() >= 4 {
                         let v = parts[3].trim();
-                        if v.is_empty() || v == "-" { None } else { Some(v.to_string()) }
+                        if v.is_empty() || v == "-" {
+                            None
+                        } else {
+                            Some(v.to_string())
+                        }
                     } else {
                         None
                     };
@@ -301,7 +310,11 @@ pub fn parse_team_markdown(content: &str) -> Option<Team> {
                     let to = parts[1].to_string();
                     let data_type = parse_data_flow(parts[2]);
                     if !from.is_empty() {
-                        connections.push(Connection { from, to, data_type });
+                        connections.push(Connection {
+                            from,
+                            to,
+                            data_type,
+                        });
                     }
                 }
                 Section::Steps if parts.len() >= 4 => {
@@ -316,7 +329,12 @@ pub fn parse_team_markdown(content: &str) -> Option<Team> {
                     };
                     let operation = parts[3..].join(" | ").to_string();
                     if !index.is_empty() && !agent.is_empty() {
-                        steps.push(TeamStep { index, agent, tool_or_skill: tool, operation });
+                        steps.push(TeamStep {
+                            index,
+                            agent,
+                            tool_or_skill: tool,
+                            operation,
+                        });
                     }
                 }
                 _ => {}
@@ -356,7 +374,11 @@ pub fn serialize_team_markdown(team: &Team) -> String {
     for a in &team.agents {
         let uf = if a.user_facing { "yes" } else { "no" };
         let nested = a.nested_workforce.as_deref().unwrap_or("-");
-        let _ = writeln!(out, "| {} | {} | {} | {} |", a.id, a.agent_profile, uf, nested);
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            a.id, a.agent_profile, uf, nested
+        );
     }
     out.push('\n');
 
@@ -364,7 +386,13 @@ pub fn serialize_team_markdown(team: &Team) -> String {
     out.push_str("| From | To | Data Type |\n");
     out.push_str("|------|----|-----------|\n");
     for c in &team.connections {
-        let _ = writeln!(out, "| {} | {} | {} |", c.from, c.to, data_flow_token(&c.data_type));
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} |",
+            c.from,
+            c.to,
+            data_flow_token(&c.data_type)
+        );
     }
     out.push('\n');
 
@@ -373,7 +401,11 @@ pub fn serialize_team_markdown(team: &Team) -> String {
     out.push_str("|-------|-------|------------|-----------|\n");
     for s in &team.steps {
         let tool = s.tool_or_skill.as_deref().unwrap_or("*");
-        let _ = writeln!(out, "| {} | {} | {} | {} |", s.index, s.agent, tool, s.operation);
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            s.index, s.agent, tool, s.operation
+        );
     }
 
     if !team.summary.is_empty() {
@@ -501,16 +533,10 @@ pub fn serialize_operation_markdown(op: &Operation) -> String {
 
     // Step rows
     for step in &op.steps {
-        let tool = step
-            .tool_or_skill
-            .as_deref()
-            .unwrap_or("*");
+        let tool = step.tool_or_skill.as_deref().unwrap_or("*");
 
         if has_model_col {
-            let model = step
-                .model_override
-                .as_deref()
-                .unwrap_or("-");
+            let model = step.model_override.as_deref().unwrap_or("-");
             let _ = writeln!(
                 out,
                 "{} | {} | {} | {} | {}",
@@ -606,20 +632,24 @@ pub fn parse_operation_markdown(content: &str) -> Option<Operation> {
         let trimmed = line.trim();
 
         // Extract operation name from ## heading
-        if let Some(heading) = trimmed.strip_prefix("## ") {
-            if !heading.starts_with('#') {
-                name = heading.trim().to_string();
-                continue;
-            }
+        if let Some(heading) = trimmed.strip_prefix("## ")
+            && !heading.starts_with('#')
+        {
+            name = heading.trim().to_string();
+            continue;
         }
 
         // Extract trigger
         if let Some(trigger_text) = trimmed.strip_prefix("Trigger:") {
             let t = trigger_text.trim();
             if t.contains("user submits") || t.contains("user submit") {
-                trigger = TriggerCondition::UserSubmit { input_type: "prompt".into() };
+                trigger = TriggerCondition::UserSubmit {
+                    input_type: "prompt".into(),
+                };
             } else if t.contains("unprocessed instructions") || t.contains("inbox") {
-                trigger = TriggerCondition::InboxNotEmpty { project: "*".into() };
+                trigger = TriggerCondition::InboxNotEmpty {
+                    project: "*".into(),
+                };
             } else {
                 trigger = TriggerCondition::Manual;
             }
@@ -672,10 +702,11 @@ pub fn parse_operation_markdown(content: &str) -> Option<Operation> {
         }
 
         // End of steps section
-        if in_steps && (trimmed.starts_with("Interrupts:") || trimmed.is_empty() && !steps.is_empty()) {
-            if trimmed.starts_with("Interrupts:") {
-                in_steps = false;
-            }
+        if in_steps
+            && (trimmed.starts_with("Interrupts:") || trimmed.is_empty() && !steps.is_empty())
+            && trimmed.starts_with("Interrupts:")
+        {
+            in_steps = false;
         }
     }
 
@@ -734,37 +765,56 @@ mod tests {
     #[test]
     fn test_intake_bugreport_operation_parses() {
         let path = workspace_root().join("operations/intake_bugreport.md");
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
-        let op = parse_operation_markdown(&content)
-            .expect("intake_bugreport.md must parse");
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+        let op = parse_operation_markdown(&content).expect("intake_bugreport.md must parse");
         assert_eq!(op.name, "INTAKE BUGREPORT");
-        assert!(op.steps.len() >= 9, "expected >=9 steps, got {}", op.steps.len());
+        assert!(
+            op.steps.len() >= 9,
+            "expected >=9 steps, got {}",
+            op.steps.len()
+        );
         // Step 1 — Executive Assistant triages
         assert_eq!(op.steps[0].agent, "Executive Assistant");
         // Step 5 — Hypervisor blocking gate
-        let hyp_idx = op.steps.iter().position(|s| s.agent == "Hypervisor")
+        let hyp_idx = op
+            .steps
+            .iter()
+            .position(|s| s.agent == "Hypervisor")
             .expect("must have a Hypervisor blocking step");
         assert_eq!(op.steps[hyp_idx].tool_or_skill, None);
         // Tools that this op introduces must be referenced
-        let combined: String = op.steps.iter()
+        let combined: String = op
+            .steps
+            .iter()
             .map(|s| s.tool_or_skill.clone().unwrap_or_default())
-            .collect::<Vec<_>>().join("|");
-        assert!(combined.contains("tool:route-bug"), "must reference tool:route-bug");
-        assert!(combined.contains("tool:ledger-append"), "must reference tool:ledger-append");
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(
+            combined.contains("tool:route-bug"),
+            "must reference tool:route-bug"
+        );
+        assert!(
+            combined.contains("tool:ledger-append"),
+            "must reference tool:ledger-append"
+        );
     }
 
     #[test]
     fn test_assess_development_operation_parses() {
         let path = workspace_root().join("operations/assess_development.md");
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
-        let op = parse_operation_markdown(&content)
-            .expect("assess_development.md must parse");
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+        let op = parse_operation_markdown(&content).expect("assess_development.md must parse");
         assert_eq!(op.name, "ASSESS DEVELOPMENT");
         // Step 2 must be a parallel group: Feature Tester, Developer, Researcher
         let step2: Vec<&Step> = op.steps.iter().filter(|s| s.index == "2").collect();
-        assert_eq!(step2.len(), 3, "step 2 should have 3 parallel agents, got {}", step2.len());
+        assert_eq!(
+            step2.len(),
+            3,
+            "step 2 should have 3 parallel agents, got {}",
+            step2.len()
+        );
         let agents: Vec<&str> = step2.iter().map(|s| s.agent.as_str()).collect();
         assert!(agents.contains(&"Feature Tester"));
         assert!(agents.contains(&"Developer"));
@@ -785,14 +835,20 @@ mod tests {
             "personal_tech_support",
         ] {
             let path = root.join(format!("workforces/{}.md", wf_name));
-            let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+            let content =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
             let wf = parse_workforce_markdown(&content)
                 .unwrap_or_else(|| panic!("{} must parse", wf_name));
-            assert!(wf.operations.contains(&"INTAKE BUGREPORT".to_string()),
-                "{} must list INTAKE BUGREPORT", wf_name);
-            assert!(wf.operations.contains(&"ASSESS DEVELOPMENT".to_string()),
-                "{} must list ASSESS DEVELOPMENT", wf_name);
+            assert!(
+                wf.operations.contains(&"INTAKE BUGREPORT".to_string()),
+                "{} must list INTAKE BUGREPORT",
+                wf_name
+            );
+            assert!(
+                wf.operations.contains(&"ASSESS DEVELOPMENT".to_string()),
+                "{} must list ASSESS DEVELOPMENT",
+                wf_name
+            );
         }
     }
 
@@ -812,8 +868,7 @@ mod tests {
             let path = root.join(format!("workforces/{}.md", wf_name));
             let content = std::fs::read_to_string(&path).unwrap();
             let wf = parse_workforce_markdown(&content).unwrap();
-            let agents: Vec<&str> = wf.agents.iter()
-                .map(|a| a.agent_profile.as_str()).collect();
+            let agents: Vec<&str> = wf.agents.iter().map(|a| a.agent_profile.as_str()).collect();
 
             for op_listed in &wf.operations {
                 if !new_ops.contains(&op_listed.as_str()) {
@@ -831,7 +886,9 @@ mod tests {
                         agents.contains(&step.agent.as_str()),
                         "workforce {} declares new operation {} which uses agent '{}' \
                          but that agent is not in the workforce's agent table",
-                        wf_name, op_listed, step.agent
+                        wf_name,
+                        op_listed,
+                        step.agent
                     );
                 }
             }
@@ -941,7 +998,10 @@ operations:
 "#;
         let wf = parse_workforce_markdown(md).unwrap();
         assert_eq!(wf.name, "General Software Development");
-        assert_eq!(wf.description, "Full dev team with PM, engineers, testers, and DevOps. Suitable for most software projects.");
+        assert_eq!(
+            wf.description,
+            "Full dev team with PM, engineers, testers, and DevOps. Suitable for most software projects."
+        );
         assert_eq!(wf.agents.len(), 11);
         assert_eq!(wf.connections.len(), 15);
         assert_eq!(wf.operations.len(), 2);
@@ -959,7 +1019,10 @@ operations:
         assert!(!wf.agents[4].user_facing);
 
         // Verify connection data types
-        assert!(matches!(wf.connections[0].data_type, DataFlow::Instructions));
+        assert!(matches!(
+            wf.connections[0].data_type,
+            DataFlow::Instructions
+        ));
         assert!(matches!(wf.connections[6].data_type, DataFlow::Deliverable));
         assert!(matches!(wf.connections[9].data_type, DataFlow::Report));
         assert!(matches!(wf.connections[13].data_type, DataFlow::Research));
@@ -1029,7 +1092,10 @@ operations:
         assert!(wf2.agents[0].user_facing);
         assert!(!wf2.agents[3].user_facing);
         assert!(matches!(wf2.connections[4].data_type, DataFlow::Research));
-        assert!(matches!(wf2.connections[5].data_type, DataFlow::Deliverable));
+        assert!(matches!(
+            wf2.connections[5].data_type,
+            DataFlow::Deliverable
+        ));
         assert!(matches!(wf2.connections[6].data_type, DataFlow::Report));
         assert!(matches!(wf2.connections[7].data_type, DataFlow::Message));
     }
@@ -1039,8 +1105,8 @@ operations:
         let root = workspace_root();
         for stem in ["cleanup", "develop_feature", "develop_aio"] {
             let path = root.join(format!("teams/{}.md", stem));
-            let content = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+            let content =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
             let team = parse_team_markdown(&content)
                 .unwrap_or_else(|| panic!("teams/{}.md must parse", stem));
             assert!(!team.name.is_empty());
@@ -1074,7 +1140,10 @@ operations:
         assert_eq!(parsed.description, team.description);
         assert_eq!(parsed.agents.len(), 1);
         assert_eq!(parsed.steps.len(), 1);
-        assert_eq!(parsed.steps[0].tool_or_skill.as_deref(), Some("skill:plan_tasks"));
+        assert_eq!(
+            parsed.steps[0].tool_or_skill.as_deref(),
+            Some("skill:plan_tasks")
+        );
         assert_eq!(parsed.summary.trim(), "A short summary line.");
     }
 
@@ -1268,10 +1337,26 @@ Interrupts: none
         for (a, b) in op1.steps.iter().zip(op2.steps.iter()) {
             assert_eq!(a.index, b.index, "index mismatch");
             assert_eq!(a.agent, b.agent, "agent mismatch at step {}", a.index);
-            assert_eq!(a.tool_or_skill, b.tool_or_skill, "tool mismatch at step {}", a.index);
-            assert_eq!(a.operation, b.operation, "operation mismatch at step {}", a.index);
-            assert_eq!(a.parallel_group, b.parallel_group, "parallel_group mismatch at step {}", a.index);
-            assert_eq!(a.model_override, b.model_override, "model_override mismatch at step {}", a.index);
+            assert_eq!(
+                a.tool_or_skill, b.tool_or_skill,
+                "tool mismatch at step {}",
+                a.index
+            );
+            assert_eq!(
+                a.operation, b.operation,
+                "operation mismatch at step {}",
+                a.index
+            );
+            assert_eq!(
+                a.parallel_group, b.parallel_group,
+                "parallel_group mismatch at step {}",
+                a.index
+            );
+            assert_eq!(
+                a.model_override, b.model_override,
+                "model_override mismatch at step {}",
+                a.index
+            );
         }
     }
 
@@ -1329,7 +1414,11 @@ Interrupts: none
 
         // Verify parallel groups survived roundtrip
         for (a, b) in op1.steps.iter().zip(op2.steps.iter()) {
-            assert_eq!(a.parallel_group, b.parallel_group, "parallel_group mismatch at step {}", a.index);
+            assert_eq!(
+                a.parallel_group, b.parallel_group,
+                "parallel_group mismatch at step {}",
+                a.index
+            );
         }
         // Steps at index "2" should have the same parallel_group
         assert!(op2.steps[1].parallel_group.is_some());
@@ -1344,8 +1433,22 @@ Interrupts: none
             trigger: TriggerCondition::Manual,
             blocker: None,
             steps: vec![
-                Step { index: "1".into(), agent: "PM".into(), tool_or_skill: Some("skill:plan".into()), operation: "plan the work".into(), parallel_group: None, model_override: None },
-                Step { index: "2".into(), agent: "Dev".into(), tool_or_skill: None, operation: "code".into(), parallel_group: Some(1), model_override: Some("claude_opus".into()) },
+                Step {
+                    index: "1".into(),
+                    agent: "PM".into(),
+                    tool_or_skill: Some("skill:plan".into()),
+                    operation: "plan the work".into(),
+                    parallel_group: None,
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Dev".into(),
+                    tool_or_skill: None,
+                    operation: "code".into(),
+                    parallel_group: Some(1),
+                    model_override: Some("claude_opus".into()),
+                },
             ],
             interrupts: vec![],
         };

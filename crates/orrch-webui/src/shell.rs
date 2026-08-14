@@ -33,7 +33,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::sync::broadcast;
 
 const BROADCAST_CAPACITY: usize = 64;
@@ -163,7 +163,10 @@ impl ShellBridge {
             writer,
             _child: child,
         };
-        let mut slot = self.inner.lock().map_err(|_| anyhow::anyhow!("inner mutex poisoned"))?;
+        let mut slot = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("inner mutex poisoned"))?;
         *slot = Some(state);
         Ok(())
     }
@@ -190,15 +193,15 @@ impl ShellBridge {
         if let Ok(mut size) = self.size.lock() {
             *size = (cols, rows);
         }
-        if let Ok(mut slot) = self.inner.lock() {
-            if let Some(state) = slot.as_mut() {
-                let _ = state.master.resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
-            }
+        if let Ok(mut slot) = self.inner.lock()
+            && let Some(state) = slot.as_mut()
+        {
+            let _ = state.master.resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
         }
     }
 
@@ -209,14 +212,14 @@ impl ShellBridge {
         if bytes.is_empty() {
             return;
         }
-        if let Ok(mut slot) = self.inner.lock() {
-            if let Some(state) = slot.as_mut() {
-                if let Err(e) = state.writer.write_all(bytes) {
-                    tracing::warn!("pty write_all: {e}");
-                    return;
-                }
-                let _ = state.writer.flush();
+        if let Ok(mut slot) = self.inner.lock()
+            && let Some(state) = slot.as_mut()
+        {
+            if let Err(e) = state.writer.write_all(bytes) {
+                tracing::warn!("pty write_all: {e}");
+                return;
             }
+            let _ = state.writer.flush();
         }
     }
 }
@@ -260,7 +263,10 @@ fn pty_reader_loop(
                 // the next `ensure_session` call reboots a fresh shell.
                 started.store(false, Ordering::Release);
                 tracing::info!("WebUI PTY reader: EOF (shell exited)");
-                let _ = tx.send(b"\r\n\x1b[33m[shell exited - reconnect to spawn a fresh one]\x1b[0m\r\n".to_vec());
+                let _ = tx.send(
+                    b"\r\n\x1b[33m[shell exited - reconnect to spawn a fresh one]\x1b[0m\r\n"
+                        .to_vec(),
+                );
                 return;
             }
             Ok(n) => {
@@ -292,7 +298,9 @@ mod tests {
 
     #[test]
     fn bridge_default_session_name() {
-        unsafe { std::env::remove_var("ORRCH_WEBUI_TMUX_SESSION"); }
+        unsafe {
+            std::env::remove_var("ORRCH_WEBUI_TMUX_SESSION");
+        }
         let b = ShellBridge::from_env();
         assert_eq!(b.session_name, DEFAULT_SHELL_SESSION);
     }

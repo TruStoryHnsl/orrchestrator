@@ -13,19 +13,15 @@ use crate::shadow::ShadowRepo;
 /// Where shadow commits get mirrored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum BackupTier {
-    /// Bare mirror reachable only over the tailscale subnet (e.g. orrigins).
+    /// Bare mirror reachable only over the tailscale subnet (e.g. a NAS).
     TailnetMirror,
     /// Dedicated PRIVATE GitHub repo, separate from the project's code repo.
     GithubPrivate,
     /// Local shadow only — never pushes.
+    #[default]
     None,
-}
-
-impl Default for BackupTier {
-    fn default() -> Self {
-        BackupTier::None
-    }
 }
 
 /// Persisted at `<project>/.orrch/backup.json`.
@@ -82,8 +78,7 @@ impl BackupConfig {
         if let Some(parent) = p.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(&p, json)
     }
 }
@@ -116,7 +111,7 @@ pub fn configure_remote(shadow: &ShadowRepo, cfg: &BackupConfig) -> std::io::Res
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "backup tier requires remote_url",
-            ))
+            ));
         }
     };
 
@@ -137,13 +132,10 @@ pub fn configure_remote(shadow: &ShadowRepo, cfg: &BackupConfig) -> std::io::Res
             .output()?
     };
     if !out.status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "configure_remote failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            ),
-        ));
+        return Err(std::io::Error::other(format!(
+            "configure_remote failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
     }
     Ok(())
 }
@@ -178,31 +170,41 @@ pub struct ProvisionPlan {
 }
 
 /// Pure string/struct builder — no network. orrch-core stays gh-free.
+///
+/// Defaults are configurable via env so the tool isn't tied to one user's
+/// infrastructure:
+///   `ORRCH_BACKUP_GITHUB_ORG`  — GitHub owner for the GithubPrivate tier
+///   `ORRCH_BACKUP_MIRROR_HOST` — SSH host for the TailnetMirror bare mirror
+/// An explicit `cfg.remote_url` always wins over both.
 pub fn provision_plan(project_id: &str, cfg: &BackupConfig) -> ProvisionPlan {
     match cfg.tier {
         BackupTier::GithubPrivate => {
-            let remote_url = cfg.remote_url.clone().unwrap_or_else(|| {
-                format!("git@github.com:TruStoryHnsl/{project_id}-context.git")
-            });
-            let create_hint = format!(
-                "gh repo create TruStoryHnsl/{project_id}-context --private --confirm"
-            );
+            let org = std::env::var("ORRCH_BACKUP_GITHUB_ORG")
+                .unwrap_or_else(|_| "<your-github-org>".to_string());
+            let remote_url = cfg
+                .remote_url
+                .clone()
+                .unwrap_or_else(|| format!("git@github.com:{org}/{project_id}-context.git"));
+            let create_hint =
+                format!("gh repo create {org}/{project_id}-context --private --confirm");
             ProvisionPlan {
                 remote_url,
                 create_hint,
             }
         }
         BackupTier::TailnetMirror => {
+            let mirror_host = std::env::var("ORRCH_BACKUP_MIRROR_HOST")
+                .unwrap_or_else(|_| "<mirror-host>".to_string());
             let remote_url = cfg
                 .remote_url
                 .clone()
-                .unwrap_or_else(|| format!("git@orrigins:/srv/orrch-shadow/{project_id}.git"));
+                .unwrap_or_else(|| format!("git@{mirror_host}:/srv/orrch-shadow/{project_id}.git"));
             // Derive the on-host bare path from the URL if it's an SSH path.
             let bare_path = remote_url
                 .rsplit_once(':')
                 .map(|(_, p)| p.to_string())
                 .unwrap_or_else(|| format!("/srv/orrch-shadow/{project_id}.git"));
-            let create_hint = format!("ssh orrigins 'git init --bare {bare_path}'");
+            let create_hint = format!("ssh {mirror_host} 'git init --bare {bare_path}'");
             ProvisionPlan {
                 remote_url,
                 create_hint,
@@ -271,14 +273,17 @@ mod tests {
         let proj = tempfile::tempdir().unwrap();
         let cfg = BackupConfig {
             tier: BackupTier::TailnetMirror,
-            remote_url: Some("git@orrigins:/srv/orrch-shadow/x.git".into()),
+            remote_url: Some("git@mirror:/srv/orrch-shadow/x.git".into()),
             remote_name: "backup".into(),
             branch: "master".into(),
         };
         cfg.save(proj.path()).unwrap();
         let loaded = BackupConfig::load(proj.path());
         assert_eq!(loaded.tier, BackupTier::TailnetMirror);
-        assert_eq!(loaded.remote_url.as_deref(), Some("git@orrigins:/srv/orrch-shadow/x.git"));
+        assert_eq!(
+            loaded.remote_url.as_deref(),
+            Some("git@mirror:/srv/orrch-shadow/x.git")
+        );
 
         // legacy/empty json → defaults
         write(&BackupConfig::path_for(proj.path()), "{}");
@@ -363,7 +368,10 @@ mod tests {
             remote_url: Some(bare.path().to_string_lossy().to_string()),
             ..Default::default()
         };
-        assert!(matches!(push_backup(&shadow, &cfg).unwrap(), PushOutcome::Skipped));
+        assert!(matches!(
+            push_backup(&shadow, &cfg).unwrap(),
+            PushOutcome::Skipped
+        ));
 
         // bare stays empty
         let log = Command::new("git")
@@ -430,7 +438,9 @@ mod tests {
             ..Default::default()
         };
         let plan = provision_plan("widget", &tn);
-        assert!(plan.remote_url.contains("orch-shadow") || plan.remote_url.contains("orrch-shadow"));
+        assert!(
+            plan.remote_url.contains("orch-shadow") || plan.remote_url.contains("orrch-shadow")
+        );
         assert!(plan.create_hint.contains("git init --bare"));
     }
 }

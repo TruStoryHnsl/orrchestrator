@@ -276,14 +276,10 @@ impl LinearLagrangianScorer {
     fn context_reuse_bonus(&self, step: &CandidateStep, registry: Option<&FileRegistry>) -> f64 {
         let n = step.files.len().max(1) as f64;
         let already = match registry {
-            Some(r) => step
-                .files
-                .iter()
-                .filter(|p| r.has_been_acquired(p))
-                .count() as f64,
+            Some(r) => step.files.iter().filter(|p| r.has_been_acquired(p)).count() as f64,
             None => 0.0,
         };
-        -1.0 * (already / n)
+        -(already / n)
     }
 
     /// `diff_surface_penalty` ∈ [0.0, 1.0]. Normalized to 1.0 at 500 LOC.
@@ -334,7 +330,7 @@ impl LinearLagrangianScorer {
             .filter(|t| t.depends.iter().any(|d| d == &step.id))
             .count();
         let normalized = (down as f64 / 3.0).min(1.0);
-        -1.0 * normalized
+        -normalized
     }
 }
 
@@ -632,10 +628,10 @@ pub fn parse_task_blocks(text: &str) -> Vec<CandidateStep> {
                     if let Ok(r) = v.trim().parse::<f64>() {
                         step.architectural_risk = Some(r);
                     }
-                } else if let Some(v) = next.strip_prefix("EditFactor:") {
-                    if let Ok(r) = v.trim().parse::<f64>() {
-                        step.edit_factor = r;
-                    }
+                } else if let Some(v) = next.strip_prefix("EditFactor:")
+                    && let Ok(r) = v.trim().parse::<f64>()
+                {
+                    step.edit_factor = r;
                 }
                 i += 1;
             }
@@ -701,7 +697,13 @@ pub fn render_ranked_plan(
         {
             s.push_str(&format!(
                 "TASK {} | E={:+.4} | reuse={:+.2} diff={:.2} tok={:.2} risk={:.2} unblk={:+.2}\n",
-                r.step_id, r.energy, r.terms.reuse, r.terms.diff, r.terms.tok, r.terms.risk, r.terms.unblk
+                r.step_id,
+                r.energy,
+                r.terms.reuse,
+                r.terms.diff,
+                r.terms.tok,
+                r.terms.risk,
+                r.terms.unblk
             ));
         } else {
             s.push_str(&format!(
@@ -868,10 +870,8 @@ fn rank_with(
             .then_with(|| a.step_id.cmp(&b.step_id))
     });
 
-    let steps_by_id: HashMap<String, CandidateStep> = steps
-        .iter()
-        .map(|s| (s.id.clone(), s.clone()))
-        .collect();
+    let steps_by_id: HashMap<String, CandidateStep> =
+        steps.iter().map(|s| (s.id.clone(), s.clone())).collect();
 
     let text = render_ranked_plan(&scored, &steps_by_id, scorer.name());
     let ranked_path = workspace_root.join(DEFAULT_RANKED_PATH);
@@ -897,7 +897,13 @@ fn rank_with(
 mod tests {
     use super::*;
 
-    fn step(id: &str, files: &[&str], depends: &[&str], edit_factor: f64, risk: f64) -> CandidateStep {
+    fn step(
+        id: &str,
+        files: &[&str],
+        depends: &[&str],
+        edit_factor: f64,
+        risk: f64,
+    ) -> CandidateStep {
         CandidateStep {
             id: id.to_string(),
             description: format!("desc {}", id),
@@ -915,7 +921,11 @@ mod tests {
     fn linear_coeffs_default_sum_to_one() {
         let c = LinearCoeffs::default();
         let s = c.alpha + c.beta + c.gamma + c.delta + c.epsilon;
-        assert!((s - 1.0).abs() < 1e-9, "coeffs should sum to 1.0, got {}", s);
+        assert!(
+            (s - 1.0).abs() < 1e-9,
+            "coeffs should sum to 1.0, got {}",
+            s
+        );
     }
 
     #[test]

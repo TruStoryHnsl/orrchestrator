@@ -36,4 +36,4 @@ pub mod api;
 pub mod assets;
 pub mod server;
 
-pub use server::{launch_webedit_server, ServerHandle};
+pub use server::{ServerHandle, launch_webedit_server};

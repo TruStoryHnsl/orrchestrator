@@ -1,6 +1,6 @@
 //! Time abstraction so the scheduler is deterministically testable.
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub trait Clock: Send + Sync {

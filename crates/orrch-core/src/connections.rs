@@ -225,7 +225,7 @@ pub async fn test_connection(connection: &Connection) -> Result<String> {
     let primary = format!("{base_url}/models");
 
     match test_models_url(&client, &primary, connection).await {
-        Ok(count) => return Ok(format!("reachable, {count} models")),
+        Ok(count) => Ok(format!("reachable, {count} models")),
         Err(primary_error) => {
             if matches!(connection.kind, ConnectionKind::Ollama)
                 || connection.api_key.trim().is_empty()
@@ -236,10 +236,10 @@ pub async fn test_connection(connection: &Connection) -> Result<String> {
                 } else {
                     format!("{base_url}/v1/models")
                 };
-                if alt != primary {
-                    if let Ok(count) = test_models_url(&client, &alt, connection).await {
-                        return Ok(format!("reachable, {count} models"));
-                    }
+                if alt != primary
+                    && let Ok(count) = test_models_url(&client, &alt, connection).await
+                {
+                    return Ok(format!("reachable, {count} models"));
                 }
                 if head_reachable(&client, base_url).await {
                     return Ok("reachable, models endpoint unavailable".to_string());

@@ -61,10 +61,10 @@ pub(crate) fn strip_ansi(s: &str) -> String {
                     // Two-byte ESC sequence (e.g. ESC M, ESC 7, ESC (B).
                     i += 2;
                     // Some sequences have an additional charset byte.
-                    if next == b'(' || next == b')' || next == b'*' || next == b'+' {
-                        if i < bytes.len() {
-                            i += 1;
-                        }
+                    if (next == b'(' || next == b')' || next == b'*' || next == b'+')
+                        && i < bytes.len()
+                    {
+                        i += 1;
                     }
                 }
             }
@@ -147,7 +147,7 @@ const AGENT_SCRIPT: &str = include_str!("../../../agent/orrch-agent.sh");
 #[derive(Debug, Clone)]
 pub struct RemoteHost {
     pub name: String,
-    pub ssh_target: String, // e.g. "orrgate", "user@orrpheus"
+    pub ssh_target: String, // e.g. "buildbox", "me@mac-studio.local"
     pub is_local: bool,
     pub reachable: bool,
     pub capabilities: Option<HostCapabilities>,
@@ -157,7 +157,7 @@ pub struct RemoteHost {
 #[derive(Debug, Clone, Deserialize)]
 pub struct HostCapabilities {
     pub os: String,
-    pub mux: String,      // "tmux", "screen", or "nohup"
+    pub mux: String, // "tmux", "screen", or "nohup"
     pub claude: bool,
     pub codex: bool,
     pub gemini: bool,
@@ -165,32 +165,38 @@ pub struct HostCapabilities {
     pub hostname: String,
 }
 
-/// Known hosts from the workspace configuration.
+/// Known hosts, from the `ORRCH_REMOTE_HOSTS` environment variable.
+///
+/// Format: comma-separated entries of `name` or `name=ssh_target`
+/// (e.g. `ORRCH_REMOTE_HOSTS="buildbox,mac=me@mac-studio.local"`).
+/// When the ssh_target is omitted it defaults to the host name, which
+/// works with `~/.ssh/config` Host aliases. Set this in
+/// `~/.config/orrchestrator/launch.env` so both launchers pick it up.
+/// Unset → no remote hosts (local-only operation).
 pub fn known_hosts() -> Vec<RemoteHost> {
-    let hostname = get_hostname();
-    vec![
-        RemoteHost {
-            name: "orrion".into(),
-            ssh_target: "orrion".into(),
-            is_local: hostname == "orrion",
-            reachable: false,
-            capabilities: None,
-        },
-        RemoteHost {
-            name: "orrgate".into(),
-            ssh_target: "orrgate".into(),
-            is_local: hostname == "orrgate",
-            reachable: false,
-            capabilities: None,
-        },
-        RemoteHost {
-            name: "orrpheus".into(),
-            ssh_target: "user@orrpheus".into(),
-            is_local: hostname.to_lowercase().starts_with("orrpheus"),
-            reachable: false,
-            capabilities: None,
-        },
-    ]
+    let hostname = get_hostname().to_lowercase();
+    std::env::var("ORRCH_REMOTE_HOSTS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                return None;
+            }
+            let (name, ssh_target) = match entry.split_once('=') {
+                Some((n, t)) => (n.trim().to_string(), t.trim().to_string()),
+                None => (entry.to_string(), entry.to_string()),
+            };
+            let is_local = hostname.starts_with(&name.to_lowercase());
+            Some(RemoteHost {
+                name,
+                ssh_target,
+                is_local,
+                reachable: false,
+                capabilities: None,
+            })
+        })
+        .collect()
 }
 
 // ─── Agent invocation helper ────────────────────────────────────────
@@ -200,9 +206,12 @@ pub fn known_hosts() -> Vec<RemoteHost> {
 async fn run_agent(host: &RemoteHost, subcommand: &str) -> Option<String> {
     let mut child = tokio::process::Command::new("ssh")
         .args([
-            "-o", "ConnectTimeout=5",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
             &host.ssh_target,
             &format!("bash -s -- {subcommand}"),
         ])
@@ -226,7 +235,10 @@ async fn run_agent(host: &RemoteHost, subcommand: &str) -> Option<String> {
         Some(stdout)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("Agent command '{subcommand}' failed on {}: {stderr}", host.name);
+        debug!(
+            "Agent command '{subcommand}' failed on {}: {stderr}",
+            host.name
+        );
         None
     }
 }
@@ -235,9 +247,12 @@ async fn run_agent(host: &RemoteHost, subcommand: &str) -> Option<String> {
 async fn run_agent_with_args(host: &RemoteHost, args: &str) -> Option<String> {
     let mut child = tokio::process::Command::new("ssh")
         .args([
-            "-o", "ConnectTimeout=5",
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
             &host.ssh_target,
             &format!("bash -s -- {args}"),
         ])
@@ -297,7 +312,10 @@ pub async fn discover_remote_sessions(host: &RemoteHost) -> Vec<ExternalSession>
                 });
             }
             Err(e) => {
-                debug!("Failed to parse agent discovery object from {}: {e}", host.name);
+                debug!(
+                    "Failed to parse agent discovery object from {}: {e}",
+                    host.name
+                );
             }
         }
     }
@@ -324,8 +342,10 @@ pub async fn check_host_reachable(host: &mut RemoteHost) {
             // ANSI/OSC noise and scans for balanced JSON objects.
             for obj in iter_json_objects(&stdout) {
                 if let Ok(caps) = serde_json::from_str::<HostCapabilities>(&obj) {
-                    debug!("Host {} capabilities: os={}, mux={}, claude={}, codex={}, gemini={}",
-                        host.name, caps.os, caps.mux, caps.claude, caps.codex, caps.gemini);
+                    debug!(
+                        "Host {} capabilities: os={}, mux={}, claude={}, codex={}, gemini={}",
+                        host.name, caps.os, caps.mux, caps.claude, caps.codex, caps.gemini
+                    );
                     host.capabilities = Some(caps);
                     break;
                 }
@@ -351,7 +371,11 @@ pub async fn spawn_remote_session(
     goal: &str,
     flags: &[String],
 ) -> anyhow::Result<String> {
-    let flags_str = flags.iter().map(|f| shell_escape(f)).collect::<Vec<_>>().join(" ");
+    let flags_str = flags
+        .iter()
+        .map(|f| shell_escape(f))
+        .collect::<Vec<_>>()
+        .join(" ");
     let args = format!(
         "spawn {} {} {} {}",
         shell_escape(project_name),
@@ -413,7 +437,9 @@ fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
-    if s.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`') {
+    if s.contains(|c: char| {
+        c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`'
+    }) {
         format!("'{}'", s.replace('\'', "'\\''"))
     } else {
         s.to_string()
@@ -491,10 +517,10 @@ mod tests {
 
     #[test]
     fn iter_json_objects_strips_shell_noise() {
-        // This is the actual failure mode that broke orrpheus:
+        // This is the actual failure mode that broke macbook:
         // fish prompt OSC escapes prepended to the JSON line from the
         // agent's `check` command.
-        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\",\"mux\":\"screen\",\"claude\":true,\"codex\":true,\"gemini\":false,\"projects_dir\":\"/Users/x/projects\",\"hostname\":\"orrpheus\"}\n\x1b]4;15;#a6adc8\x07";
+        let raw = "\x1b]10;#cdd6f4\x07\x1b]11;#1e1e2e\x07{\"os\":\"macos\",\"mux\":\"screen\",\"claude\":true,\"codex\":true,\"gemini\":false,\"projects_dir\":\"/Users/x/projects\",\"hostname\":\"macbook\"}\n\x1b]4;15;#a6adc8\x07";
         let objects = iter_json_objects(raw);
         assert_eq!(objects.len(), 1, "objects: {objects:?}");
         let parsed: HostCapabilities = serde_json::from_str(&objects[0]).expect("JSON parses");
@@ -503,7 +529,7 @@ mod tests {
         assert!(parsed.claude);
         assert!(parsed.codex);
         assert!(!parsed.gemini);
-        assert_eq!(parsed.hostname, "orrpheus");
+        assert_eq!(parsed.hostname, "macbook");
     }
 
     #[test]

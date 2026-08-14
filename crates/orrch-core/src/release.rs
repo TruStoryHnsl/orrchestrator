@@ -30,7 +30,9 @@ impl BumpKind {
 fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
     let s = s.trim_start_matches('v');
     let parts: Vec<&str> = s.split('.').collect();
-    if parts.len() < 3 { return None; }
+    if parts.len() < 3 {
+        return None;
+    }
     let major = parts[0].parse().ok()?;
     let minor = parts[1].parse().ok()?;
     // Strip pre-release suffix from patch
@@ -110,15 +112,32 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     loop {
         let leap = is_leap(year);
         let days_in_year = if leap { 366 } else { 365 };
-        if days < days_in_year { break; }
+        if days < days_in_year {
+            break;
+        }
         days -= days_in_year;
         year += 1;
     }
     let leap = is_leap(year);
-    let months = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &m in &months {
-        if days < m { break; }
+        if days < m {
+            break;
+        }
         days -= m;
         month += 1;
     }
@@ -126,7 +145,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 // ─── Build Artifacts ──────────────────────────────────────────
@@ -187,7 +206,10 @@ pub fn detect_build_targets(project_dir: &Path) -> Vec<BuildTarget> {
             command: vec!["cargo".into(), "build".into(), "--release".into()],
         });
     }
-    if project_dir.join("pyproject.toml").exists() || project_dir.join("setup.py").exists() || project_dir.join("setup.cfg").exists() {
+    if project_dir.join("pyproject.toml").exists()
+        || project_dir.join("setup.py").exists()
+        || project_dir.join("setup.cfg").exists()
+    {
         targets.push(BuildTarget {
             kind: BuildTargetKind::Python,
             label: "python build (wheel)".to_string(),
@@ -201,7 +223,10 @@ pub fn detect_build_targets(project_dir: &Path) -> Vec<BuildTarget> {
             command: vec!["npm".into(), "run".into(), "build".into()],
         });
     }
-    if project_dir.join("Dockerfile").exists() || project_dir.join("docker-compose.yml").exists() || project_dir.join("compose.yml").exists() {
+    if project_dir.join("Dockerfile").exists()
+        || project_dir.join("docker-compose.yml").exists()
+        || project_dir.join("compose.yml").exists()
+    {
         targets.push(BuildTarget {
             kind: BuildTargetKind::Docker,
             label: "docker build".to_string(),
@@ -216,11 +241,13 @@ pub fn detect_build_targets(project_dir: &Path) -> Vec<BuildTarget> {
 pub fn build_artifact(project_dir: &Path, target: &BuildTarget) -> BuildResult {
     let (program, args) = match target.command.split_first() {
         Some((p, a)) => (p.clone(), a.to_vec()),
-        None => return BuildResult {
-            target: target.clone(),
-            status: BuildStatus::Failed,
-            output: "Empty command.".to_string(),
-        },
+        None => {
+            return BuildResult {
+                target: target.clone(),
+                status: BuildStatus::Failed,
+                output: "Empty command.".to_string(),
+            };
+        }
     };
 
     let out = Command::new(&program)
@@ -233,8 +260,16 @@ pub fn build_artifact(project_dir: &Path, target: &BuildTarget) -> BuildResult {
             let stdout = String::from_utf8_lossy(&o.stdout).to_string();
             let stderr = String::from_utf8_lossy(&o.stderr).to_string();
             let combined = format!("{stdout}{stderr}");
-            let status = if o.status.success() { BuildStatus::Success } else { BuildStatus::Failed };
-            BuildResult { target: target.clone(), status, output: combined }
+            let status = if o.status.success() {
+                BuildStatus::Success
+            } else {
+                BuildStatus::Failed
+            };
+            BuildResult {
+                target: target.clone(),
+                status,
+                output: combined,
+            }
         }
         Err(e) => BuildResult {
             target: target.clone(),
@@ -295,9 +330,11 @@ pub fn generate_release_notes(project_dir: &Path) -> String {
 
     for line in log.lines() {
         // format: "<hash> <message>"
-        let msg = line.splitn(2, ' ').nth(1).unwrap_or(line).trim();
+        let msg = line.split_once(' ').map(|x| x.1).unwrap_or(line).trim();
         let prefix = msg.split(&[':', '('][..]).next().unwrap_or("").trim();
-        let matched = order.iter().find(|(k, _)| prefix == *k || prefix.starts_with(k));
+        let matched = order
+            .iter()
+            .find(|(k, _)| prefix == *k || prefix.starts_with(k));
         if let Some((key, _)) = matched {
             groups.entry(key).or_default().push(msg.to_string());
         } else {
@@ -369,10 +406,19 @@ impl PreReleaseCheck {
 /// Returns a vec of (check, passed) pairs.
 pub fn run_checklist(project_dir: &Path) -> Vec<(PreReleaseCheck, bool)> {
     vec![
-        (PreReleaseCheck::ChangelogExists, check_changelog(project_dir)),
+        (
+            PreReleaseCheck::ChangelogExists,
+            check_changelog(project_dir),
+        ),
         (PreReleaseCheck::NoEnvFiles, check_no_env_files(project_dir)),
-        (PreReleaseCheck::CargoVersionPresent, check_cargo_version(project_dir)),
-        (PreReleaseCheck::GitWorkingTreeClean, check_git_clean(project_dir)),
+        (
+            PreReleaseCheck::CargoVersionPresent,
+            check_cargo_version(project_dir),
+        ),
+        (
+            PreReleaseCheck::GitWorkingTreeClean,
+            check_git_clean(project_dir),
+        ),
     ]
 }
 
@@ -542,7 +588,11 @@ pub struct ReleaseHistoryEntry {
 /// Read git tags and build a release history list (most recent first).
 pub fn load_release_history(project_dir: &Path) -> Vec<ReleaseHistoryEntry> {
     let tag_out = process_spawn::command("git", SliceMode::OrrchSlice)
-        .args(["tag", "--sort=-version:refname", "--format=%(refname:short)"])
+        .args([
+            "tag",
+            "--sort=-version:refname",
+            "--format=%(refname:short)",
+        ])
         .current_dir(project_dir)
         .output();
 
@@ -690,13 +740,18 @@ pub fn load_marketing_metadata(project_dir: &Path) -> MarketingMetadata {
         .args(["log", "--oneline", "--no-merges", "--grep=^feat"])
         .current_dir(project_dir)
         .output();
-    if let Ok(o) = feat_out {
-        if o.status.success() {
-            for line in String::from_utf8_lossy(&o.stdout).lines().take(8) {
-                let msg = line.splitn(2, ' ').nth(1).unwrap_or(line).trim().to_string();
-                if !msg.is_empty() {
-                    meta.features.push(msg);
-                }
+    if let Ok(o) = feat_out
+        && o.status.success()
+    {
+        for line in String::from_utf8_lossy(&o.stdout).lines().take(8) {
+            let msg = line
+                .split_once(' ')
+                .map(|x| x.1)
+                .unwrap_or(line)
+                .trim()
+                .to_string();
+            if !msg.is_empty() {
+                meta.features.push(msg);
             }
         }
     }
@@ -710,11 +765,7 @@ pub fn load_marketing_metadata(project_dir: &Path) -> MarketingMetadata {
         .trim_end_matches(".git")
         .to_string();
 
-    let license_id = meta
-        .license
-        .as_deref()
-        .unwrap_or("MIT")
-        .replace(' ', "_");
+    let license_id = meta.license.as_deref().unwrap_or("MIT").replace(' ', "_");
 
     let mut badges: Vec<String> = Vec::new();
     if !meta.version.is_empty() {
@@ -757,7 +808,11 @@ fn extract_toml_str(line: &str, key: &str) -> Option<String> {
         rest
     }
     .trim();
-    if inner.is_empty() { None } else { Some(inner.to_string()) }
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
 }
 
 // ─── Rollback (item 108) ──────────────────────────────────────────────────────

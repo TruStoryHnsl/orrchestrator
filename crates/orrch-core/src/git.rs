@@ -21,8 +21,12 @@ pub fn check_status(project_dir: &Path) -> GitStatus {
     let git_dir = project_dir.join(".git");
     if !git_dir.exists() {
         return GitStatus {
-            has_repo: false, has_remote: false, remote_url: String::new(),
-            dirty_count: 0, branch: String::new(), unpushed: 0,
+            has_repo: false,
+            has_remote: false,
+            remote_url: String::new(),
+            dirty_count: 0,
+            branch: String::new(),
+            unpushed: 0,
         };
     }
 
@@ -50,10 +54,7 @@ pub fn check_status(project_dir: &Path) -> GitStatus {
 ///
 /// Claude analyzes the changes, writes a proper commit message,
 /// stages appropriate files, commits, and pushes.
-pub fn spawn_commit_session(
-    project_dir: &Path,
-    project_name: &str,
-) -> anyhow::Result<String> {
+pub fn spawn_commit_session(project_dir: &Path, project_name: &str) -> anyhow::Result<String> {
     let session_name = format!("orrch-git-{}", project_name);
     let projects_dir = project_dir.parent().unwrap_or(project_dir);
     let feedback_dir = projects_dir.join(".feedback");
@@ -159,13 +160,23 @@ pub fn spawn_goal_session(
 /// Returns the list of (project_name, session_name) pairs spawned.
 pub fn spawn_commit_all(projects_dir: &Path) -> Vec<(String, String)> {
     let mut spawned = Vec::new();
-    let Ok(entries) = std::fs::read_dir(projects_dir) else { return spawned };
+    let Ok(entries) = std::fs::read_dir(projects_dir) else {
+        return spawned;
+    };
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() { continue; }
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        if name.starts_with('.') || name == "deprecated" { continue; }
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if name.starts_with('.') || name == "deprecated" {
+            continue;
+        }
 
         let status = check_status(&path);
         if status.has_repo && status.has_remote && status.dirty_count > 0 {

@@ -65,9 +65,14 @@ pub fn merge_catalog(
 ) -> (Vec<CatalogModel>, MergeReport) {
     let was = existing.len();
     let mut order: Vec<String> = existing.iter().map(|m| m.name.clone()).collect();
-    let mut by_name: std::collections::HashMap<String, CatalogModel> =
-        existing.iter().map(|m| (m.name.clone(), m.clone())).collect();
-    let mut report = MergeReport { was, ..Default::default() };
+    let mut by_name: std::collections::HashMap<String, CatalogModel> = existing
+        .iter()
+        .map(|m| (m.name.clone(), m.clone()))
+        .collect();
+    let mut report = MergeReport {
+        was,
+        ..Default::default()
+    };
 
     for raw in incoming {
         let entry = apply_override(raw, overrides);
@@ -84,8 +89,10 @@ pub fn merge_catalog(
         by_name.insert(entry.name.clone(), entry);
     }
 
-    let merged: Vec<CatalogModel> =
-        order.into_iter().filter_map(|n| by_name.remove(&n)).collect();
+    let merged: Vec<CatalogModel> = order
+        .into_iter()
+        .filter_map(|n| by_name.remove(&n))
+        .collect();
     report.now = merged.len();
     (merged, report)
 }
@@ -210,16 +217,33 @@ pub(crate) fn quant_from_name(name: &str) -> String {
 #[cfg(feature = "hf-pull")]
 pub(crate) fn arch_from_tags(tags: &[String]) -> String {
     const GENERIC: &[&str] = &[
-        "transformers", "safetensors", "conversational", "text-generation",
-        "image-text-to-text", "text-generation-inference", "endpoints_compatible",
-        "autotrain_compatible", "compressed-tensors", "gguf", "mlx", "vllm",
-        "4-bit", "8-bit", "awq", "gptq", "fp8", "quantized", "chat",
+        "transformers",
+        "safetensors",
+        "conversational",
+        "text-generation",
+        "image-text-to-text",
+        "text-generation-inference",
+        "endpoints_compatible",
+        "autotrain_compatible",
+        "compressed-tensors",
+        "gguf",
+        "mlx",
+        "vllm",
+        "4-bit",
+        "8-bit",
+        "awq",
+        "gptq",
+        "fp8",
+        "quantized",
+        "chat",
     ];
     for t in tags {
         if t.contains(':') || GENERIC.contains(&t.as_str()) {
             continue;
         }
-        let charsok = t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        let charsok = t
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
         let has_alpha = t.chars().any(|c| c.is_ascii_alphabetic());
         if charsok && has_alpha {
             return t.clone();
@@ -241,7 +265,11 @@ fn entry_from_modelinfo(mi: &serde_json::Value) -> Option<CatalogModel> {
     let tags: Vec<String> = mi
         .get("tags")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     if total.is_none() {
         for t in &tags {
@@ -315,9 +343,8 @@ pub fn fetch_hf_models(authors: &[&str], repos: &[&str]) -> anyhow::Result<Vec<C
     let mut seen = std::collections::HashSet::new();
 
     for author in authors {
-        let url = format!(
-            "https://huggingface.co/api/models?author={author}&full=true&cardData=true"
-        );
+        let url =
+            format!("https://huggingface.co/api/models?author={author}&full=true&cardData=true");
         let resp = client.get(&url).send()?.error_for_status()?;
         let arr: serde_json::Value = resp.json()?;
         if let Some(models) = arr.as_array() {
@@ -373,8 +400,7 @@ mod tests {
         let existing = vec![model("a", "7B"), model("b", "13B")];
         // incoming collides on "a" (different params) and adds "c".
         let incoming = vec![model("a", "70B"), model("c", "3B")];
-        let (merged, report) =
-            merge_catalog(&existing, &incoming, &OverrideMap::new(), false);
+        let (merged, report) = merge_catalog(&existing, &incoming, &OverrideMap::new(), false);
 
         // "a" is NOT overwritten; original 7B preserved.
         let a = merged.iter().find(|m| m.name == "a").unwrap();
@@ -395,8 +421,7 @@ mod tests {
     fn merge_overwrites_when_flagged() {
         let existing = vec![model("a", "7B")];
         let incoming = vec![model("a", "70B")];
-        let (merged, report) =
-            merge_catalog(&existing, &incoming, &OverrideMap::new(), true);
+        let (merged, report) = merge_catalog(&existing, &incoming, &OverrideMap::new(), true);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].parameter_count, "70B");
         assert_eq!(report.updated, vec!["a".to_string()]);
@@ -450,7 +475,10 @@ mod tests {
         let mut ov = OverrideMap::new();
         let mut fields = serde_json::Map::new();
         fields.insert("parameter_count".into(), serde_json::json!("168B"));
-        fields.insert("parameters_raw".into(), serde_json::json!(168_000_000_000u64));
+        fields.insert(
+            "parameters_raw".into(),
+            serde_json::json!(168_000_000_000u64),
+        );
         ov.insert("x/y".into(), fields);
 
         let patched = apply_override(&entry, &ov);
@@ -473,8 +501,7 @@ mod tests {
         std::fs::write(&path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
 
         let incoming = vec![model("b", "13B")];
-        let report =
-            merge_into_file(&path, &incoming, &OverrideMap::new(), false).unwrap();
+        let report = merge_into_file(&path, &incoming, &OverrideMap::new(), false).unwrap();
         assert_eq!(report.added, vec!["b".to_string()]);
 
         // .bak written with the ORIGINAL catalog.
@@ -499,8 +526,7 @@ mod tests {
 
         // incoming collides only; overwrite=false ⇒ nothing added/updated ⇒ no .bak.
         let incoming = vec![model("a", "70B")];
-        let report =
-            merge_into_file(&path, &incoming, &OverrideMap::new(), false).unwrap();
+        let report = merge_into_file(&path, &incoming, &OverrideMap::new(), false).unwrap();
         assert!(report.added.is_empty() && report.updated.is_empty());
         assert!(!path.with_extension("json.bak").exists());
     }

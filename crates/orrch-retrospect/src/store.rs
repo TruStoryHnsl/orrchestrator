@@ -106,10 +106,9 @@ impl ErrorStore {
             .create(true)
             .append(true)
             .open(&self.store_path)
+            && let Ok(json) = serde_json::to_string(&record)
         {
-            if let Ok(json) = serde_json::to_string(&record) {
-                let _ = writeln!(file, "{json}");
-            }
+            let _ = writeln!(file, "{json}");
         }
 
         self.index
@@ -168,10 +167,9 @@ impl ErrorStore {
                     .create(true)
                     .append(true)
                     .open(&self.store_path)
+                    && let Ok(json) = serde_json::to_string(&marker)
                 {
-                    if let Ok(json) = serde_json::to_string(&marker) {
-                        let _ = writeln!(file, "{json}");
-                    }
+                    let _ = writeln!(file, "{json}");
                 }
             }
         }

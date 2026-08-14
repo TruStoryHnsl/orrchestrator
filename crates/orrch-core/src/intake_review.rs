@@ -151,7 +151,10 @@ pub fn load_intake_review(vault_dir: &Path, projects: &[Project]) -> Option<Inta
         ));
     }
 
-    candidates.into_iter().min_by_key(|(t, _)| *t).map(|(_, r)| r)
+    candidates
+        .into_iter()
+        .min_by_key(|(t, _)| *t)
+        .map(|(_, r)| r)
 }
 
 /// Load a single review file from a specific workspace directory, even if
@@ -342,8 +345,16 @@ mod tests {
             "status": "pending",
             "source_idea": "both.md",
         });
-        std::fs::write(ws.join("review.json"), serde_json::to_string(&canonical).unwrap()).unwrap();
-        std::fs::write(ws.join("intake_review.json"), serde_json::to_string(&legacy).unwrap()).unwrap();
+        std::fs::write(
+            ws.join("review.json"),
+            serde_json::to_string(&canonical).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            ws.join("intake_review.json"),
+            serde_json::to_string(&legacy).unwrap(),
+        )
+        .unwrap();
 
         let result = load_intake_review(vault, &[]).unwrap();
         assert_eq!(result.optimized, "canonical opt");

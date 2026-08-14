@@ -162,12 +162,11 @@ impl VoiceEngine {
             offset += stride;
             if offset + chunk_samples > audio_16k_mono.len() && offset < audio_16k_mono.len() {
                 let remaining = &audio_16k_mono[offset..];
-                if remaining.len() > overlap_samples {
-                    if let Ok(text) = self.transcribe_chunk(remaining) {
-                        if !text.is_empty() {
-                            results.push(text);
-                        }
-                    }
+                if remaining.len() > overlap_samples
+                    && let Ok(text) = self.transcribe_chunk(remaining)
+                    && !text.is_empty()
+                {
+                    results.push(text);
                 }
                 break;
             }

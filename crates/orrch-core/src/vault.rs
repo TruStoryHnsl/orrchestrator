@@ -3,10 +3,10 @@
 //! Stored in ~/projects/orrchestrator/plans/*.md
 //! Pipeline state stored in ~/projects/orrchestrator/plans/.pipeline/<filename>.json
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
 /// Pipeline state for an idea going through instruction intake.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -57,7 +57,9 @@ impl PipelineState {
     /// Implementation percentage (0.0 - 1.0) based on instruction completion.
     pub fn implementation_ratio(&self) -> f64 {
         let total = self.total_instructions();
-        if total == 0 { return 0.0; }
+        if total == 0 {
+            return 0.0;
+        }
         self.total_implemented() as f64 / total as f64
     }
 
@@ -65,11 +67,15 @@ impl PipelineState {
     /// 0 = not submitted, 1-49 = intake processing, 50 = instructions distributed,
     /// 51-99 = partially implemented, 100 = all implemented.
     pub fn recompute_progress(&mut self) {
-        if self.progress == 0 { return; } // not submitted, don't touch
+        if self.progress == 0 {
+            return;
+        } // not submitted, don't touch
         let total = self.total_instructions();
         if total == 0 {
             // Submitted but no instructions distributed yet — intake phase
-            if self.progress < 50 { return; }
+            if self.progress < 50 {
+                return;
+            }
         }
         let implemented = self.total_implemented();
         if implemented >= total && total > 0 {
@@ -97,7 +103,12 @@ impl PipelineState {
     /// it. A just-taken-in intention (progress 50, 0% implemented) is
     /// rendered at full yellow so it's maximally visible during the window
     /// when the user most needs to act on it.
-    pub fn gradient_color(&self, default: (u8, u8, u8), yellow: (u8, u8, u8), green: (u8, u8, u8)) -> (u8, u8, u8) {
+    pub fn gradient_color(
+        &self,
+        default: (u8, u8, u8),
+        yellow: (u8, u8, u8),
+        green: (u8, u8, u8),
+    ) -> (u8, u8, u8) {
         let p = self.progress;
         if p < 5 {
             default
@@ -140,53 +151,54 @@ pub fn load_ideas(vault_dir: &Path) -> Vec<Idea> {
     if let Ok(entries) = fs::read_dir(vault_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Ok(contents) = fs::read_to_string(&path) {
-                    let filename = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(contents) = fs::read_to_string(&path)
+            {
+                let filename = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
 
-                    // Title: first non-empty line (strip # prefix)
-                    let title = contents
-                        .lines()
-                        .find(|l| !l.trim().is_empty())
-                        .unwrap_or(&filename)
-                        .trim_start_matches('#')
-                        .trim()
-                        .to_string();
+                // Title: first non-empty line (strip # prefix)
+                let title = contents
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or(&filename)
+                    .trim_start_matches('#')
+                    .trim()
+                    .to_string();
 
-                    // Preview: first 80 chars of second non-empty line
-                    let preview = contents
-                        .lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .nth(1)
-                        .unwrap_or("")
-                        .chars()
-                        .take(80)
-                        .collect();
+                // Preview: first 80 chars of second non-empty line
+                let preview = contents
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .nth(1)
+                    .unwrap_or("")
+                    .chars()
+                    .take(80)
+                    .collect();
 
-                    // Modification time
-                    let modified = entry.metadata()
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                        .map(|d: std::time::Duration| d.as_secs())
-                        .unwrap_or(0);
+                // Modification time
+                let modified = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                    .map(|d: std::time::Duration| d.as_secs())
+                    .unwrap_or(0);
 
-                    // Load pipeline state
-                    let pipeline = load_pipeline_state(&pipeline_dir, &filename);
+                // Load pipeline state
+                let pipeline = load_pipeline_state(&pipeline_dir, &filename);
 
-                    ideas.push(Idea {
-                        filename,
-                        title,
-                        preview,
-                        path,
-                        modified,
-                        pipeline,
-                    });
-                }
+                ideas.push(Idea {
+                    filename,
+                    title,
+                    preview,
+                    path,
+                    modified,
+                    pipeline,
+                });
             }
         }
     }
@@ -215,23 +227,25 @@ pub fn save_idea(vault_dir: &Path, text: &str) -> anyhow::Result<PathBuf> {
 /// Load pipeline state for an idea file.
 fn load_pipeline_state(pipeline_dir: &Path, filename: &str) -> PipelineState {
     let state_file = pipeline_dir.join(format!("{}.json", filename));
-    if state_file.exists() {
-        if let Ok(content) = fs::read_to_string(&state_file) {
-            if let Ok(state) = serde_json::from_str(&content) {
-                return state;
-            }
-        }
+    if state_file.exists()
+        && let Ok(content) = fs::read_to_string(&state_file)
+        && let Ok(state) = serde_json::from_str(&content)
+    {
+        return state;
     }
     PipelineState::default()
 }
 
 /// Save pipeline state for an idea file.
-pub fn save_pipeline_state(vault_dir: &Path, filename: &str, state: &PipelineState) -> std::io::Result<()> {
+pub fn save_pipeline_state(
+    vault_dir: &Path,
+    filename: &str,
+    state: &PipelineState,
+) -> std::io::Result<()> {
     let pipeline_dir = vault_dir.join(".pipeline");
     fs::create_dir_all(&pipeline_dir)?;
     let state_file = pipeline_dir.join(format!("{}.json", filename));
-    let json = serde_json::to_string_pretty(state)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(state).map_err(std::io::Error::other)?;
     fs::write(state_file, json)
 }
 
@@ -253,7 +267,7 @@ pub fn save_pipeline_state(vault_dir: &Path, filename: &str, state: &PipelineSta
 // On submit: try Layer 2; if it fails, fall back to Layer 1 refusal.
 
 /// Encode an absolute path the way nvim names its swap files: replace `/`
-/// with `%`. So `/home/user/foo.md` → `%home%corr%foo.md`.
+/// with `%`. So `/home/user/foo.md` → `%home%user%foo.md`.
 fn nvim_swap_encoded(path: &Path) -> String {
     path.to_string_lossy().replace('/', "%")
 }
@@ -299,10 +313,10 @@ fn process_holding_file(path: &Path) -> Option<u32> {
             Err(_) => continue,
         };
         for fd in fds.flatten() {
-            if let Ok(link) = std::fs::read_link(fd.path()) {
-                if link == canonical {
-                    return Some(pid);
-                }
+            if let Ok(link) = std::fs::read_link(fd.path())
+                && link == canonical
+            {
+                return Some(pid);
             }
         }
     }
@@ -354,7 +368,12 @@ pub fn request_nvim_save(file: &Path) -> bool {
         None => return false,
     };
     std::process::Command::new("nvim")
-        .args(["--server", socket_str, "--remote-expr", "execute('silent write')"])
+        .args([
+            "--server",
+            socket_str,
+            "--remote-expr",
+            "execute('silent write')",
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -377,7 +396,11 @@ pub fn submit_to_pipeline(vault_dir: &Path, idea: &Idea) -> std::io::Result<Pipe
 }
 
 /// Update pipeline progress for an idea.
-pub fn update_pipeline_progress(vault_dir: &Path, filename: &str, progress: u8) -> std::io::Result<()> {
+pub fn update_pipeline_progress(
+    vault_dir: &Path,
+    filename: &str,
+    progress: u8,
+) -> std::io::Result<()> {
     let mut state = load_pipeline_state(&vault_dir.join(".pipeline"), filename);
     state.progress = progress.min(100);
     if progress == 0 {
@@ -411,12 +434,12 @@ pub fn refresh_implementation_from_inboxes(projects_dir: &Path, vault_dir: &Path
                             pending_sources.insert(tail[..end].to_string());
                         }
                     }
-                    if line.starts_with("### ") {
-                        if let Some(colon) = line.find(':') {
-                            let code = line[4..colon].trim();
-                            if code.starts_with("INS-") {
-                                pending_codes.insert(code.to_string());
-                            }
+                    if line.starts_with("### ")
+                        && let Some(colon) = line.find(':')
+                    {
+                        let code = line[4..colon].trim();
+                        if code.starts_with("INS-") {
+                            pending_codes.insert(code.to_string());
                         }
                     }
                 }
@@ -483,14 +506,14 @@ pub fn intake_workspace(vault_dir: &Path, idea_filename: &str) -> PathBuf {
 /// user has *explicitly confirmed* the optimized review in the TUI.
 fn intake_step_to_progress(step: u32) -> u8 {
     match step {
-        0 => 5,   // initialized
-        1 => 10,  // executive assistant triaging
-        2 => 20,  // COO optimizing
-        3 => 30,  // pending review (waiting on user)
-        4 => 32,  // user reviewing
-        5 => 38,  // COO routing
-        6 => 44,  // appending to inboxes
-        7 => 49,  // PM incorporating
+        0 => 5,  // initialized
+        1 => 10, // executive assistant triaging
+        2 => 20, // COO optimizing
+        3 => 30, // pending review (waiting on user)
+        4 => 32, // user reviewing
+        5 => 38, // COO routing
+        6 => 44, // appending to inboxes
+        7 => 49, // PM incorporating
         _ => 49,
     }
 }
@@ -524,9 +547,13 @@ pub fn sync_intake_progress(vault_dir: &Path, idea_filename: &str) -> bool {
     let pipeline_dir = vault_dir.join(".pipeline");
     let mut state = load_pipeline_state(&pipeline_dir, idea_filename);
     // Don't touch ideas that have already advanced past intake.
-    if state.progress >= 50 { return false; }
+    if state.progress >= 50 {
+        return false;
+    }
     // Don't touch ideas that were never submitted.
-    if state.progress == 0 { return false; }
+    if state.progress == 0 {
+        return false;
+    }
 
     let new_progress: u8 = match parsed.status.as_str() {
         // Skill marked itself failed/rejected — surface as 1 (stuck) so the
@@ -548,7 +575,12 @@ pub fn sync_intake_progress(vault_dir: &Path, idea_filename: &str) -> bool {
 }
 
 /// Set pipeline targets (called when instructions are distributed to projects).
-pub fn set_pipeline_targets(vault_dir: &Path, filename: &str, package_name: &str, targets: Vec<PipelineTarget>) -> std::io::Result<()> {
+pub fn set_pipeline_targets(
+    vault_dir: &Path,
+    filename: &str,
+    package_name: &str,
+    targets: Vec<PipelineTarget>,
+) -> std::io::Result<()> {
     let pipeline_dir = vault_dir.join(".pipeline");
     let mut state = load_pipeline_state(&pipeline_dir, filename);
     state.package_name = Some(package_name.to_string());
@@ -579,19 +611,34 @@ pub fn sync_targets_from_workflow(vault_dir: &Path, idea_filename: &str) -> bool
         Ok(p) => p,
         Err(_) => return false,
     };
-    if parsed.routed.is_empty() { return false; }
+    if parsed.routed.is_empty() {
+        return false;
+    }
 
     let pipeline_dir = vault_dir.join(".pipeline");
     let mut state = load_pipeline_state(&pipeline_dir, idea_filename);
-    if !state.targets.is_empty() { return false; } // already set
+    if !state.targets.is_empty() {
+        return false;
+    } // already set
 
-    let targets: Vec<PipelineTarget> = parsed.routed.into_iter().map(|(project, codes)| {
-        let instruction_count = codes.len() as u32;
-        PipelineTarget { project, instruction_count, implemented_count: 0, codes }
-    }).collect();
+    let targets: Vec<PipelineTarget> = parsed
+        .routed
+        .into_iter()
+        .map(|(project, codes)| {
+            let instruction_count = codes.len() as u32;
+            PipelineTarget {
+                project,
+                instruction_count,
+                implemented_count: 0,
+                codes,
+            }
+        })
+        .collect();
 
     state.targets = targets;
-    if state.progress < 50 { state.progress = 50; }
+    if state.progress < 50 {
+        state.progress = 50;
+    }
     let _ = save_pipeline_state(vault_dir, idea_filename, &state);
     true
 }
@@ -623,7 +670,9 @@ pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea
     }
 
     let mut state = load_pipeline_state(&pipeline_dir, &idea.filename);
-    if state.targets.is_empty() || state.progress < 50 { return false; }
+    if state.targets.is_empty() || state.progress < 50 {
+        return false;
+    }
 
     let source_marker = format!("plans/{}", idea.filename);
     let mut changed = false;
@@ -637,8 +686,14 @@ pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea
         let mut in_source_block = false;
         if let Ok(content) = fs::read_to_string(&inbox_path) {
             for line in content.lines() {
-                if line.contains(&source_marker) { in_source_block = true; }
-                if in_source_block && (line.contains("✓ IMPLEMENTED") || line.contains("[x]") || line.contains("COMPLETED")) {
+                if line.contains(&source_marker) {
+                    in_source_block = true;
+                }
+                if in_source_block
+                    && (line.contains("✓ IMPLEMENTED")
+                        || line.contains("[x]")
+                        || line.contains("COMPLETED"))
+                {
                     implemented += 1;
                 }
             }
@@ -649,13 +704,16 @@ pub fn sync_pipeline_progress(vault_dir: &Path, projects_dir: &Path, idea: &Idea
         if let Ok(plan) = fs::read_to_string(&plan_path) {
             if target.codes.is_empty() {
                 // No specific codes — fall back to any [x] INS- line capped at instruction_count
-                let plan_count = plan.lines()
+                let plan_count = plan
+                    .lines()
                     .filter(|l| l.contains("[x]") && l.contains("INS-"))
                     .count() as u32;
                 implemented = implemented.max(plan_count);
             } else {
                 for line in plan.lines() {
-                    if line.contains("[x]") && target.codes.iter().any(|c| line.contains(c.as_str())) {
+                    if line.contains("[x]")
+                        && target.codes.iter().any(|c| line.contains(c.as_str()))
+                    {
                         implemented += 1;
                     }
                 }
@@ -684,14 +742,20 @@ mod tests {
 
     #[test]
     fn test_gradient_default_at_zero() {
-        let state = PipelineState { progress: 0, ..Default::default() };
+        let state = PipelineState {
+            progress: 0,
+            ..Default::default()
+        };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         assert_eq!(color, (200, 200, 220));
     }
 
     #[test]
     fn test_gradient_yellow_at_5() {
-        let state = PipelineState { progress: 5, ..Default::default() };
+        let state = PipelineState {
+            progress: 5,
+            ..Default::default()
+        };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         assert_eq!(color, (255, 200, 50));
     }
@@ -702,7 +766,10 @@ mod tests {
         // been implemented yet. Under the new gradient, this sits roughly
         // halfway between yellow and green — close to the yellow end,
         // because the 5..100 range is 95 units wide and 50 is at t ≈ 0.47.
-        let state = PipelineState { progress: 50, ..Default::default() };
+        let state = PipelineState {
+            progress: 50,
+            ..Default::default()
+        };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         // Must NOT be default (200, 200, 220).
         assert_ne!(color, (200, 200, 220));
@@ -714,14 +781,20 @@ mod tests {
 
     #[test]
     fn test_gradient_green_at_100() {
-        let state = PipelineState { progress: 100, ..Default::default() };
+        let state = PipelineState {
+            progress: 100,
+            ..Default::default()
+        };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         assert_eq!(color, (80, 200, 120));
     }
 
     #[test]
     fn test_gradient_midpoint_yellow_to_green() {
-        let state = PipelineState { progress: 52, ..Default::default() }; // ~halfway 5-100
+        let state = PipelineState {
+            progress: 52,
+            ..Default::default()
+        }; // ~halfway 5-100
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         // Should be between yellow and green
         assert!(color.0 > 80 && color.0 < 255);
@@ -731,7 +804,10 @@ mod tests {
     fn test_gradient_pure_yellow_immediately_after_submit() {
         // Progress 5 fires the moment the user presses `s`. This is the
         // "harsh transition to maximum yellow" state.
-        let state = PipelineState { progress: 5, ..Default::default() };
+        let state = PipelineState {
+            progress: 5,
+            ..Default::default()
+        };
         let color = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
         assert_eq!(color, (255, 200, 50));
     }
@@ -745,7 +821,10 @@ mod tests {
         let mut prev_r = 255i16;
         let mut prev_b = 50i16;
         for p in 5..=100u8 {
-            let state = PipelineState { progress: p, ..Default::default() };
+            let state = PipelineState {
+                progress: p,
+                ..Default::default()
+            };
             let (r, _g, b) = state.gradient_color((200, 200, 220), (255, 200, 50), (80, 200, 120));
             assert!(
                 r as i16 <= prev_r,
@@ -764,14 +843,20 @@ mod tests {
     fn test_intake_workspace_strips_md_extension() {
         let vault = std::path::Path::new("/tmp/vault");
         let ws = intake_workspace(vault, "2026-04-21-00-14.md");
-        assert_eq!(ws, std::path::PathBuf::from("/tmp/vault/.pipeline/2026-04-21-00-14"));
+        assert_eq!(
+            ws,
+            std::path::PathBuf::from("/tmp/vault/.pipeline/2026-04-21-00-14")
+        );
     }
 
     #[test]
     fn test_intake_workspace_handles_no_extension() {
         let vault = std::path::Path::new("/tmp/vault");
         let ws = intake_workspace(vault, "raw_idea");
-        assert_eq!(ws, std::path::PathBuf::from("/tmp/vault/.pipeline/raw_idea"));
+        assert_eq!(
+            ws,
+            std::path::PathBuf::from("/tmp/vault/.pipeline/raw_idea")
+        );
     }
 
     #[test]
@@ -888,7 +973,10 @@ mod tests {
         update_pipeline_progress(vault, "test.md", 0).unwrap();
         let reloaded = load_pipeline_state(&vault.join(".pipeline"), "test.md");
         assert_eq!(reloaded.progress, 0);
-        assert_eq!(reloaded.submitted_at, None, "rejecting should clear submission");
+        assert_eq!(
+            reloaded.submitted_at, None,
+            "rejecting should clear submission"
+        );
     }
 
     #[test]
@@ -896,8 +984,18 @@ mod tests {
         let state = PipelineState {
             progress: 75,
             targets: vec![
-                PipelineTarget { project: "foo".into(), instruction_count: 10, implemented_count: 5, codes: vec![] },
-                PipelineTarget { project: "bar".into(), instruction_count: 10, implemented_count: 10, codes: vec![] },
+                PipelineTarget {
+                    project: "foo".into(),
+                    instruction_count: 10,
+                    implemented_count: 5,
+                    codes: vec![],
+                },
+                PipelineTarget {
+                    project: "bar".into(),
+                    instruction_count: 10,
+                    implemented_count: 10,
+                    codes: vec![],
+                },
             ],
             ..Default::default()
         };

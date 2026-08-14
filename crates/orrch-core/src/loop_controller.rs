@@ -51,7 +51,9 @@ pub struct SystemClock {
 
 impl Default for SystemClock {
     fn default() -> Self {
-        Self { origin: std::time::Instant::now() }
+        Self {
+            origin: std::time::Instant::now(),
+        }
     }
 }
 
@@ -173,7 +175,9 @@ impl BlockedReason {
     pub fn summary(&self) -> String {
         match self {
             BlockedReason::NeedsUserDecision {
-                workforce, question, ..
+                workforce,
+                question,
+                ..
             } => format!("'{workforce}' needs a decision: {question}"),
             BlockedReason::AllRemainingWorkUserGated { pending_plan_items } => format!(
                 "all remaining work is user-gated ({} item(s))",
@@ -456,10 +460,7 @@ impl<R: WorkflowRunner, E: WorkEvaluator, C: Clock> LoopController<R, E, C> {
 
             // --- Running: poll the workforce's completion signal. ------------
             LoopState::Running { workforce, since } => {
-                let handle = self
-                    .active
-                    .as_ref()
-                    .expect("Running implies active handle");
+                let handle = self.active.as_ref().expect("Running implies active handle");
                 match self.runner.poll(handle, now) {
                     RunStatus::InProgress => LoopState::Running { workforce, since },
                     RunStatus::Completed => {
@@ -596,8 +597,7 @@ impl<R: WorkflowRunner, E: WorkEvaluator, C: Clock> LoopController<R, E, C> {
         let resolved = match reason {
             BlockedReason::AllRemainingWorkUserGated { .. } => fb.added_inbox_work,
             BlockedReason::NeedsUserDecision { question, .. } => {
-                fb.answers_decision_for.as_deref() == Some(question.as_str())
-                    || fb.added_inbox_work
+                fb.answers_decision_for.as_deref() == Some(question.as_str()) || fb.added_inbox_work
             }
             BlockedReason::RetriesExhausted { .. } => fb.added_inbox_work,
         };
@@ -827,7 +827,11 @@ mod tests {
         // Cursor walked the schedule and wrapped: spawn order 0,1,0,1.
         assert_eq!(c.runner().spawn_log(), vec![0, 1, 0, 1], "wrapped schedule");
         // No live sessions while idle.
-        assert_eq!(c.runner().live_session_count(), 0, "no live session at idle");
+        assert_eq!(
+            c.runner().live_session_count(),
+            0,
+            "no live session at idle"
+        );
     }
 
     // ---------------------------------------------------------------------

@@ -18,9 +18,9 @@ pub enum OutputSignal {
 /// Patterns that indicate the AI is waiting for user input.
 const WAITING_PATTERNS: &[&str] = &[
     // Claude Code patterns
-    "❯",                    // Claude Code prompt
-    "> ",                   // generic prompt
-    "? ",                   // question prompt
+    "❯",  // Claude Code prompt
+    "> ", // generic prompt
+    "? ", // question prompt
     "Press Enter",
     "Do you want to",
     "Would you like",

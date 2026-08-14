@@ -1,3 +1,4 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -5,17 +6,16 @@ use ratatui::widgets::{
     Block, Borders, Cell, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
     Table, TableState, Wrap,
 };
-use ratatui::Frame;
 
-use orrch_core::{LifecycleStage, Project, SessionState, FeedbackStatus};
 use crate::app::{App, IntakeReviewFocus, Panel, SubView};
 use crate::markdown::markdown_to_lines;
+use orrch_core::{FeedbackStatus, LifecycleStage, Project, SessionState};
 
 // ─── Color Palette (all high-contrast, readable on translucent bg) ────
 const ACCENT: Color = Color::Rgb(233, 69, 96);
-const TEXT: Color = Color::Rgb(230, 230, 240);      // primary text — always readable
-const TEXT_DIM: Color = Color::Rgb(180, 180, 200);   // secondary text — still readable
-const TEXT_MUTED: Color = Color::Rgb(130, 130, 155);  // tertiary — used sparingly
+const TEXT: Color = Color::Rgb(230, 230, 240); // primary text — always readable
+const TEXT_DIM: Color = Color::Rgb(180, 180, 200); // secondary text — still readable
+const TEXT_MUTED: Color = Color::Rgb(130, 130, 155); // tertiary — used sparingly
 const BG_DARK: Color = Color::Rgb(22, 33, 62);
 const BG_HIGHLIGHT: Color = Color::Rgb(35, 35, 70);
 const WAITING_COLOR: Color = Color::Rgb(255, 200, 50);
@@ -30,14 +30,20 @@ fn feature_status_style(status: orrch_core::FeatureStatus) -> Style {
     use orrch_core::FeatureStatus;
     match status {
         FeatureStatus::Planned | FeatureStatus::Pending => Style::default().fg(TEXT_DIM),
-        FeatureStatus::Implementing | FeatureStatus::InProgress => Style::default().fg(WAITING_COLOR),
+        FeatureStatus::Implementing | FeatureStatus::InProgress => {
+            Style::default().fg(WAITING_COLOR)
+        }
         FeatureStatus::Implemented => Style::default().fg(CYAN),
         FeatureStatus::Testing => Style::default().fg(Color::Rgb(180, 120, 220)),
         FeatureStatus::Verified => Style::default().fg(GREEN),
         FeatureStatus::UserConfirmed => Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
         FeatureStatus::Done => Style::default().fg(GREEN),
-        FeatureStatus::Deprecated => Style::default().fg(Color::Rgb(90, 90, 110)).add_modifier(Modifier::CROSSED_OUT),
-        FeatureStatus::Removed(_) => Style::default().fg(Color::Rgb(200, 60, 60)).add_modifier(Modifier::CROSSED_OUT),
+        FeatureStatus::Deprecated => Style::default()
+            .fg(Color::Rgb(90, 90, 110))
+            .add_modifier(Modifier::CROSSED_OUT),
+        FeatureStatus::Removed(_) => Style::default()
+            .fg(Color::Rgb(200, 60, 60))
+            .add_modifier(Modifier::CROSSED_OUT),
     }
 }
 
@@ -75,48 +81,138 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         SubView::ProjectDetail(idx) => draw_project_detail(frame, app, layout[1], idx),
         SubView::SessionFocus(idx) => draw_session_focus(frame, app, layout[1], idx),
         SubView::ExternalSessionView(pid) => draw_external_session(frame, app, layout[1], pid),
-        SubView::SpawnGoal => { draw_panel_content(frame, app, layout[1]); draw_spawn_goal(frame, app); }
-        SubView::SpawnWorkforce => { draw_panel_content(frame, app, layout[1]); draw_spawn_workforce(frame, app); }
-        SubView::SpawnAgent => { draw_panel_content(frame, app, layout[1]); draw_spawn_agent(frame, app); }
-        SubView::SpawnBackend => { draw_panel_content(frame, app, layout[1]); draw_spawn_backend(frame, app); }
-        SubView::SpawnEngine => { draw_panel_content(frame, app, layout[1]); draw_spawn_engine(frame, app); }
-        SubView::SpawnHost => { draw_panel_content(frame, app, layout[1]); draw_spawn_host(frame, app); }
-        SubView::RoutingSummary => { draw_panel_content(frame, app, layout[1]); draw_routing_summary(frame, app); }
-        SubView::ConfirmDeprecate(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_deprecate(frame, app, idx); }
-        SubView::ConfirmComplete(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_complete(frame, app, idx); }
-        SubView::ConfirmDeleteFeedback(idx) => { draw_panel_content(frame, app, layout[1]); draw_confirm_delete_feedback(frame, app, idx); }
+        SubView::SpawnGoal => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_goal(frame, app);
+        }
+        SubView::SpawnWorkforce => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_workforce(frame, app);
+        }
+        SubView::SpawnAgent => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_agent(frame, app);
+        }
+        SubView::SpawnBackend => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_backend(frame, app);
+        }
+        SubView::SpawnEngine => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_engine(frame, app);
+        }
+        SubView::SpawnHost => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_spawn_host(frame, app);
+        }
+        SubView::RoutingSummary => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_routing_summary(frame, app);
+        }
+        SubView::ConfirmDeprecate(idx) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_deprecate(frame, app, idx);
+        }
+        SubView::ConfirmComplete(idx) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_complete(frame, app, idx);
+        }
+        SubView::ConfirmDeleteFeedback(idx) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_delete_feedback(frame, app, idx);
+        }
         SubView::DeprecatedBrowser => draw_deprecated_browser(frame, app, layout[1]),
-        SubView::AppMenu => { draw_panel_content(frame, app, layout[1]); draw_app_menu(frame, app); }
-        SubView::ActionMenu => { draw_panel_content(frame, app, layout[1]); draw_action_menu(frame, app); }
-        SubView::ConfirmDeleteDeprecated => { draw_deprecated_browser(frame, app, layout[1]); draw_confirm_delete_deprecated(frame, app); }
-        SubView::NewProjectName => { draw_panel_content(frame, app, layout[1]); draw_new_project_name(frame, app); }
-        SubView::NewProjectScope => { draw_panel_content(frame, app, layout[1]); draw_new_project_scope(frame, app); }
-        SubView::NewProjectConfirm => { draw_panel_content(frame, app, layout[1]); draw_new_project_confirm(frame, app); }
+        SubView::AppMenu => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_app_menu(frame, app);
+        }
+        SubView::ActionMenu => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_action_menu(frame, app);
+        }
+        SubView::ConfirmDeleteDeprecated => {
+            draw_deprecated_browser(frame, app, layout[1]);
+            draw_confirm_delete_deprecated(frame, app);
+        }
+        SubView::NewProjectName => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_new_project_name(frame, app);
+        }
+        SubView::NewProjectScope => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_new_project_scope(frame, app);
+        }
+        SubView::NewProjectConfirm => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_new_project_confirm(frame, app);
+        }
         SubView::ConnectionPreset
         | SubView::ConnectionName
         | SubView::ConnectionBaseUrl
         | SubView::ConnectionApiKey
         | SubView::ConnectionModel
         | SubView::ConnectionRateLimit
-        | SubView::ConnectionConfirm => { draw_panel_content(frame, app, layout[1]); draw_connection_form(frame, app); }
-        SubView::ConfirmDeleteConnection => { draw_panel_content(frame, app, layout[1]); draw_confirm_delete_connection(frame, app); }
-        SubView::FeedbackConfirm(_) => { draw_panel_content(frame, app, layout[1]); draw_feedback_confirm(frame, app); }
-        SubView::CommitReview(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_review(frame, app); }
-        SubView::CommitCorrecting(_) => { draw_panel_content(frame, app, layout[1]); draw_commit_correcting(frame, app); }
-        SubView::WorkflowPicker => { draw_panel_content(frame, app, layout[1]); draw_workflow_picker(frame, app); }
-        SubView::AddFeature(idx) => { draw_project_detail(frame, app, layout[1], idx); draw_add_feature(frame, app); }
-        SubView::AddMcpServer => { draw_panel_content(frame, app, layout[1]); draw_add_mcp_server(frame, app); }
-        SubView::RenameWorkforce(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Workforce File"); }
-        SubView::RenameIdea(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Idea"); }
-        SubView::ConfirmRollback => { draw_panel_content(frame, app, layout[1]); draw_confirm_rollback(frame, app); }
+        | SubView::ConnectionConfirm => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_connection_form(frame, app);
+        }
+        SubView::ConfirmDeleteConnection => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_delete_connection(frame, app);
+        }
+        SubView::FeedbackConfirm(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_feedback_confirm(frame, app);
+        }
+        SubView::CommitReview(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_commit_review(frame, app);
+        }
+        SubView::CommitCorrecting(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_commit_correcting(frame, app);
+        }
+        SubView::WorkflowPicker => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_workflow_picker(frame, app);
+        }
+        SubView::AddFeature(idx) => {
+            draw_project_detail(frame, app, layout[1], idx);
+            draw_add_feature(frame, app);
+        }
+        SubView::AddMcpServer => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_add_mcp_server(frame, app);
+        }
+        SubView::RenameWorkforce(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_rename_popup(frame, app, "Rename Workforce File");
+        }
+        SubView::RenameIdea(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_rename_popup(frame, app, "Rename Idea");
+        }
+        SubView::ConfirmRollback => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_confirm_rollback(frame, app);
+        }
         SubView::ConfirmKillSession(ref name) => {
             let name = name.clone();
             draw_panel_content(frame, app, layout[1]);
             draw_confirm_kill_session(frame, &name);
         }
-        SubView::RenameProject(_) => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Project"); }
-        SubView::RenamePlanFeature { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename Plan Feature"); }
-        SubView::RenameFile { .. } => { draw_panel_content(frame, app, layout[1]); draw_rename_popup(frame, app, "Rename File"); }
+        SubView::RenameProject(_) => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_rename_popup(frame, app, "Rename Project");
+        }
+        SubView::RenamePlanFeature { .. } => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_rename_popup(frame, app, "Rename Plan Feature");
+        }
+        SubView::RenameFile { .. } => {
+            draw_panel_content(frame, app, layout[1]);
+            draw_rename_popup(frame, app, "Rename File");
+        }
         SubView::SteerSession(idx) => {
             draw_panel_content(frame, app, layout[1]);
             draw_steer_session_input(frame, app, idx);
@@ -164,52 +260,70 @@ fn draw_panel_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let panel_count = Panel::ALL.len();
     let width = area.width as usize;
     // Each slot (label + divider) is exactly width/N chars. Dividers always render.
-    let slot_width = if panel_count > 0 { width / panel_count } else { width };
-    let remainder = if panel_count > 0 { width % panel_count } else { 0 };
+    let slot_width = if panel_count > 0 {
+        width / panel_count
+    } else {
+        width
+    };
+    let remainder = if panel_count > 0 {
+        width % panel_count
+    } else {
+        0
+    };
 
-    let spans: Vec<Span> = Panel::ALL.iter().enumerate().flat_map(|(i, p)| {
-        let is_last = i == panel_count - 1;
-        // Last slot absorbs remainder pixels and has no divider
-        let label_width = if is_last {
-            slot_width + remainder
-        } else {
-            slot_width.saturating_sub(1) // 1 char reserved for "│"
-        };
-
-        // Pick label tier that fits (need at least 1 char padding each side)
-        let label = if label_width >= p.label().len() + 2 {
-            p.label()
-        } else if label_width >= p.short_label().len() + 2 {
-            p.short_label()
-        } else {
-            p.tiny_label()
-        };
-
-        // Center label, truncate if still too wide
-        let pad_total = label_width.saturating_sub(label.len());
-        let pad_left = pad_total / 2;
-        let pad_right = pad_total - pad_left;
-        let padded = format!("{}{}{}", " ".repeat(pad_left), label, " ".repeat(pad_right));
-        let truncated: String = padded.chars().take(label_width).collect();
-
-        let style = if *p == app.panel {
-            if focused {
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    let spans: Vec<Span> = Panel::ALL
+        .iter()
+        .enumerate()
+        .flat_map(|(i, p)| {
+            let is_last = i == panel_count - 1;
+            // Last slot absorbs remainder pixels and has no divider
+            let label_width = if is_last {
+                slot_width + remainder
             } else {
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                slot_width.saturating_sub(1) // 1 char reserved for "│"
+            };
+
+            // Pick label tier that fits (need at least 1 char padding each side)
+            let label = if label_width >= p.label().len() + 2 {
+                p.label()
+            } else if label_width >= p.short_label().len() + 2 {
+                p.short_label()
+            } else {
+                p.tiny_label()
+            };
+
+            // Center label, truncate if still too wide
+            let pad_total = label_width.saturating_sub(label.len());
+            let pad_left = pad_total / 2;
+            let pad_right = pad_total - pad_left;
+            let padded = format!("{}{}{}", " ".repeat(pad_left), label, " ".repeat(pad_right));
+            let truncated: String = padded.chars().take(label_width).collect();
+
+            let style = if *p == app.panel {
+                if focused {
+                    Style::default()
+                        .fg(ACCENT)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                } else {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                }
+            } else {
+                Style::default().fg(TEXT_MUTED)
+            };
+
+            let mut result = vec![Span::styled(truncated, style)];
+            if !is_last {
+                result.push(Span::styled("│", Style::default().fg(TEXT_MUTED)));
             }
-        } else {
-            Style::default().fg(TEXT_MUTED)
-        };
+            result
+        })
+        .collect();
 
-        let mut result = vec![Span::styled(truncated, style)];
-        if !is_last {
-            result.push(Span::styled("│", Style::default().fg(TEXT_MUTED)));
-        }
-        result
-    }).collect();
-
-    let bg = if focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
+    let bg = if focused {
+        Color::Rgb(30, 30, 55)
+    } else {
+        BG_DARK
+    };
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
         area,
@@ -249,7 +363,9 @@ fn draw_hypervise(frame: &mut Frame, app: &mut App, area: Rect) {
     // Sub-tab bar
     let mut spans: Vec<Span> = Vec::new();
     for (i, tab) in HyperviseSub::ALL.iter().enumerate() {
-        if i > 0 { spans.push(Span::raw("  ")); }
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
         let sel = *tab == app.hypervise_sub;
         let style = if sel {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -286,10 +402,12 @@ fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
         let p = Paragraph::new(msg)
             .style(Style::default().fg(TEXT_DIM))
             .wrap(Wrap { trim: false })
-            .block(Block::default()
-                .title(" Loops (empty) ")
-                .borders(Borders::ALL)
-                .style(Style::default().fg(TEXT_MUTED)));
+            .block(
+                Block::default()
+                    .title(" Loops (empty) ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            );
         frame.render_widget(p, area);
         return;
     }
@@ -299,7 +417,9 @@ fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
         Cell::from("Name").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Project").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Workflows").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-    ]).height(1).bottom_margin(1);
+    ])
+    .height(1)
+    .bottom_margin(1);
 
     let rows: Vec<Row> = app
         .loop_schedules
@@ -309,7 +429,10 @@ fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
             let on = if s.enabled { "●" } else { "○" };
             let on_color = if s.enabled { GREEN } else { TEXT_DIM };
             let name_color = if i == app.loop_selected { ACCENT } else { TEXT };
-            let proj = s.project_dir.file_name().map(|f| f.to_string_lossy().to_string())
+            let proj = s
+                .project_dir
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| "?".into());
             let wfs = s.workflows.join(" → ");
             Row::new(vec![
@@ -330,10 +453,15 @@ fn draw_hypervise_loops_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(Block::default()
-            .title(format!(" Loops ({}) — [t]=toggle  [Del]=remove  [r]=reload ", app.loop_schedules.len()))
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .title(format!(
+                    " Loops ({}) — [t]=toggle  [Del]=remove  [r]=reload ",
+                    app.loop_schedules.len()
+                ))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .column_spacing(2);
     frame.render_widget(table, area);
 }
@@ -353,11 +481,12 @@ fn draw_hypervise_voice_tab(frame: &mut Frame, _app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default()
+    let list = List::new(items).block(
+        Block::default()
             .title(" Voice Control ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+            .style(Style::default().fg(TEXT_MUTED)),
+    );
     frame.render_widget(list, area);
 }
 
@@ -377,7 +506,11 @@ pub fn voice_panel_lines(
         ];
     };
 
-    let mode = if status.listening { "🎙 LISTENING" } else { "○ idle" };
+    let mode = if status.listening {
+        "🎙 LISTENING"
+    } else {
+        "○ idle"
+    };
     let readiness = if status.model_ready {
         String::new()
     } else {
@@ -398,7 +531,10 @@ pub fn voice_panel_lines(
     }
 
     if status.listening && !status.partial_transcript.trim().is_empty() {
-        lines.push(format!("▶ {}", compact_inline(status.partial_transcript.trim(), 100)));
+        lines.push(format!(
+            "▶ {}",
+            compact_inline(status.partial_transcript.trim(), 100)
+        ));
     }
 
     if lines.len() >= max_rows {
@@ -417,15 +553,21 @@ pub fn voice_panel_lines(
     }
 
     let remaining_rows = max_rows.saturating_sub(lines.len());
-    lines.extend(activities.iter().rev().take(remaining_rows).map(|activity| {
-        format!(
-            "{}  \"{}\"  → {}  [{}]",
-            hh_mm_ss(activity.ts_ms),
-            compact_inline(&activity.utterance, 72),
-            voice_action_summary(&activity.action),
-            voice_status_label(&activity.status),
-        )
-    }));
+    lines.extend(
+        activities
+            .iter()
+            .rev()
+            .take(remaining_rows)
+            .map(|activity| {
+                format!(
+                    "{}  \"{}\"  → {}  [{}]",
+                    hh_mm_ss(activity.ts_ms),
+                    compact_inline(&activity.utterance, 72),
+                    voice_action_summary(&activity.action),
+                    voice_status_label(&activity.status),
+                )
+            }),
+    );
     lines
 }
 
@@ -453,7 +595,10 @@ fn voice_action_summary(action: &orrch_voice::intent::VoiceAction) -> String {
     use orrch_voice::intent::VoiceAction;
 
     match action {
-        VoiceAction::Dispatch { project, instruction } => {
+        VoiceAction::Dispatch {
+            project,
+            instruction,
+        } => {
             format!("Dispatch → {project}: {}", compact_inline(instruction, 80))
         }
         VoiceAction::SpawnSession { project, goal } => {
@@ -514,24 +659,38 @@ fn draw_hypervise_token_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
         Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Tokens").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-    ]).height(1).bottom_margin(1);
+    ])
+    .height(1)
+    .bottom_margin(1);
 
     let rows: Vec<Row> = if summary.per_provider.is_empty() {
         vec![Row::new(vec![
             Cell::from("(no usage tracked yet)").style(Style::default().fg(TEXT_DIM)),
-            Cell::from(""), Cell::from(""), Cell::from(""), Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
         ])]
     } else {
-        summary.per_provider.iter().map(|p| {
-            let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
-            Row::new(vec![
-                Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
-                Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
-                Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
-                Cell::from(last).style(Style::default().fg(TEXT_DIM)),
-                Cell::from("n/a (TOK-001)").style(Style::default().fg(TEXT_MUTED)),
-            ])
-        }).collect()
+        summary
+            .per_provider
+            .iter()
+            .map(|p| {
+                let last = p
+                    .last_used
+                    .as_deref()
+                    .map(usage::format_ago)
+                    .unwrap_or_else(|| "—".into());
+                Row::new(vec![
+                    Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
+                    Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
+                    Cell::from(usage::format_duration(p.total_duration_secs))
+                        .style(Style::default().fg(TEXT)),
+                    Cell::from(last).style(Style::default().fg(TEXT_DIM)),
+                    Cell::from("n/a (TOK-001)").style(Style::default().fg(TEXT_MUTED)),
+                ])
+            })
+            .collect()
     };
 
     let widths = [
@@ -544,10 +703,12 @@ fn draw_hypervise_token_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(Block::default()
-            .title(format!(" Token Usage (last {}h) ", summary.period_hours))
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .title(format!(" Token Usage (last {}h) ", summary.period_hours))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .column_spacing(2);
     frame.render_widget(table, area);
 }
@@ -557,49 +718,116 @@ fn draw_hypervise_token_usage_tab(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_deprecated_browser(frame: &mut Frame, app: &App, area: Rect) {
     let hsplit = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(20), Constraint::Percentage(20), Constraint::Percentage(60)])
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+        ])
         .split(area);
 
     // Parent column
     let parent_focused = !app.dep_in_child;
-    let parent_border = if parent_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
-    let rel_path = app.dep_path.strip_prefix(&app.dep_root).unwrap_or(&app.dep_path);
-    let parent_title = if rel_path.as_os_str().is_empty() { " deprecated/ ".to_string() } else { format!(" {}/ ", rel_path.display()) };
+    let parent_border = if parent_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
+    let rel_path = app
+        .dep_path
+        .strip_prefix(&app.dep_root)
+        .unwrap_or(&app.dep_path);
+    let parent_title = if rel_path.as_os_str().is_empty() {
+        " deprecated/ ".to_string()
+    } else {
+        format!(" {}/ ", rel_path.display())
+    };
 
-    let parent_items: Vec<ListItem> = app.dep_parent_entries.iter().map(|e| {
-        let style = if e.is_dir { Style::default().fg(CYAN) } else { Style::default().fg(TEXT) };
-        ListItem::new(format!("{} {}", e.icon(), e.name)).style(style)
-    }).collect();
+    let parent_items: Vec<ListItem> = app
+        .dep_parent_entries
+        .iter()
+        .map(|e| {
+            let style = if e.is_dir {
+                Style::default().fg(CYAN)
+            } else {
+                Style::default().fg(TEXT)
+            };
+            ListItem::new(format!("{} {}", e.icon(), e.name)).style(style)
+        })
+        .collect();
     let parent_list = List::new(parent_items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(parent_title).borders(Borders::ALL).style(parent_border))
-        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .block(
+            Block::default()
+                .title(parent_title)
+                .borders(Borders::ALL)
+                .style(parent_border),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
     let mut pstate = ListState::default().with_selected(Some(app.dep_parent_selected));
     frame.render_stateful_widget(parent_list, hsplit[0], &mut pstate);
 
     // Child column
     let child_focused = app.dep_in_child;
-    let child_border = if child_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
-    let child_title = app.dep_parent_entries.get(app.dep_parent_selected)
-        .filter(|e| e.is_dir).map(|e| format!(" {}/ ", e.name)).unwrap_or_else(|| " — ".into());
+    let child_border = if child_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
+    let child_title = app
+        .dep_parent_entries
+        .get(app.dep_parent_selected)
+        .filter(|e| e.is_dir)
+        .map(|e| format!(" {}/ ", e.name))
+        .unwrap_or_else(|| " — ".into());
 
-    let child_items: Vec<ListItem> = app.dep_child_entries.iter().map(|e| {
-        let style = if e.is_dir { Style::default().fg(CYAN) } else { Style::default().fg(TEXT) };
-        ListItem::new(format!("{} {}", e.icon(), e.name)).style(style)
-    }).collect();
+    let child_items: Vec<ListItem> = app
+        .dep_child_entries
+        .iter()
+        .map(|e| {
+            let style = if e.is_dir {
+                Style::default().fg(CYAN)
+            } else {
+                Style::default().fg(TEXT)
+            };
+            ListItem::new(format!("{} {}", e.icon(), e.name)).style(style)
+        })
+        .collect();
 
     if child_items.is_empty() {
-        let empty = Paragraph::new("  (empty or file)").style(Style::default().fg(TEXT_MUTED))
-            .block(Block::default().title(child_title).borders(Borders::ALL).style(child_border));
+        let empty = Paragraph::new("  (empty or file)")
+            .style(Style::default().fg(TEXT_MUTED))
+            .block(
+                Block::default()
+                    .title(child_title)
+                    .borders(Borders::ALL)
+                    .style(child_border),
+            );
         frame.render_widget(empty, hsplit[1]);
     } else {
         let child_list = List::new(child_items)
             .scroll_padding(SCROLL_PAD)
-            .block(Block::default().title(child_title).borders(Borders::ALL).style(child_border))
-            .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+            .block(
+                Block::default()
+                    .title(child_title)
+                    .borders(Borders::ALL)
+                    .style(child_border),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(BG_HIGHLIGHT)
+                    .add_modifier(Modifier::BOLD),
+            )
             .highlight_symbol("▶ ");
-        let sel = if child_focused { Some(app.dep_child_selected) } else { None };
+        let sel = if child_focused {
+            Some(app.dep_child_selected)
+        } else {
+            None
+        };
         let mut cstate = ListState::default().with_selected(sel);
         frame.render_stateful_widget(child_list, hsplit[1], &mut cstate);
     }
@@ -607,7 +835,11 @@ fn draw_deprecated_browser(frame: &mut Frame, app: &App, area: Rect) {
     // Preview
     let preview = Paragraph::new(app.dep_preview.as_str())
         .style(Style::default().fg(TEXT))
-        .block(Block::default().title(" Details (read-only) ").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(" Details (read-only) ")
+                .borders(Borders::ALL),
+        )
         .wrap(Wrap { trim: false });
     frame.render_widget(preview, hsplit[2]);
 }
@@ -618,7 +850,11 @@ fn draw_deprecated_browser(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, message: &str) {
     let msg = Paragraph::new(message)
         .style(Style::default().fg(TEXT_DIM))
-        .block(Block::default().title(format!(" {} ", title)).borders(Borders::ALL));
+        .block(
+            Block::default()
+                .title(format!(" {} ", title))
+                .borders(Borders::ALL),
+        );
     frame.render_widget(msg, area);
 }
 
@@ -636,7 +872,9 @@ fn draw_analyze(frame: &mut Frame, app: &App, area: Rect) {
     // Sub-tab bar
     let mut spans: Vec<Span> = Vec::new();
     for (i, tab) in AnalyzeTab::ALL.iter().enumerate() {
-        if i > 0 { spans.push(Span::raw("  ")); }
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
         let sel = *tab == app.analyze_tab;
         let style = if sel {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -667,17 +905,25 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
     // Split vertically: provider summary, per-project breakdown, budget footer.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(44), Constraint::Percentage(53), Constraint::Length(1)])
+        .constraints([
+            Constraint::Percentage(44),
+            Constraint::Percentage(53),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     // ── Provider summary ────────────────────────────────────────────────────
     if summary.per_provider.is_empty() {
-        let msg = Paragraph::new("No usage data yet. Session metrics will appear here as you spawn sessions.")
-            .style(Style::default().fg(TEXT_DIM))
-            .block(Block::default()
+        let msg = Paragraph::new(
+            "No usage data yet. Session metrics will appear here as you spawn sessions.",
+        )
+        .style(Style::default().fg(TEXT_DIM))
+        .block(
+            Block::default()
                 .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
                 .borders(Borders::ALL)
-                .style(Style::default().fg(TEXT_MUTED)));
+                .style(Style::default().fg(TEXT_MUTED)),
+        );
         frame.render_widget(msg, chunks[0]);
     } else {
         let header = Row::new(vec![
@@ -685,28 +931,40 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
             Cell::from("Sessions").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Cell::from("Duration").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Cell::from("Last Used").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        ]).height(1).bottom_margin(1);
+        ])
+        .height(1)
+        .bottom_margin(1);
 
         let mut rows: Vec<Row> = Vec::new();
         let mut total_duration: f64 = 0.0;
 
         for p in &summary.per_provider {
             total_duration += p.total_duration_secs;
-            let last = p.last_used.as_deref().map(usage::format_ago).unwrap_or_else(|| "—".into());
+            let last = p
+                .last_used
+                .as_deref()
+                .map(usage::format_ago)
+                .unwrap_or_else(|| "—".into());
             rows.push(Row::new(vec![
                 Cell::from(p.provider.clone()).style(Style::default().fg(CYAN)),
                 Cell::from(format!("{}", p.session_count)).style(Style::default().fg(TEXT)),
-                Cell::from(usage::format_duration(p.total_duration_secs)).style(Style::default().fg(TEXT)),
+                Cell::from(usage::format_duration(p.total_duration_secs))
+                    .style(Style::default().fg(TEXT)),
                 Cell::from(last).style(Style::default().fg(TEXT_DIM)),
             ]));
         }
 
-        rows.push(Row::new(vec![
-            Cell::from("Total").style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{}", summary.total_sessions)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Cell::from(usage::format_duration(total_duration)).style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Cell::from(""),
-        ]).top_margin(1));
+        rows.push(
+            Row::new(vec![
+                Cell::from("Total").style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                Cell::from(format!("{}", summary.total_sessions))
+                    .style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                Cell::from(usage::format_duration(total_duration))
+                    .style(Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                Cell::from(""),
+            ])
+            .top_margin(1),
+        );
 
         let widths = [
             Constraint::Length(14),
@@ -717,10 +975,12 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
 
         let table = Table::new(rows, widths)
             .header(header)
-            .block(Block::default()
-                .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
-                .borders(Borders::ALL)
-                .style(Style::default().fg(TEXT_MUTED)))
+            .block(
+                Block::default()
+                    .title(format!(" Usage Summary (last {}h) ", summary.period_hours))
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_MUTED)),
+            )
             .column_spacing(2);
 
         frame.render_widget(table, chunks[0]);
@@ -733,26 +993,42 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
         Cell::from("Max").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Tokens").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Cost").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-    ]).height(1).bottom_margin(1);
+    ])
+    .height(1)
+    .bottom_margin(1);
 
     let proj_rows: Vec<Row> = if app.projects.is_empty() {
         vec![Row::new(vec![
             Cell::from("(no projects loaded)").style(Style::default().fg(TEXT_DIM)),
-            Cell::from(""), Cell::from(""), Cell::from(""), Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
         ])]
     } else {
-        app.projects.iter().map(|proj| {
-            let sess = app.active_session_count(&proj.path);
-            let max = proj.max_sessions;
-            // Tokens and cost are not tracked per-project yet — show placeholder.
-            Row::new(vec![
-                Cell::from(proj.name.clone()).style(Style::default().fg(if sess > 0 { CYAN } else { TEXT })),
-                Cell::from(format!("{sess}")).style(Style::default().fg(if sess > 0 { GREEN } else { TEXT_DIM })),
-                Cell::from(format!("{max}")).style(Style::default().fg(TEXT_DIM)),
-                Cell::from("—").style(Style::default().fg(TEXT_DIM)),
-                Cell::from("—").style(Style::default().fg(TEXT_DIM)),
-            ])
-        }).collect()
+        app.projects
+            .iter()
+            .map(|proj| {
+                let sess = app.active_session_count(&proj.path);
+                let max = proj.max_sessions;
+                // Tokens and cost are not tracked per-project yet — show placeholder.
+                Row::new(vec![
+                    Cell::from(proj.name.clone()).style(Style::default().fg(if sess > 0 {
+                        CYAN
+                    } else {
+                        TEXT
+                    })),
+                    Cell::from(format!("{sess}")).style(Style::default().fg(if sess > 0 {
+                        GREEN
+                    } else {
+                        TEXT_DIM
+                    })),
+                    Cell::from(format!("{max}")).style(Style::default().fg(TEXT_DIM)),
+                    Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+                    Cell::from("—").style(Style::default().fg(TEXT_DIM)),
+                ])
+            })
+            .collect()
     };
 
     let proj_widths = [
@@ -765,16 +1041,22 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
 
     let proj_table = Table::new(proj_rows, proj_widths)
         .header(proj_header)
-        .block(Block::default()
-            .title(" Per-Project Breakdown ")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .title(" Per-Project Breakdown ")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .column_spacing(2);
 
     frame.render_widget(proj_table, chunks[1]);
 
     // ── Token budget status bar ──────────────────────────────────────────────
-    let total_secs: f64 = summary.per_provider.iter().map(|p| p.total_duration_secs).sum();
+    let total_secs: f64 = summary
+        .per_provider
+        .iter()
+        .map(|p| p.total_duration_secs)
+        .sum();
     let total_mins = (total_secs / 60.0).round() as u64;
     let hours = total_mins / 60;
     let mins = total_mins % 60;
@@ -787,8 +1069,7 @@ fn draw_analyze_code_review(frame: &mut Frame, app: &App, area: Rect) {
         " Session budget: {} total · {} sessions (last {}h)",
         duration_str, summary.total_sessions, summary.period_hours
     );
-    let budget_bar = Paragraph::new(budget_line)
-        .style(Style::default().fg(TEXT_MUTED).bg(BG_DARK));
+    let budget_bar = Paragraph::new(budget_line).style(Style::default().fg(TEXT_MUTED).bg(BG_DARK));
     frame.render_widget(budget_bar, chunks[2]);
 }
 
@@ -820,8 +1101,11 @@ fn draw_analyze_licensing(frame: &mut Frame, app: &App, area: Rect) {
                 Row::new(vec![
                     Cell::from(dep.name.clone()).style(Style::default().fg(TEXT)),
                     Cell::from(dep.spdx.clone()).style(Style::default().fg(TEXT_DIM)),
-                    Cell::from(status_label)
-                        .style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Cell::from(status_label).style(
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ])
             })
             .collect(),
@@ -834,15 +1118,20 @@ fn draw_analyze_licensing(frame: &mut Frame, app: &App, area: Rect) {
         ),
         None => " Licensing ".to_string(),
     };
-    let table = Table::new(rows, [
-        Constraint::Percentage(35),
-        Constraint::Percentage(45),
-        Constraint::Percentage(20),
-    ])
-    .block(Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .style(Style::default().fg(TEXT_MUTED)))
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(35),
+            Constraint::Percentage(45),
+            Constraint::Percentage(20),
+        ],
+    )
+    .block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_MUTED)),
+    )
     .column_spacing(1);
     frame.render_widget(table, area);
 }
@@ -869,10 +1158,7 @@ fn draw_analyze_legal(frame: &mut Frame, app: &App, area: Rect) {
                     s.push('\n');
                 }
                 if report.missing.len() > 50 {
-                    s.push_str(&format!(
-                        "... ({} more)\n",
-                        report.missing.len() - 50
-                    ));
+                    s.push_str(&format!("... ({} more)\n", report.missing.len() - 50));
                 }
             }
             s
@@ -881,10 +1167,12 @@ fn draw_analyze_legal(frame: &mut Frame, app: &App, area: Rect) {
     let p = Paragraph::new(body)
         .style(Style::default().fg(TEXT))
         .wrap(Wrap { trim: false })
-        .block(Block::default()
-            .title(" Legal — Copyright Header Audit ")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+        .block(
+            Block::default()
+                .title(" Legal — Copyright Header Audit ")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        );
     frame.render_widget(p, area);
 }
 
@@ -899,10 +1187,12 @@ fn draw_analyze_placeholder(frame: &mut Frame, label: &str, area: Rect) {
     let p = Paragraph::new(msg)
         .style(Style::default().fg(TEXT_DIM))
         .wrap(Wrap { trim: false })
-        .block(Block::default()
-            .title(format!(" {label} (coming soon) "))
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+        .block(
+            Block::default()
+                .title(format!(" {label} (coming soon) "))
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        );
     frame.render_widget(p, area);
 }
 
@@ -918,7 +1208,9 @@ fn draw_publish(frame: &mut Frame, app: &mut App, area: Rect) {
     // Tab bar
     let mut spans: Vec<Span> = Vec::new();
     for (i, tab) in PublishTab::ALL.iter().enumerate() {
-        if i > 0 { spans.push(Span::raw("  ")); }
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
         let sel = *tab == app.publish_tab;
         let style = if sel {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -985,11 +1277,12 @@ fn draw_brands_tab(frame: &mut Frame, app: &App, area: Rect) {
             })
             .collect()
     };
-    let list_table = Table::new(rows, [Constraint::Min(15)])
-        .block(Block::default()
+    let list_table = Table::new(rows, [Constraint::Min(15)]).block(
+        Block::default()
             .title(format!(" Brand Profiles ({}) ", app.brand_profiles.len()))
             .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+            .style(Style::default().fg(TEXT_MUTED)),
+    );
     frame.render_widget(list_table, hsplit[0]);
 
     let preview = if let Some((_, path)) = app.brand_profiles.get(app.brand_selected) {
@@ -1000,10 +1293,12 @@ fn draw_brands_tab(frame: &mut Frame, app: &App, area: Rect) {
     };
     let preview_widget = Paragraph::new(crate::markdown::markdown_to_lines(&preview))
         .wrap(Wrap { trim: false })
-        .block(Block::default()
-            .title(" Brand Style Guide ")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)));
+        .block(
+            Block::default()
+                .title(" Brand Style Guide ")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        );
     frame.render_widget(preview_widget, hsplit[1]);
 }
 
@@ -1029,12 +1324,22 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
         " Release Notes  [v]=preview version  [b]=build  [D]=rollback "
     };
     let notes = Paragraph::new(notes_text)
-        .style(Style::default().fg(if app.rollback_advisory.is_some() { Color::Red } else { TEXT }))
+        .style(Style::default().fg(if app.rollback_advisory.is_some() {
+            Color::Red
+        } else {
+            TEXT
+        }))
         .wrap(Wrap { trim: false })
-        .block(Block::default()
-            .title(notes_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(if app.rollback_advisory.is_some() { Color::Red } else { TEXT_MUTED })));
+        .block(
+            Block::default()
+                .title(notes_title)
+                .borders(Borders::ALL)
+                .style(Style::default().fg(if app.rollback_advisory.is_some() {
+                    Color::Red
+                } else {
+                    TEXT_MUTED
+                })),
+        );
     frame.render_widget(notes, hsplit[0]);
 
     // ── Right pane: checklist (top) + build targets (bottom) ───────────
@@ -1050,24 +1355,41 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
             Cell::from("Navigate here to run checks").style(Style::default().fg(TEXT_DIM)),
         ])]
     } else {
-        app.checklist_results.iter().map(|(label, passed)| {
-            let (icon, color) = if *passed { ("✓", GREEN) } else { ("✗", Color::Red) };
-            Row::new(vec![
-                Cell::from(icon).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
-                Cell::from(label.clone()).style(Style::default().fg(if *passed { TEXT } else { Color::Red })),
-            ])
-        }).collect()
+        app.checklist_results
+            .iter()
+            .map(|(label, passed)| {
+                let (icon, color) = if *passed {
+                    ("✓", GREEN)
+                } else {
+                    ("✗", Color::Red)
+                };
+                Row::new(vec![
+                    Cell::from(icon).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                    Cell::from(label.clone()).style(Style::default().fg(if *passed {
+                        TEXT
+                    } else {
+                        Color::Red
+                    })),
+                ])
+            })
+            .collect()
     };
 
-    let all_pass = !app.checklist_results.is_empty()
-        && app.checklist_results.iter().all(|(_, p)| *p);
-    let checklist_title = if all_pass { " Pre-release ✓ " } else { " Pre-release Checklist " };
+    let all_pass =
+        !app.checklist_results.is_empty() && app.checklist_results.iter().all(|(_, p)| *p);
+    let checklist_title = if all_pass {
+        " Pre-release ✓ "
+    } else {
+        " Pre-release Checklist "
+    };
 
     let checklist = Table::new(checklist_rows, [Constraint::Length(3), Constraint::Min(30)])
-        .block(Block::default()
-            .title(checklist_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(if all_pass { GREEN } else { TEXT_MUTED })))
+        .block(
+            Block::default()
+                .title(checklist_title)
+                .borders(Borders::ALL)
+                .style(Style::default().fg(if all_pass { GREEN } else { TEXT_MUTED })),
+        )
         .column_spacing(1);
     frame.render_widget(checklist, right_split[0]);
 
@@ -1078,30 +1400,41 @@ fn draw_packaging_tab(frame: &mut Frame, app: &App, area: Rect) {
             Cell::from("No project files detected").style(Style::default().fg(TEXT_DIM)),
         ])]
     } else {
-        app.build_targets.iter().enumerate().map(|(i, target)| {
-            let result = app.build_results.get(i);
-            let (icon, icon_color) = match result {
-                Some(r) => match r.status {
-                    orrch_core::release::BuildStatus::Success => ("✓", GREEN),
-                    orrch_core::release::BuildStatus::Failed => ("✗", Color::Red),
-                    orrch_core::release::BuildStatus::Running => ("⏳", WAITING_COLOR),
-                    orrch_core::release::BuildStatus::Pending => ("·", TEXT_DIM),
-                },
-                None => ("·", TEXT_DIM),
-            };
-            Row::new(vec![
-                Cell::from(icon).style(Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
-                Cell::from(target.label.clone()).style(Style::default().fg(TEXT)),
-            ])
-        }).collect()
+        app.build_targets
+            .iter()
+            .enumerate()
+            .map(|(i, target)| {
+                let result = app.build_results.get(i);
+                let (icon, icon_color) = match result {
+                    Some(r) => match r.status {
+                        orrch_core::release::BuildStatus::Success => ("✓", GREEN),
+                        orrch_core::release::BuildStatus::Failed => ("✗", Color::Red),
+                        orrch_core::release::BuildStatus::Running => ("⏳", WAITING_COLOR),
+                        orrch_core::release::BuildStatus::Pending => ("·", TEXT_DIM),
+                    },
+                    None => ("·", TEXT_DIM),
+                };
+                Row::new(vec![
+                    Cell::from(icon)
+                        .style(Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
+                    Cell::from(target.label.clone()).style(Style::default().fg(TEXT)),
+                ])
+            })
+            .collect()
     };
 
-    let build_title = if app.build_running { " Build Targets ⏳ " } else { " Build Targets  [b]=run " };
+    let build_title = if app.build_running {
+        " Build Targets ⏳ "
+    } else {
+        " Build Targets  [b]=run "
+    };
     let build_table = Table::new(build_rows, [Constraint::Length(3), Constraint::Min(30)])
-        .block(Block::default()
-            .title(build_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .title(build_title)
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .column_spacing(1);
     frame.render_widget(build_table, right_split[1]);
 }
@@ -1127,32 +1460,54 @@ fn draw_compliance_tab(frame: &mut Frame, app: &App, area: Rect) {
                     Cell::from("No Cargo.lock found").style(Style::default().fg(TEXT_DIM)),
                 ])]
             } else {
-                report.deps.iter().map(|dep| {
-                    let (status_color, status_label) = match dep.status {
-                        orrch_core::LicenseStatus::Permissive => (GREEN, dep.status.label()),
-                        orrch_core::LicenseStatus::Copyleft => (WAITING_COLOR, dep.status.label()),
-                        orrch_core::LicenseStatus::Unknown => (TEXT_DIM, dep.status.label()),
-                    };
-                    Row::new(vec![
-                        Cell::from(dep.name.clone()).style(Style::default().fg(TEXT)),
-                        Cell::from(dep.spdx.clone()).style(Style::default().fg(TEXT_DIM)),
-                        Cell::from(status_label).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-                    ])
-                }).collect()
+                report
+                    .deps
+                    .iter()
+                    .map(|dep| {
+                        let (status_color, status_label) = match dep.status {
+                            orrch_core::LicenseStatus::Permissive => (GREEN, dep.status.label()),
+                            orrch_core::LicenseStatus::Copyleft => {
+                                (WAITING_COLOR, dep.status.label())
+                            }
+                            orrch_core::LicenseStatus::Unknown => (TEXT_DIM, dep.status.label()),
+                        };
+                        Row::new(vec![
+                            Cell::from(dep.name.clone()).style(Style::default().fg(TEXT)),
+                            Cell::from(dep.spdx.clone()).style(Style::default().fg(TEXT_DIM)),
+                            Cell::from(status_label).style(
+                                Style::default()
+                                    .fg(status_color)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ])
+                    })
+                    .collect()
             }
         }
     };
 
     let lic_title = match &app.license_report {
-        Some(r) => format!(" Licenses ({} deps, {} permissive, {} copyleft, {} unknown) ", r.total, r.permissive, r.copyleft, r.unknown),
+        Some(r) => format!(
+            " Licenses ({} deps, {} permissive, {} copyleft, {} unknown) ",
+            r.total, r.permissive, r.copyleft, r.unknown
+        ),
         None => " Licenses ".to_string(),
     };
-    let lic_table = Table::new(lic_rows, [Constraint::Percentage(35), Constraint::Percentage(45), Constraint::Percentage(20)])
-        .block(Block::default()
+    let lic_table = Table::new(
+        lic_rows,
+        [
+            Constraint::Percentage(35),
+            Constraint::Percentage(45),
+            Constraint::Percentage(20),
+        ],
+    )
+    .block(
+        Block::default()
             .title(lic_title)
             .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
-        .column_spacing(1);
+            .style(Style::default().fg(TEXT_MUTED)),
+    )
+    .column_spacing(1);
     frame.render_widget(lic_table, vsplit[0]);
 
     // ── Copyright Report (bottom) ─────────────────────────────────────
@@ -1165,28 +1520,44 @@ fn draw_compliance_tab(frame: &mut Frame, app: &App, area: Rect) {
             if report.missing.is_empty() {
                 vec![Row::new(vec![
                     Cell::from("✓").style(Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
-                    Cell::from(format!("All {} files have copyright headers", report.scanned)).style(Style::default().fg(GREEN)),
+                    Cell::from(format!(
+                        "All {} files have copyright headers",
+                        report.scanned
+                    ))
+                    .style(Style::default().fg(GREEN)),
                 ])]
             } else {
-                report.missing.iter().map(|m| {
-                    Row::new(vec![
-                        Cell::from("✗").style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                        Cell::from(m.path.clone()).style(Style::default().fg(TEXT_DIM)),
-                    ])
-                }).collect()
+                report
+                    .missing
+                    .iter()
+                    .map(|m| {
+                        Row::new(vec![
+                            Cell::from("✗").style(
+                                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                            ),
+                            Cell::from(m.path.clone()).style(Style::default().fg(TEXT_DIM)),
+                        ])
+                    })
+                    .collect()
             }
         }
     };
 
     let copy_title = match &app.copyright_report {
-        Some(r) => format!(" Copyright Headers ({:.0}% coverage, {} missing) ", r.coverage_pct(), r.missing.len()),
+        Some(r) => format!(
+            " Copyright Headers ({:.0}% coverage, {} missing) ",
+            r.coverage_pct(),
+            r.missing.len()
+        ),
         None => " Copyright Headers ".to_string(),
     };
     let copy_table = Table::new(copy_rows, [Constraint::Length(3), Constraint::Min(40)])
-        .block(Block::default()
-            .title(copy_title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .title(copy_title)
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .column_spacing(1);
     frame.render_widget(copy_table, vsplit[1]);
 }
@@ -1212,8 +1583,12 @@ fn draw_distribution_tab(frame: &mut Frame, app: &App, area: Rect) {
                 };
 
                 let (status_str, status_color) = match status {
-                    orrch_core::release::PlatformStatus::NotConfigured => ("—  Not configured", TEXT_DIM),
-                    orrch_core::release::PlatformStatus::NotPublished => ("·  Not published", WAITING_COLOR),
+                    orrch_core::release::PlatformStatus::NotConfigured => {
+                        ("—  Not configured", TEXT_DIM)
+                    }
+                    orrch_core::release::PlatformStatus::NotPublished => {
+                        ("·  Not published", WAITING_COLOR)
+                    }
                     orrch_core::release::PlatformStatus::Published(_) => ("✓  Published", GREEN),
                 };
                 let version_str = match status {
@@ -1297,10 +1672,7 @@ fn draw_history_tab(frame: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(TEXT),
                 )
             } else {
-                (
-                    Style::default().fg(ACCENT),
-                    Style::default().fg(TEXT_DIM),
-                )
+                (Style::default().fg(ACCENT), Style::default().fg(TEXT_DIM))
             };
             Row::new(vec![
                 Cell::from(entry.tag.clone()).style(tag_style),
@@ -1324,7 +1696,10 @@ fn draw_history_tab(frame: &mut Frame, app: &App, area: Rect) {
     )
     .block(
         Block::default()
-            .title(format!(" Release History ({} releases)  [j/k]=select ", entries.len()))
+            .title(format!(
+                " Release History ({} releases)  [j/k]=select ",
+                entries.len()
+            ))
             .borders(Borders::ALL)
             .style(Style::default().fg(TEXT_MUTED)),
     )
@@ -1357,9 +1732,9 @@ fn draw_marketing_tab(frame: &mut Frame, app: &App, area: Rect) {
     let vsplit = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // Description
-            Constraint::Min(6),     // Features
-            Constraint::Length(6),  // Badges
+            Constraint::Length(5), // Description
+            Constraint::Min(6),    // Features
+            Constraint::Length(6), // Badges
         ])
         .split(area);
 
@@ -1457,7 +1832,9 @@ fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
         let sel = *sub == app.design_sub;
         let style = if sel {
             let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
-            if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+            if bar_focused {
+                s = s.add_modifier(Modifier::UNDERLINED);
+            }
             s
         } else {
             Style::default().fg(TEXT_MUTED)
@@ -1468,8 +1845,15 @@ fn draw_design(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)), chunks[0]);
+    let bg = if bar_focused {
+        Color::Rgb(30, 30, 55)
+    } else {
+        BG_DARK
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(bg)),
+        chunks[0],
+    );
 
     // Poll for pending intake reviews when viewing Intentions and none is loaded.
     // (The main loop also polls every 3s; this gives an immediate refresh on
@@ -1505,48 +1889,87 @@ fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // ── Left pane: project list ──
     let left_focused = !app.plans_focus_right && app.focus_depth >= app.content_depth();
-    let left_border = if left_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    let left_border = if left_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
 
-    let proj_items: Vec<ListItem> = app.plans_project_indices.iter().enumerate().map(|(i, &pidx)| {
-        let proj = &app.projects[pidx];
-        let done: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
-        let total: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
-        let color = if done == total && total > 0 { GREEN } else if done > 0 { TEXT_DIM } else { TEXT };
-        let sel = i == app.plans_project_selected;
-        let style = if sel && left_focused {
-            Style::default().fg(color).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(color)
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!(" {} ", proj.name), style),
-            Span::styled(format!("({done}/{total})"), Style::default().fg(TEXT_MUTED)),
-        ]))
-    }).collect();
+    let proj_items: Vec<ListItem> = app
+        .plans_project_indices
+        .iter()
+        .enumerate()
+        .map(|(i, &pidx)| {
+            let proj = &app.projects[pidx];
+            let done: usize = proj.plan_phases.iter().map(|p| p.done_count()).sum();
+            let total: usize = proj.plan_phases.iter().map(|p| p.total_count()).sum();
+            let color = if done == total && total > 0 {
+                GREEN
+            } else if done > 0 {
+                TEXT_DIM
+            } else {
+                TEXT
+            };
+            let sel = i == app.plans_project_selected;
+            let style = if sel && left_focused {
+                Style::default().fg(color).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(color)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {} ", proj.name), style),
+                Span::styled(format!("({done}/{total})"), Style::default().fg(TEXT_MUTED)),
+            ]))
+        })
+        .collect();
 
     let proj_list = List::new(proj_items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(" Projects ").borders(Borders::ALL).style(left_border))
-        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .block(
+            Block::default()
+                .title(" Projects ")
+                .borders(Borders::ALL)
+                .style(left_border),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
 
-    let left_sel = if left_focused { Some(app.plans_project_selected) } else { None };
+    let left_sel = if left_focused {
+        Some(app.plans_project_selected)
+    } else {
+        None
+    };
     let mut left_state = ListState::default().with_selected(left_sel);
     frame.render_stateful_widget(proj_list, hsplit[0], &mut left_state);
 
     // ── Right pane: phase/feature tree ──
     let right_focused = app.plans_focus_right && app.focus_depth >= app.content_depth();
-    let right_border = if right_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    let right_border = if right_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
 
     let proj_idx = app.plans_current_project_idx();
     let Some(pidx) = proj_idx else {
         let empty = Paragraph::new("No projects with PLAN.md found")
             .style(Style::default().fg(TEXT_MUTED))
-            .block(Block::default().title(" Plan ").borders(Borders::ALL).style(right_border));
+            .block(
+                Block::default()
+                    .title(" Plan ")
+                    .borders(Borders::ALL)
+                    .style(right_border),
+            );
         frame.render_widget(empty, hsplit[1]);
         return;
     };
-    let Some(proj) = app.projects.get(pidx) else { return; };
+    let Some(proj) = app.projects.get(pidx) else {
+        return;
+    };
 
     let mut items: Vec<ListItem> = Vec::new();
     for (pi, phase) in proj.plan_phases.iter().enumerate() {
@@ -1554,7 +1977,11 @@ fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
         let arrow = if expanded { "▾" } else { "▸" };
         let done = phase.done_count();
         let total = phase.total_count();
-        let progress = if total > 0 { format!(" ({done}/{total})") } else { String::new() };
+        let progress = if total > 0 {
+            format!(" ({done}/{total})")
+        } else {
+            String::new()
+        };
 
         let phase_color = if done == total && total > 0 {
             GREEN
@@ -1570,9 +1997,12 @@ fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
             format!("{arrow} {}{progress}", phase.name)
         };
 
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(phase_name, Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
-        ])));
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            phase_name,
+            Style::default()
+                .fg(phase_color)
+                .add_modifier(Modifier::BOLD),
+        )])));
 
         if expanded {
             for feat in &phase.features {
@@ -1589,7 +2019,10 @@ fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
                 }
 
                 // Status label for non-trivial statuses
-                if !matches!(feat.status, FeatureStatus::Planned | FeatureStatus::Pending | FeatureStatus::Done) {
+                if !matches!(
+                    feat.status,
+                    FeatureStatus::Planned | FeatureStatus::Pending | FeatureStatus::Done
+                ) {
                     spans.push(Span::styled(
                         format!(" [{}]", feat.status.label()),
                         Style::default().fg(TEXT_MUTED),
@@ -1609,17 +2042,28 @@ fn draw_plans(frame: &mut Frame, app: &mut App, area: Rect) {
     let footer = " Enter=expand v=verify s/S=cycle d=deprecate k/j=move e=edit r=refresh ";
     let right_block = Block::default()
         .title(block_title)
-        .title_bottom(Line::from(Span::styled(footer, Style::default().fg(TEXT_MUTED))))
+        .title_bottom(Line::from(Span::styled(
+            footer,
+            Style::default().fg(TEXT_MUTED),
+        )))
         .borders(Borders::ALL)
         .style(right_border);
 
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
         .block(right_block)
-        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default()
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
 
-    let right_sel = if right_focused { Some(app.plans_tree_selected) } else { None };
+    let right_sel = if right_focused {
+        Some(app.plans_tree_selected)
+    } else {
+        None
+    };
     let mut right_state = ListState::default().with_selected(right_sel);
     frame.render_stateful_widget(list, hsplit[1], &mut right_state);
 }
@@ -1635,12 +2079,15 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     // Tab bar for workforce sub-tabs
     let bar_focused = app.focus_depth == 2 && app.design_sub == crate::app::DesignSub::Workforce;
-    let tab_spans: Vec<Span> = WorkforceTab::ALL.iter()
+    let tab_spans: Vec<Span> = WorkforceTab::ALL
+        .iter()
         .flat_map(|tab| {
             let sel = *tab == app.workforce_tab;
             let style = if sel {
                 let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
-                if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+                if bar_focused {
+                    s = s.add_modifier(Modifier::UNDERLINED);
+                }
                 s
             } else {
                 Style::default().fg(TEXT_MUTED)
@@ -1651,11 +2098,21 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
             ]
         })
         .collect();
-    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
-    frame.render_widget(Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg)), outer[0]);
+    let bg = if bar_focused {
+        Color::Rgb(30, 30, 55)
+    } else {
+        BG_DARK
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(tab_spans)).style(Style::default().bg(bg)),
+        outer[0],
+    );
 
     // "Coming soon" tabs
-    if matches!(app.workforce_tab, WorkforceTab::TrainingData | WorkforceTab::Models) {
+    if matches!(
+        app.workforce_tab,
+        WorkforceTab::TrainingData | WorkforceTab::Models
+    ) {
         let msg = Paragraph::new(format!("{} — coming soon.", app.workforce_tab.label()))
             .style(Style::default().fg(TEXT_DIM))
             .block(Block::default().borders(Borders::ALL));
@@ -1677,17 +2134,31 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     let items_data = app.wf_items_for_tab();
     let visible_rows = chunks[0].height.saturating_sub(2) as usize;
-    let scroll_offset = if app.wf_selected >= visible_rows { app.wf_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.wf_selected >= visible_rows {
+        app.wf_selected - visible_rows + 1
+    } else {
+        0
+    };
 
     let mut list_items = Vec::new();
     for (i, (name, _)) in items_data.iter().enumerate().skip(scroll_offset) {
         let sel = app.wf_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
-        list_items.push(ListItem::new(Line::styled(format!("{marker}{name}"), style)));
+        list_items.push(ListItem::new(Line::styled(
+            format!("{marker}{name}"),
+            style,
+        )));
     }
     if list_items.is_empty() {
-        list_items.push(ListItem::new(Line::styled("  (empty — press n to create)", Style::default().fg(TEXT_MUTED))));
+        list_items.push(ListItem::new(Line::styled(
+            "  (empty — press n to create)",
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
 
     // Scroll indicators
@@ -1703,31 +2174,51 @@ fn draw_workforce_editor(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.workforce_tab == WorkforceTab::Workflows {
         format!(
             " {} ({}) — n=new N=AI Enter=edit r=rename d=del x=export i=import R=refresh{}",
-            app.workforce_tab.label(), items_data.len(), scroll_hint,
+            app.workforce_tab.label(),
+            items_data.len(),
+            scroll_hint,
         )
     } else {
         format!(
             " {} ({}) — n=new N=AI Enter=edit r=rename d=del R=refresh{}",
-            app.workforce_tab.label(), items_data.len(), scroll_hint,
+            app.workforce_tab.label(),
+            items_data.len(),
+            scroll_hint,
         )
     };
-    frame.render_widget(List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)), chunks[0]);
+    frame.render_widget(
+        List::new(list_items).block(Block::default().title(title).borders(Borders::ALL)),
+        chunks[0],
+    );
 
     // Preview: show file contents with markdown rendering
     let preview = if let Some((_, path)) = items_data.get(app.wf_selected) {
         if let Ok(content) = std::fs::read_to_string(path) {
             markdown_to_lines(&content)
         } else {
-            vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
+            vec![Line::styled(
+                "Cannot read file",
+                Style::default().fg(TEXT_MUTED),
+            )]
         }
     } else {
-        vec![Line::styled("Select an item to preview", Style::default().fg(TEXT_MUTED))]
+        vec![Line::styled(
+            "Select an item to preview",
+            Style::default().fg(TEXT_MUTED),
+        )]
     };
 
-    frame.render_widget(Paragraph::new(preview)
-        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((app.wf_preview_scroll as u16, 0)), chunks[1]);
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Preview (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.wf_preview_scroll as u16, 0)),
+        chunks[1],
+    );
 }
 
 fn draw_workforce_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
@@ -1744,17 +2235,28 @@ fn draw_workforce_harnesses(frame: &mut Frame, app: &App, list_area: Rect, previ
     }
 
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.wf_selected >= visible_rows { app.wf_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.wf_selected >= visible_rows {
+        app.wf_selected - visible_rows + 1
+    } else {
+        0
+    };
 
     let mut list_items = Vec::new();
     for (i, h) in app.library_harnesses.iter().enumerate().skip(scroll_offset) {
         let sel = app.wf_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
         let (indicator, ind_style) = if h.available {
             ("● ", Style::default().fg(GREEN))
         } else {
-            ("○ ", Style::default().fg(TEXT_MUTED).add_modifier(Modifier::DIM))
+            (
+                "○ ",
+                Style::default().fg(TEXT_MUTED).add_modifier(Modifier::DIM),
+            )
         };
         list_items.push(ListItem::new(Line::from(vec![
             Span::styled(marker.to_owned(), style),
@@ -1783,7 +2285,10 @@ fn draw_workforce_harnesses(frame: &mut Frame, app: &App, list_area: Rect, previ
         };
         let repo = repo_url(&h.name);
         let mut lines = vec![
-            Line::styled(h.name.clone(), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(
+                h.name.clone(),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             status_line,
             Line::styled(format!("Command: {}", h.command), Style::default().fg(TEXT)),
             Line::styled(format!("Repo:    {}", repo), Style::default().fg(CYAN)),
@@ -1793,15 +2298,25 @@ fn draw_workforce_harnesses(frame: &mut Frame, app: &App, list_area: Rect, previ
             lines.extend(markdown_to_lines(&h.notes));
             lines.push(Line::raw(""));
         }
-        lines.push(Line::styled("Source: [not indexed yet]", Style::default().fg(TEXT_MUTED)));
+        lines.push(Line::styled(
+            "Source: [not indexed yet]",
+            Style::default().fg(TEXT_MUTED),
+        ));
         lines
     } else {
-        vec![Line::styled("Select a harness to preview", Style::default().fg(TEXT_MUTED))]
+        vec![Line::styled(
+            "Select a harness to preview",
+            Style::default().fg(TEXT_MUTED),
+        )]
     };
 
     frame.render_widget(
         Paragraph::new(preview)
-            .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(" Preview (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
             .wrap(Wrap { trim: false })
             .scroll((app.wf_preview_scroll as u16, 0)),
         preview_area,
@@ -1821,7 +2336,8 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Sub-panel selector bar
     let bar_focused = app.focus_depth == 2 && app.design_sub == DesignSub::Library;
-    let sub_labels: Vec<Span> = LibrarySub::ALL.iter()
+    let sub_labels: Vec<Span> = LibrarySub::ALL
+        .iter()
         .flat_map(|sub| {
             let sel = *sub == app.library_sub;
             let count = match sub {
@@ -1837,7 +2353,9 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let style = if sel {
                 let mut s = Style::default().fg(ACCENT).add_modifier(Modifier::BOLD);
-                if bar_focused { s = s.add_modifier(Modifier::UNDERLINED); }
+                if bar_focused {
+                    s = s.add_modifier(Modifier::UNDERLINED);
+                }
                 s
             } else {
                 Style::default().fg(TEXT_MUTED)
@@ -1848,8 +2366,15 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
             ]
         })
         .collect();
-    let bg = if bar_focused { Color::Rgb(30, 30, 55) } else { BG_DARK };
-    frame.render_widget(Paragraph::new(Line::from(sub_labels)).style(Style::default().bg(bg)), outer[0]);
+    let bg = if bar_focused {
+        Color::Rgb(30, 30, 55)
+    } else {
+        BG_DARK
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(sub_labels)).style(Style::default().bg(bg)),
+        outer[0],
+    );
 
     // Split content: list (40%) + preview (60%)
     let chunks = Layout::default()
@@ -1861,7 +2386,11 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
     // whenever the selected machine changes. refresh_fit reuses the per-host
     // 30-min probe cache (fresh=false), so this is NOT a per-frame re-probe.
     if app.library_sub == crate::app::LibrarySub::Fit {
-        let cur = app.fit_registry.all().get(app.fit_machine_idx).map(|m| m.name.clone());
+        let cur = app
+            .fit_registry
+            .all()
+            .get(app.fit_machine_idx)
+            .map(|m| m.name.clone());
         if app.fit_probed_machine != cur {
             app.refresh_fit(false);
         }
@@ -1873,8 +2402,24 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
         LibrarySub::Models => draw_library_models(frame, app, chunks[0], chunks[1]),
         LibrarySub::Harnesses => draw_library_harnesses(frame, app, chunks[0], chunks[1]),
         LibrarySub::McpServers => draw_library_mcp(frame, app, chunks[0], chunks[1]),
-        LibrarySub::Skills => draw_library_generic(frame, app, &app.library_skills, "Skills", "x=export to PI", chunks[0], chunks[1]),
-        LibrarySub::Tools => draw_library_generic(frame, app, &app.library_tools, "Tools", "x=export to PI", chunks[0], chunks[1]),
+        LibrarySub::Skills => draw_library_generic(
+            frame,
+            app,
+            &app.library_skills,
+            "Skills",
+            "x=export to PI",
+            chunks[0],
+            chunks[1],
+        ),
+        LibrarySub::Tools => draw_library_generic(
+            frame,
+            app,
+            &app.library_tools,
+            "Tools",
+            "x=export to PI",
+            chunks[0],
+            chunks[1],
+        ),
         LibrarySub::Connections => draw_library_connections(frame, app, chunks[0], chunks[1]),
         LibrarySub::PiExtensions => draw_library_pi_extensions(frame, app, chunks[0], chunks[1]),
     }
@@ -1884,40 +2429,77 @@ fn draw_library_agents(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
     let visible_rows = list_area.height.saturating_sub(2) as usize; // minus borders
     let scroll_offset = if app.library_selected >= visible_rows {
         app.library_selected - visible_rows + 1
-    } else { 0 };
+    } else {
+        0
+    };
 
     let mut items = Vec::new();
     for (i, profile) in app.agent_profiles.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("{marker}{}", profile.name), style),
-            Span::styled(format!(" [{}]", profile.department), Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                format!(" [{}]", profile.department),
+                Style::default().fg(TEXT_MUTED),
+            ),
         ])));
     }
-    let title = format!(" Agents ({}) — n=new N=AI-assisted Enter=edit d=del ", app.agent_profiles.len());
-    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+    let title = format!(
+        " Agents ({}) — n=new N=AI-assisted Enter=edit d=del ",
+        app.agent_profiles.len()
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some(p) = app.agent_profiles.get(app.library_selected) {
         let mut lines = vec![
-            Line::styled(&p.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(
+                &p.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Line::styled(format!("Role: {}", p.role), Style::default().fg(TEXT)),
-            Line::styled(format!("Dept: {}", p.department), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                format!("Dept: {}", p.department),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
         ];
         lines.extend(markdown_to_lines(&p.prompt));
         lines
-    } else { vec![Line::styled("No agents loaded — press n to create", Style::default().fg(TEXT_MUTED))] };
-    frame.render_widget(Paragraph::new(preview)
-        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    } else {
+        vec![Line::styled(
+            "No agents loaded — press n to create",
+            Style::default().fg(TEXT_MUTED),
+        )]
+    };
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Preview (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else {
+        0
+    };
     let mut items = Vec::new();
     for (i, model) in app.library_models.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
@@ -1945,13 +2527,27 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
         };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("{marker}{}", model.name), style),
-            Span::styled(format!(" {}", model.tier.label()), Style::default().fg(tier_color)),
+            Span::styled(
+                format!(" {}", model.tier.label()),
+                Style::default().fg(tier_color),
+            ),
             status_badge,
         ])));
     }
-    if items.is_empty() { items.push(ListItem::new(Line::styled("  No models in library/models/", Style::default().fg(TEXT_MUTED)))); }
-    let title = format!(" Models ({}) — v=valve n=new Enter=edit ", app.library_models.len());
-    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled(
+            "  No models in library/models/",
+            Style::default().fg(TEXT_MUTED),
+        )));
+    }
+    let title = format!(
+        " Models ({}) — v=valve n=new Enter=edit ",
+        app.library_models.len()
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some(m) = app.library_models.get(app.library_selected) {
         let blocked = app.valve_store.is_blocked(&m.provider);
@@ -1959,16 +2555,32 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
         let status_info = if blocked {
             let valve = app.valve_store.valves.get(&m.provider);
             let reason = valve.map(|v| v.reason.as_str()).unwrap_or("unknown");
-            let reopen = valve.map(|v| v.reopen_display()).unwrap_or_else(|| "manual".into());
+            let reopen = valve
+                .map(|v| v.reopen_display())
+                .unwrap_or_else(|| "manual".into());
             vec![
-                Line::styled(format!("⊘ VALVE CLOSED — {}", reason), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Line::styled(format!("  Reopens: {}", reopen), Style::default().fg(WAITING_COLOR)),
+                Line::styled(
+                    format!("⊘ VALVE CLOSED — {}", reason),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Line::styled(
+                    format!("  Reopens: {}", reopen),
+                    Style::default().fg(WAITING_COLOR),
+                ),
                 Line::raw(""),
             ]
         } else if throttled {
-            let reason = app.usage_tracker.throttle_reason(&m.provider).unwrap_or("rate limited");
+            let reason = app
+                .usage_tracker
+                .throttle_reason(&m.provider)
+                .unwrap_or("rate limited");
             vec![
-                Line::styled(format!("[THROTTLED] — {}", reason), Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD)),
+                Line::styled(
+                    format!("[THROTTLED] — {}", reason),
+                    Style::default()
+                        .fg(WAITING_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Line::raw(""),
             ]
         } else {
@@ -1976,27 +2588,82 @@ fn draw_library_models(frame: &mut Frame, app: &App, list_area: Rect, preview_ar
         };
         let mut lines = status_info;
         lines.extend(vec![
-            Line::styled(&m.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("Provider: {}", m.provider), Style::default().fg(TEXT)),
-            Line::styled(format!("Model ID: {}", m.model_id), Style::default().fg(TEXT)),
-            Line::styled(format!("Tier: {}", m.tier.label()), Style::default().fg(TEXT)),
-            Line::styled(format!("Pricing: {}", m.pricing.display()), Style::default().fg(TEXT)),
-            Line::styled(format!("Context: {}",
-                m.max_context.map(|c| if c >= 1_000_000 { format!("{}M", c / 1_000_000) } else { format!("{}K", c / 1000) }).unwrap_or("unknown".into())),
-                Style::default().fg(TEXT)),
-            Line::styled(format!("API Key: {}", m.api_key_env.as_deref().unwrap_or("none")), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                &m.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("Provider: {}", m.provider),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Model ID: {}", m.model_id),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Tier: {}", m.tier.label()),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Pricing: {}", m.pricing.display()),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!(
+                    "Context: {}",
+                    m.max_context
+                        .map(|c| if c >= 1_000_000 {
+                            format!("{}M", c / 1_000_000)
+                        } else {
+                            format!("{}K", c / 1000)
+                        })
+                        .unwrap_or("unknown".into())
+                ),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("API Key: {}", m.api_key_env.as_deref().unwrap_or("none")),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
-            Line::styled("Capabilities:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  {}", m.capabilities.join(", ")), Style::default().fg(GREEN)),
+            Line::styled(
+                "Capabilities:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("  {}", m.capabilities.join(", ")),
+                Style::default().fg(GREEN),
+            ),
             Line::raw(""),
-            Line::styled("Limitations:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  {}", m.limitations.join(", ")), Style::default().fg(WAITING_COLOR)),
+            Line::styled(
+                "Limitations:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("  {}", m.limitations.join(", ")),
+                Style::default().fg(WAITING_COLOR),
+            ),
             Line::raw(""),
             Line::styled(&m.notes, Style::default().fg(TEXT_DIM)),
         ]);
         lines
-    } else { vec![Line::styled("No model selected", Style::default().fg(TEXT_MUTED))] };
-    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    } else {
+        vec![Line::styled(
+            "No model selected",
+            Style::default().fg(TEXT_MUTED),
+        )]
+    };
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Details (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 /// HWF-005: hardware-fit assessment panel. LIST area = machine selector header +
@@ -2022,7 +2689,10 @@ fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
     let mut header: Vec<Line> = Vec::new();
     header.push(Line::from(vec![
         Span::styled(" Machine: ", Style::default().fg(TEXT)),
-        Span::styled(machine_name.clone(), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            machine_name.clone(),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" (m/M switch · R rescan)", Style::default().fg(TEXT_DIM)),
     ]));
     // probe summary line
@@ -2070,7 +2740,13 @@ fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
             Style::default().fg(TEXT_MUTED),
         ));
     } else {
-        for (i, r) in app.fit_results.iter().enumerate().skip(scroll_offset).take(body_rows.max(1)) {
+        for (i, r) in app
+            .fit_results
+            .iter()
+            .enumerate()
+            .skip(scroll_offset)
+            .take(body_rows.max(1))
+        {
             let sel = app.fit_row == i;
             let marker = if sel { "■ " } else { "  " };
             let base = if sel {
@@ -2085,18 +2761,28 @@ fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("{marker}{:<18}", name_trunc), base),
-                Span::styled(format!("{:<10}", r.fit_level), Style::default().fg(fit_color(&r.fit_level))),
+                Span::styled(
+                    format!("{:<10}", r.fit_level),
+                    Style::default().fg(fit_color(&r.fit_level)),
+                ),
                 Span::styled(format!("{:<12}", r.run_mode), Style::default().fg(TEXT_DIM)),
                 Span::styled(format!("{:<10}", r.quant), Style::default().fg(TEXT)),
                 Span::styled(format!("{:<8}", r.context), Style::default().fg(TEXT)),
-                Span::styled(format!("{:<10.1}", r.required_gb), Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("{:<10.1}", r.required_gb),
+                    Style::default().fg(TEXT),
+                ),
                 Span::styled(format!("{:<8.1}", r.speed_tps), Style::default().fg(TEXT)),
                 Span::styled(format!("{:<6.1}", r.score), base),
             ]));
         }
     }
 
-    let title = format!(" Fit — {} ({} models) ", machine_name, app.fit_results.len());
+    let title = format!(
+        " Fit — {} ({} models) ",
+        machine_name,
+        app.fit_results.len()
+    );
     frame.render_widget(
         Paragraph::new(lines).block(Block::default().title(title).borders(Borders::ALL)),
         list_area,
@@ -2105,33 +2791,87 @@ fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
     // ── preview: details for selected row ──────────────────────────────
     let preview = if let Some(r) = app.fit_results.get(app.fit_row) {
         vec![
-            Line::styled(&r.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("Provider: {}", r.provider), Style::default().fg(TEXT)),
-            Line::styled(format!("Params: {:.1}B", r.params_b), Style::default().fg(TEXT)),
+            Line::styled(
+                &r.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("Provider: {}", r.provider),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Params: {:.1}B", r.params_b),
+                Style::default().fg(TEXT),
+            ),
             Line::styled(format!("MoE: {}", r.is_moe), Style::default().fg(TEXT)),
-            Line::styled(format!("Use case: {}", r.use_case), Style::default().fg(TEXT)),
+            Line::styled(
+                format!("Use case: {}", r.use_case),
+                Style::default().fg(TEXT),
+            ),
             Line::raw(""),
-            Line::styled(format!("Fit level: {}", r.fit_level), Style::default().fg(fit_color(&r.fit_level)).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("Run mode: {}", r.run_mode), Style::default().fg(TEXT)),
+            Line::styled(
+                format!("Fit level: {}", r.fit_level),
+                Style::default()
+                    .fg(fit_color(&r.fit_level))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("Run mode: {}", r.run_mode),
+                Style::default().fg(TEXT),
+            ),
             Line::styled(format!("Quant: {}", r.quant), Style::default().fg(TEXT)),
-            Line::styled(format!("Context length: {}", r.context_length), Style::default().fg(TEXT)),
-            Line::styled(format!("Required: {:.1}GB", r.required_gb), Style::default().fg(TEXT)),
-            Line::styled(format!("Speed: {:.1} tok/s", r.speed_tps), Style::default().fg(TEXT)),
+            Line::styled(
+                format!("Context length: {}", r.context_length),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Required: {:.1}GB", r.required_gb),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Speed: {:.1} tok/s", r.speed_tps),
+                Style::default().fg(TEXT),
+            ),
             Line::raw(""),
-            Line::styled("Scores:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  quality: {:.1}", r.scores.quality), Style::default().fg(TEXT_DIM)),
-            Line::styled(format!("  speed:   {:.1}", r.scores.speed), Style::default().fg(TEXT_DIM)),
-            Line::styled(format!("  fit:     {:.1}", r.scores.fit), Style::default().fg(TEXT_DIM)),
-            Line::styled(format!("  context: {:.1}", r.scores.context), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                "Scores:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("  quality: {:.1}", r.scores.quality),
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                format!("  speed:   {:.1}", r.scores.speed),
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                format!("  fit:     {:.1}", r.scores.fit),
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                format!("  context: {:.1}", r.scores.context),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
-            Line::styled(format!("Composite score: {:.1}", r.score), Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
+            Line::styled(
+                format!("Composite score: {:.1}", r.score),
+                Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+            ),
         ]
     } else {
-        vec![Line::styled("No machine probed", Style::default().fg(TEXT_MUTED))]
+        vec![Line::styled(
+            "No machine probed",
+            Style::default().fg(TEXT_MUTED),
+        )]
     };
     frame.render_widget(
         Paragraph::new(preview)
-            .block(Block::default().title(" Fit Details (PgUp/PgDn) ").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(" Fit Details (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
             .wrap(Wrap { trim: false })
             .scroll((app.library_preview_scroll as u16, 0)),
         preview_area,
@@ -2140,20 +2880,40 @@ fn draw_library_fit(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
 
 fn draw_library_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else {
+        0
+    };
     let mut items = Vec::new();
     for (i, h) in app.library_harnesses.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
-        let status = if h.available { Span::styled(" ●", Style::default().fg(GREEN)) } else { Span::styled(" ○", Style::default().fg(TEXT_MUTED)) };
+        let status = if h.available {
+            Span::styled(" ●", Style::default().fg(GREEN))
+        } else {
+            Span::styled(" ○", Style::default().fg(TEXT_MUTED))
+        };
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("{marker}{}", h.name), style),
             status,
         ])));
     }
-    if items.is_empty() { items.push(ListItem::new(Line::styled("  No harnesses in library/harnesses/", Style::default().fg(TEXT_MUTED)))); }
-    frame.render_widget(List::new(items).block(Block::default().title(" Harnesses ").borders(Borders::ALL)), list_area);
+    if items.is_empty() {
+        items.push(ListItem::new(Line::styled(
+            "  No harnesses in library/harnesses/",
+            Style::default().fg(TEXT_MUTED),
+        )));
+    }
+    frame.render_widget(
+        List::new(items).block(Block::default().title(" Harnesses ").borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some(h) = app.library_harnesses.get(app.library_selected) {
         let status_line = if h.available {
@@ -2162,30 +2922,74 @@ fn draw_library_harnesses(frame: &mut Frame, app: &App, list_area: Rect, preview
             Line::styled("○ Not found", Style::default().fg(WAITING_COLOR))
         };
         vec![
-            Line::styled(&h.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Line::styled(
+                &h.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             status_line,
             Line::styled(format!("Command: {}", h.command), Style::default().fg(TEXT)),
             Line::styled(&h.description, Style::default().fg(TEXT_DIM)),
             Line::raw(""),
-            Line::styled("Capabilities:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  {}", h.capabilities.join(", ")), Style::default().fg(GREEN)),
+            Line::styled(
+                "Capabilities:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("  {}", h.capabilities.join(", ")),
+                Style::default().fg(GREEN),
+            ),
             Line::raw(""),
-            Line::styled("Supported Models:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Line::styled(format!("  {}", h.supported_models.join(", ")), Style::default().fg(CYAN)),
+            Line::styled(
+                "Supported Models:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                format!("  {}", h.supported_models.join(", ")),
+                Style::default().fg(CYAN),
+            ),
             Line::raw(""),
-            Line::styled(format!("Flags: {}", if h.flags.is_empty() { "(none)".into() } else { h.flags.join(" ") }), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                format!(
+                    "Flags: {}",
+                    if h.flags.is_empty() {
+                        "(none)".into()
+                    } else {
+                        h.flags.join(" ")
+                    }
+                ),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
             Line::styled(&h.notes, Style::default().fg(TEXT_DIM)),
         ]
-    } else { vec![Line::styled("No harness selected", Style::default().fg(TEXT_MUTED))] };
-    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    } else {
+        vec![Line::styled(
+            "No harness selected",
+            Style::default().fg(TEXT_MUTED),
+        )]
+    };
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Details (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
     let mut items = Vec::new();
     for (i, server) in app.library_mcp_servers.iter().enumerate() {
         let sel = app.library_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
         let status = if server.enabled {
             Span::styled(" ●", Style::default().fg(GREEN))
@@ -2198,10 +3002,23 @@ fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
         ])));
     }
     if items.is_empty() {
-        items.push(ListItem::new(Line::styled("  No MCP servers configured", Style::default().fg(TEXT_MUTED))));
-        items.push(ListItem::new(Line::styled("  Add .md files to library/mcp_servers/", Style::default().fg(TEXT_MUTED))));
+        items.push(ListItem::new(Line::styled(
+            "  No MCP servers configured",
+            Style::default().fg(TEXT_MUTED),
+        )));
+        items.push(ListItem::new(Line::styled(
+            "  Add .md files to library/mcp_servers/",
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
-    frame.render_widget(List::new(items).block(Block::default().title(" MCP Servers (e=toggle) ").borders(Borders::ALL)), list_area);
+    frame.render_widget(
+        List::new(items).block(
+            Block::default()
+                .title(" MCP Servers (e=toggle) ")
+                .borders(Borders::ALL),
+        ),
+        list_area,
+    );
 
     let preview = if let Some(s) = app.library_mcp_servers.get(app.library_selected) {
         let transport_info = match &s.transport {
@@ -2211,19 +3028,40 @@ fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
             orrch_library::McpTransport::Sse { url } => format!("sse: {}", url),
         };
         let mut lines = vec![
-            Line::styled(&s.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Line::styled(if s.enabled { "● Enabled" } else { "○ Disabled" },
-                Style::default().fg(if s.enabled { GREEN } else { TEXT_MUTED })),
+            Line::styled(
+                &s.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                if s.enabled {
+                    "● Enabled"
+                } else {
+                    "○ Disabled"
+                },
+                Style::default().fg(if s.enabled { GREEN } else { TEXT_MUTED }),
+            ),
             Line::styled(&s.description, Style::default().fg(TEXT_DIM)),
             Line::raw(""),
-            Line::styled(format!("Transport: {}", transport_info), Style::default().fg(TEXT)),
+            Line::styled(
+                format!("Transport: {}", transport_info),
+                Style::default().fg(TEXT),
+            ),
         ];
         if !s.assigned_roles.is_empty() {
             lines.push(Line::raw(""));
-            lines.push(Line::styled("Assigned to:", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)));
-            lines.push(Line::styled(format!("  {}", s.assigned_roles.join(", ")), Style::default().fg(CYAN)));
+            lines.push(Line::styled(
+                "Assigned to:",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ));
+            lines.push(Line::styled(
+                format!("  {}", s.assigned_roles.join(", ")),
+                Style::default().fg(CYAN),
+            ));
         } else {
-            lines.push(Line::styled("  Available to all agents", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                "  Available to all agents",
+                Style::default().fg(TEXT_DIM),
+            ));
         }
         if !s.notes.is_empty() {
             lines.push(Line::raw(""));
@@ -2234,27 +3072,71 @@ fn draw_library_mcp(frame: &mut Frame, app: &App, list_area: Rect, preview_area:
         vec![
             Line::styled("orrch-mcp (planned)", Style::default().fg(TEXT_MUTED)),
             Line::raw(""),
-            Line::styled("Unified MCP server exposing:", Style::default().fg(TEXT_DIM)),
-            Line::styled("  library_search, library_get", Style::default().fg(TEXT_DIM)),
-            Line::styled("  project_state, inbox_append", Style::default().fg(TEXT_DIM)),
-            Line::styled("  operation_status, session_list", Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                "Unified MCP server exposing:",
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                "  library_search, library_get",
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                "  project_state, inbox_append",
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                "  operation_status, session_list",
+                Style::default().fg(TEXT_DIM),
+            ),
         ]
     };
-    frame.render_widget(Paragraph::new(preview).block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL)).wrap(Wrap { trim: false }).scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Details (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
-fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std::path::PathBuf)], label: &str, extra_hint: &str, list_area: Rect, preview_area: Rect) {
+fn draw_library_generic(
+    frame: &mut Frame,
+    app: &App,
+    items_data: &[(String, std::path::PathBuf)],
+    label: &str,
+    extra_hint: &str,
+    list_area: Rect,
+    preview_area: Rect,
+) {
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else {
+        0
+    };
     let mut items = Vec::new();
     for (i, (name, _)) in items_data.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
-        items.push(ListItem::new(Line::styled(format!("{marker}{name}"), style)));
+        items.push(ListItem::new(Line::styled(
+            format!("{marker}{name}"),
+            style,
+        )));
     }
     if items.is_empty() {
-        items.push(ListItem::new(Line::styled(format!("  No {label} — create in Workforce editor"), Style::default().fg(TEXT_MUTED))));
+        items.push(ListItem::new(Line::styled(
+            format!("  No {label} — create in Workforce editor"),
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
     // Scroll indicators
     let has_above = scroll_offset > 0;
@@ -2265,29 +3147,59 @@ fn draw_library_generic(frame: &mut Frame, app: &App, items_data: &[(String, std
         (false, true) => " [v..]",
         (false, false) => "",
     };
-    let hint_part = if extra_hint.is_empty() { String::new() } else { format!(" {extra_hint}") };
-    let title = format!(" {} ({}) r=refresh{}{} ", label, items_data.len(), hint_part, scroll_hint);
-    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+    let hint_part = if extra_hint.is_empty() {
+        String::new()
+    } else {
+        format!(" {extra_hint}")
+    };
+    let title = format!(
+        " {} ({}) r=refresh{}{} ",
+        label,
+        items_data.len(),
+        hint_part,
+        scroll_hint
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some((_, path)) = items_data.get(app.library_selected) {
         if let Ok(content) = std::fs::read_to_string(path) {
             markdown_to_lines(&content)
         } else {
-            vec![Line::styled("Cannot read file", Style::default().fg(TEXT_MUTED))]
+            vec![Line::styled(
+                "Cannot read file",
+                Style::default().fg(TEXT_MUTED),
+            )]
         }
     } else {
-        vec![Line::styled("Select an item to preview", Style::default().fg(TEXT_MUTED))]
+        vec![Line::styled(
+            "Select an item to preview",
+            Style::default().fg(TEXT_MUTED),
+        )]
     };
-    frame.render_widget(Paragraph::new(preview)
-        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Preview (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 fn draw_library_connections(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
     let connections = app.connection_store.list();
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else {
+        0
+    };
     let mut items = Vec::new();
     for (i, connection) in connections.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
@@ -2300,68 +3212,179 @@ fn draw_library_connections(frame: &mut Frame, app: &App, list_area: Rect, previ
         };
         let marker = if sel { "■ " } else { "  " };
         let status = if connection.enabled { "on" } else { "off" };
-        let test_status = app.connection_test_status.get(&connection.name).map(String::as_str).unwrap_or("");
+        let test_status = app
+            .connection_test_status
+            .get(&connection.name)
+            .map(String::as_str)
+            .unwrap_or("");
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!("{marker}{}", connection.name), style),
-            Span::styled(format!(" | {} | {} rpm | [{}]", connection.kind.label(), connection.rate_limit_rpm, status), Style::default().fg(TEXT_DIM)),
             Span::styled(
-                if test_status.is_empty() { String::new() } else { format!(" | {test_status}") },
-                Style::default().fg(if test_status.starts_with("failed") { WAITING_COLOR } else { GREEN }),
+                format!(
+                    " | {} | {} rpm | [{}]",
+                    connection.kind.label(),
+                    connection.rate_limit_rpm,
+                    status
+                ),
+                Style::default().fg(TEXT_DIM),
+            ),
+            Span::styled(
+                if test_status.is_empty() {
+                    String::new()
+                } else {
+                    format!(" | {test_status}")
+                },
+                Style::default().fg(if test_status.starts_with("failed") {
+                    WAITING_COLOR
+                } else {
+                    GREEN
+                }),
             ),
         ])));
     }
     if items.is_empty() {
-        items.push(ListItem::new(Line::styled("  No connections configured - press n to add one", Style::default().fg(TEXT_MUTED))));
+        items.push(ListItem::new(Line::styled(
+            "  No connections configured - press n to add one",
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
-    let title = format!(" Connections ({}) - n new  e edit  d delete  t test  v toggle ", connections.len());
-    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+    let title = format!(
+        " Connections ({}) - n new  e edit  d delete  t test  v toggle ",
+        connections.len()
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some(connection) = connections.get(app.library_selected) {
-        let test_status = app.connection_test_status.get(&connection.name).map(String::as_str).unwrap_or("not tested");
+        let test_status = app
+            .connection_test_status
+            .get(&connection.name)
+            .map(String::as_str)
+            .unwrap_or("not tested");
         vec![
-            Line::styled(&connection.name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Line::styled(if connection.enabled { "Status: enabled" } else { "Status: disabled" }, Style::default().fg(if connection.enabled { GREEN } else { TEXT_MUTED })),
-            Line::styled(format!("Kind: {}", connection.kind.label()), Style::default().fg(TEXT)),
-            Line::styled(format!("Base URL: {}", connection.base_url), Style::default().fg(TEXT)),
-            Line::styled(format!("Default model: {}", connection.default_model), Style::default().fg(TEXT)),
             Line::styled(
-                format!("Rate limit: {}", if connection.rate_limit_rpm == 0 { "unlimited".to_string() } else { format!("{} rpm", connection.rate_limit_rpm) }),
+                &connection.name,
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                if connection.enabled {
+                    "Status: enabled"
+                } else {
+                    "Status: disabled"
+                },
+                Style::default().fg(if connection.enabled {
+                    GREEN
+                } else {
+                    TEXT_MUTED
+                }),
+            ),
+            Line::styled(
+                format!("Kind: {}", connection.kind.label()),
                 Style::default().fg(TEXT),
             ),
-            Line::styled(format!("API key: {}", orrch_core::mask_key(&connection.api_key)), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                format!("Base URL: {}", connection.base_url),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("Default model: {}", connection.default_model),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!(
+                    "Rate limit: {}",
+                    if connection.rate_limit_rpm == 0 {
+                        "unlimited".to_string()
+                    } else {
+                        format!("{} rpm", connection.rate_limit_rpm)
+                    }
+                ),
+                Style::default().fg(TEXT),
+            ),
+            Line::styled(
+                format!("API key: {}", orrch_core::mask_key(&connection.api_key)),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
-            Line::styled(format!("Last test: {test_status}"), Style::default().fg(TEXT_DIM)),
+            Line::styled(
+                format!("Last test: {test_status}"),
+                Style::default().fg(TEXT_DIM),
+            ),
             Line::raw(""),
-            Line::styled(format!("Stored locally in {}", orrch_core::connections_path().display()), Style::default().fg(TEXT_MUTED)),
-            Line::styled("Use ORRCH_VOICE_PORTAL_PROVIDER=connection:<name> for voice portal.", Style::default().fg(TEXT_MUTED)),
+            Line::styled(
+                format!(
+                    "Stored locally in {}",
+                    orrch_core::connections_path().display()
+                ),
+                Style::default().fg(TEXT_MUTED),
+            ),
+            Line::styled(
+                "Use ORRCH_VOICE_PORTAL_PROVIDER=connection:<name> for voice portal.",
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]
     } else {
         vec![
-            Line::styled("Add a connection to use external model services.", Style::default().fg(TEXT_MUTED)),
+            Line::styled(
+                "Add a connection to use external model services.",
+                Style::default().fg(TEXT_MUTED),
+            ),
             Line::raw(""),
-            Line::styled("Presets: NVIDIA, OpenAI, Groq, OpenRouter, Together, Ollama.", Style::default().fg(TEXT_DIM)),
-            Line::styled(format!("Stored locally in {}", orrch_core::connections_path().display()), Style::default().fg(TEXT_MUTED)),
+            Line::styled(
+                "Presets: NVIDIA, OpenAI, Groq, OpenRouter, Together, Ollama.",
+                Style::default().fg(TEXT_DIM),
+            ),
+            Line::styled(
+                format!(
+                    "Stored locally in {}",
+                    orrch_core::connections_path().display()
+                ),
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]
     };
-    frame.render_widget(Paragraph::new(preview)
-        .block(Block::default().title(" Details (PgUp/PgDn) ").borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Details (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 fn draw_library_pi_extensions(frame: &mut Frame, app: &App, list_area: Rect, preview_area: Rect) {
     let items_data = &app.library_pi_extensions;
     let visible_rows = list_area.height.saturating_sub(2) as usize;
-    let scroll_offset = if app.library_selected >= visible_rows { app.library_selected - visible_rows + 1 } else { 0 };
+    let scroll_offset = if app.library_selected >= visible_rows {
+        app.library_selected - visible_rows + 1
+    } else {
+        0
+    };
     let mut items = Vec::new();
     for (i, item) in items_data.iter().enumerate().skip(scroll_offset) {
         let sel = app.library_selected == i;
-        let style = if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+        let style = if sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT)
+        };
         let marker = if sel { "■ " } else { "  " };
-        items.push(ListItem::new(Line::styled(format!("{marker}{}.ts", item.name), style)));
+        items.push(ListItem::new(Line::styled(
+            format!("{marker}{}.ts", item.name),
+            style,
+        )));
     }
     if items.is_empty() {
-        items.push(ListItem::new(Line::styled("  No PI extensions — press 'n' to create, or 'x' on a Skill/Tool to export", Style::default().fg(TEXT_MUTED))));
+        items.push(ListItem::new(Line::styled(
+            "  No PI extensions — press 'n' to create, or 'x' on a Skill/Tool to export",
+            Style::default().fg(TEXT_MUTED),
+        )));
     }
     let has_above = scroll_offset > 0;
     let has_below = items_data.len() > scroll_offset + visible_rows;
@@ -2371,11 +3394,20 @@ fn draw_library_pi_extensions(frame: &mut Frame, app: &App, list_area: Rect, pre
         (false, true) => " [v..]",
         (false, false) => "",
     };
-    let title = format!(" PI Extensions ({}) n=new e=edit r=refresh{} ", items_data.len(), scroll_hint);
-    frame.render_widget(List::new(items).block(Block::default().title(title).borders(Borders::ALL)), list_area);
+    let title = format!(
+        " PI Extensions ({}) n=new e=edit r=refresh{} ",
+        items_data.len(),
+        scroll_hint
+    );
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL)),
+        list_area,
+    );
 
     let preview = if let Some(item) = items_data.get(app.library_selected) {
-        let lines: Vec<Line> = item.content.lines()
+        let lines: Vec<Line> = item
+            .content
+            .lines()
             .map(|l| Line::styled(l.to_string(), Style::default().fg(TEXT)))
             .collect();
         if lines.is_empty() {
@@ -2384,12 +3416,22 @@ fn draw_library_pi_extensions(frame: &mut Frame, app: &App, list_area: Rect, pre
             lines
         }
     } else {
-        vec![Line::styled("Select an extension to preview", Style::default().fg(TEXT_MUTED))]
+        vec![Line::styled(
+            "Select an extension to preview",
+            Style::default().fg(TEXT_MUTED),
+        )]
     };
-    frame.render_widget(Paragraph::new(preview)
-        .block(Block::default().title(" Preview (PgUp/PgDn) ").borders(Borders::ALL))
-        .wrap(Wrap { trim: false })
-        .scroll((app.library_preview_scroll as u16, 0)), preview_area);
+    frame.render_widget(
+        Paragraph::new(preview)
+            .block(
+                Block::default()
+                    .title(" Preview (PgUp/PgDn) ")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((app.library_preview_scroll as u16, 0)),
+        preview_area,
+    );
 }
 
 // ─── Ideas (Design > Intentions) ────────────────────────────────────
@@ -2410,119 +3452,151 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
 
     // Color constants for gradient
     let default_rgb = (230, 230, 240); // TEXT
-    let yellow_rgb = (255, 200, 50);   // WAITING_COLOR
-    let green_rgb = (80, 200, 120);    // GREEN
+    let yellow_rgb = (255, 200, 50); // WAITING_COLOR
+    let green_rgb = (80, 200, 120); // GREEN
 
-    let items: Vec<ListItem> = app.ideas.iter().enumerate().map(|(idx, idea)| {
-        let (r, g, b) = idea.pipeline.gradient_color(default_rgb, yellow_rgb, green_rgb);
-        let title_style = Style::default().fg(Color::Rgb(r, g, b)).add_modifier(Modifier::BOLD);
+    let items: Vec<ListItem> = app
+        .ideas
+        .iter()
+        .enumerate()
+        .map(|(idx, idea)| {
+            let (r, g, b) = idea
+                .pipeline
+                .gradient_color(default_rgb, yellow_rgb, green_rgb);
+            let title_style = Style::default()
+                .fg(Color::Rgb(r, g, b))
+                .add_modifier(Modifier::BOLD);
 
-        // Build status badge
-        let badge = if idea.pipeline.is_complete() {
-            " ✓ 100%".to_string()
-        } else if idea.pipeline.is_submitted() {
-            let pct = idea.pipeline.progress;
-            if pct >= 50 {
-                let impl_ratio = idea.pipeline.implementation_ratio();
-                format!(" {}% impl", (impl_ratio * 100.0) as u8)
+            // Build status badge
+            let badge = if idea.pipeline.is_complete() {
+                " ✓ 100%".to_string()
+            } else if idea.pipeline.is_submitted() {
+                let pct = idea.pipeline.progress;
+                if pct >= 50 {
+                    let impl_ratio = idea.pipeline.implementation_ratio();
+                    format!(" {}% impl", (impl_ratio * 100.0) as u8)
+                } else {
+                    format!(" {}% intake", pct)
+                }
             } else {
-                format!(" {}% intake", pct)
-            }
-        } else {
-            String::new()
-        };
+                String::new()
+            };
 
-        // Package name header (shown when instructions distributed, progress >= 50)
-        let package_line = if let Some(ref pkg) = idea.pipeline.package_name {
-            let counts: Vec<String> = idea.pipeline.targets.iter()
-                .map(|t| {
-                    let remaining = t.instruction_count.saturating_sub(t.implemented_count);
-                    if t.implemented_count > 0 {
-                        format!("{}:{} remaining ({} done)", t.project, remaining, t.implemented_count)
-                    } else {
-                        format!("{}:{}", t.project, t.instruction_count)
-                    }
-                })
-                .collect();
-            format!("  ⟦{}⟧ → {}", pkg, counts.join(", "))
-        } else {
-            String::new()
-        };
+            // Package name header (shown when instructions distributed, progress >= 50)
+            let package_line = if let Some(ref pkg) = idea.pipeline.package_name {
+                let counts: Vec<String> = idea
+                    .pipeline
+                    .targets
+                    .iter()
+                    .map(|t| {
+                        let remaining = t.instruction_count.saturating_sub(t.implemented_count);
+                        if t.implemented_count > 0 {
+                            format!(
+                                "{}:{} remaining ({} done)",
+                                t.project, remaining, t.implemented_count
+                            )
+                        } else {
+                            format!("{}:{}", t.project, t.instruction_count)
+                        }
+                    })
+                    .collect();
+                format!("  ⟦{}⟧ → {}", pkg, counts.join(", "))
+            } else {
+                String::new()
+            };
 
-        let mut lines = vec![
-            Line::from(vec![
+            let mut lines = vec![Line::from(vec![
                 Span::styled(&idea.title, title_style),
                 Span::styled(badge, Style::default().fg(Color::Rgb(r, g, b))),
-            ]),
-        ];
-        if !package_line.is_empty() {
-            lines.push(Line::styled(package_line, Style::default().fg(CYAN)));
-        }
-        lines.push(Line::styled(format!("  {}", idea.preview), Style::default().fg(TEXT_DIM)));
-
-        // Inline audit trail expansion (toggled with 'i')
-        if app.ideas_audit_expanded == Some(idx) {
-            let idea_filename = idea.path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            // Load audit entries for orrchestrator project dir
-            let project_dir = app.projects_dir.join("orrchestrator");
-            let all_entries = orrch_core::load_audit_entries(&project_dir);
-            let matching: Vec<_> = all_entries.iter()
-                .filter(|e| e.source_file.contains(&idea_filename))
-                .collect();
-
-            lines.push(Line::raw(""));
-            lines.push(Line::styled("── Audit Trail ──", Style::default().fg(TEXT_MUTED)));
-
-            if matching.is_empty() {
-                lines.push(Line::styled("  No audit records for this idea", Style::default().fg(TEXT_MUTED)));
-            } else {
-                for entry in &matching {
-                    let raw_preview = if entry.raw_text.chars().count() > 80 {
-                        format!("{}...", entry.raw_text.chars().take(80).collect::<String>())
-                    } else {
-                        entry.raw_text.clone()
-                    };
-                    let opt_preview = if entry.optimized_text.chars().count() > 80 {
-                        format!("{}...", entry.optimized_text.chars().take(80).collect::<String>())
-                    } else {
-                        entry.optimized_text.clone()
-                    };
-                    let hash_short: String = entry.source_hash.chars().take(8).collect();
-                    lines.push(Line::styled(
-                        format!("  Source: {}", entry.source_file),
-                        Style::default().fg(TEXT_DIM),
-                    ));
-                    lines.push(Line::styled(
-                        format!("  Range: line {}–{}, chars {}–{}",
-                            entry.coordinate.line_start, entry.coordinate.line_end,
-                            entry.coordinate.char_start, entry.coordinate.char_end),
-                        Style::default().fg(TEXT_DIM),
-                    ));
-                    lines.push(Line::styled(
-                        format!("  Raw: {}", raw_preview),
-                        Style::default().fg(TEXT_MUTED),
-                    ));
-                    lines.push(Line::styled(
-                        format!("  Optimized: {}", opt_preview),
-                        Style::default().fg(TEXT_MUTED),
-                    ));
-                    lines.push(Line::styled(
-                        format!("  Hash: {}", hash_short),
-                        Style::default().fg(TEXT_MUTED),
-                    ));
-                    lines.push(Line::raw(""));
-                }
+            ])];
+            if !package_line.is_empty() {
+                lines.push(Line::styled(package_line, Style::default().fg(CYAN)));
             }
             lines.push(Line::styled(
-                "  Press 'i' or Esc to collapse",
+                format!("  {}", idea.preview),
                 Style::default().fg(TEXT_DIM),
             ));
-        }
 
-        ListItem::new(lines)
-    }).collect();
+            // Inline audit trail expansion (toggled with 'i')
+            if app.ideas_audit_expanded == Some(idx) {
+                let idea_filename = idea
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                // Load audit entries for orrchestrator project dir
+                let project_dir = app.projects_dir.join("orrchestrator");
+                let all_entries = orrch_core::load_audit_entries(&project_dir);
+                let matching: Vec<_> = all_entries
+                    .iter()
+                    .filter(|e| e.source_file.contains(&idea_filename))
+                    .collect();
+
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    "── Audit Trail ──",
+                    Style::default().fg(TEXT_MUTED),
+                ));
+
+                if matching.is_empty() {
+                    lines.push(Line::styled(
+                        "  No audit records for this idea",
+                        Style::default().fg(TEXT_MUTED),
+                    ));
+                } else {
+                    for entry in &matching {
+                        let raw_preview = if entry.raw_text.chars().count() > 80 {
+                            format!("{}...", entry.raw_text.chars().take(80).collect::<String>())
+                        } else {
+                            entry.raw_text.clone()
+                        };
+                        let opt_preview = if entry.optimized_text.chars().count() > 80 {
+                            format!(
+                                "{}...",
+                                entry.optimized_text.chars().take(80).collect::<String>()
+                            )
+                        } else {
+                            entry.optimized_text.clone()
+                        };
+                        let hash_short: String = entry.source_hash.chars().take(8).collect();
+                        lines.push(Line::styled(
+                            format!("  Source: {}", entry.source_file),
+                            Style::default().fg(TEXT_DIM),
+                        ));
+                        lines.push(Line::styled(
+                            format!(
+                                "  Range: line {}–{}, chars {}–{}",
+                                entry.coordinate.line_start,
+                                entry.coordinate.line_end,
+                                entry.coordinate.char_start,
+                                entry.coordinate.char_end
+                            ),
+                            Style::default().fg(TEXT_DIM),
+                        ));
+                        lines.push(Line::styled(
+                            format!("  Raw: {}", raw_preview),
+                            Style::default().fg(TEXT_MUTED),
+                        ));
+                        lines.push(Line::styled(
+                            format!("  Optimized: {}", opt_preview),
+                            Style::default().fg(TEXT_MUTED),
+                        ));
+                        lines.push(Line::styled(
+                            format!("  Hash: {}", hash_short),
+                            Style::default().fg(TEXT_MUTED),
+                        ));
+                        lines.push(Line::raw(""));
+                    }
+                }
+                lines.push(Line::styled(
+                    "  Press 'i' or Esc to collapse",
+                    Style::default().fg(TEXT_DIM),
+                ));
+            }
+
+            ListItem::new(lines)
+        })
+        .collect();
 
     // Split area: if open editors exist, carve out a bottom section for them
     let (list_area, editors_area) = if !app.split_off_editors.is_empty() {
@@ -2536,7 +3610,10 @@ fn draw_ideas(frame: &mut Frame, app: &App, area: Rect) {
         (area, None)
     };
 
-    let title = format!(" Intentions ({}) — n=new s=submit X=retract Enter=edit ", app.ideas.len());
+    let title = format!(
+        " Intentions ({}) — n=new s=submit X=retract Enter=edit ",
+        app.ideas.len()
+    );
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
         .block(Block::default().title(title).borders(Borders::ALL))
@@ -2581,7 +3658,9 @@ fn draw_intake_review(frame: &mut Frame, app: &App, area: Rect) {
     // Banner
     let banner = Paragraph::new(Line::styled(
         " Intake Review Pending — y=confirm  e=edit  N=reject  Tab=switch pane ",
-        Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(WAITING_COLOR)
+            .add_modifier(Modifier::BOLD),
     ));
     frame.render_widget(banner, chunks[0]);
 
@@ -2596,7 +3675,11 @@ fn draw_intake_review(frame: &mut Frame, app: &App, area: Rect) {
         let opt_focused = app.intake_review_focus == IntakeReviewFocus::Optimized;
 
         // Raw pane (left, read-only)
-        let raw_border = if raw_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+        let raw_border = if raw_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(TEXT_MUTED)
+        };
         let raw_block = Block::default()
             .title(" Raw (read-only) ")
             .borders(Borders::ALL)
@@ -2609,7 +3692,11 @@ fn draw_intake_review(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(raw_para, panes[0]);
 
         // Optimized pane (right, editable)
-        let opt_border = if opt_focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+        let opt_border = if opt_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(TEXT_MUTED)
+        };
         let opt_block = Block::default()
             .title(" Optimized (e=edit) ")
             .borders(Borders::ALL)
@@ -2631,8 +3718,12 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     // Helper: render a project as list item lines
     let render_project = |proj: &Project, idx: usize, app: &App| -> Vec<Line<'_>> {
         let session_count = app.active_session_count(&proj.path);
-        let waiting = app.pm.sessions().iter()
-            .filter(|s| s.project_dir == proj.path && s.state == SessionState::Waiting).count();
+        let waiting = app
+            .pm
+            .sessions()
+            .iter()
+            .filter(|s| s.project_dir == proj.path && s.state == SessionState::Waiting)
+            .count();
         let tag_color = match proj.color_tag {
             orrch_core::ColorTag::Red => Color::Red,
             orrch_core::ColorTag::Yellow => Color::Yellow,
@@ -2665,13 +3756,27 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         let sess_str = if session_count > 0 {
             if pipeline_count > 1 {
                 // Show pipeline count for parallel work
-                if waiting > 0 { format!(" {pipeline_count}/{max_sess}⊞⚠") } else { format!(" {pipeline_count}/{max_sess}⊞") }
+                if waiting > 0 {
+                    format!(" {pipeline_count}/{max_sess}⊞⚠")
+                } else {
+                    format!(" {pipeline_count}/{max_sess}⊞")
+                }
             } else {
-                if waiting > 0 { format!(" {session_count}/{max_sess}⚠") } else { format!(" {session_count}/{max_sess}▶") }
+                if waiting > 0 {
+                    format!(" {session_count}/{max_sess}⚠")
+                } else {
+                    format!(" {session_count}/{max_sess}▶")
+                }
             }
-        } else { String::new() };
+        } else {
+            String::new()
+        };
         // OPT-002: self-explanatory label for inbox queue count
-        let queued_str = if proj.queued_prompts > 0 { format!(" Inbox:{}", proj.queued_prompts) } else { String::new() };
+        let queued_str = if proj.queued_prompts > 0 {
+            format!(" Inbox:{}", proj.queued_prompts)
+        } else {
+            String::new()
+        };
 
         // OPT-013: lifecycle badge color
         let lifecycle_color = match proj.lifecycle_stage {
@@ -2682,34 +3787,64 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         };
         // Only show badge for non-active stages to avoid clutter
         let lifecycle_span = if proj.lifecycle_stage != LifecycleStage::Active {
-            Span::styled(format!(" [{}]", proj.lifecycle_stage.badge()), Style::default().fg(lifecycle_color))
+            Span::styled(
+                format!(" [{}]", proj.lifecycle_stage.badge()),
+                Style::default().fg(lifecycle_color),
+            )
         } else {
             Span::raw("")
         };
 
         let mut lines = vec![Line::from(vec![
             Span::styled(proj.color_tag.icon(), Style::default().fg(tag_color)),
-            Span::styled(format!(" {}", proj.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" [{}]", proj.scope.badge()), Style::default().fg(CYAN)),
+            Span::styled(
+                format!(" {}", proj.name),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" [{}]", proj.scope.badge()),
+                Style::default().fg(CYAN),
+            ),
             lifecycle_span,
-            Span::styled(goals_str, Style::default().fg(
-                if done == total && total > 0 { GREEN }
-                else if !proj.has_plan && total == 0 { TEXT_MUTED }
-                else { TEXT_DIM }
-            )),
-            Span::styled(sess_str, Style::default().fg(if waiting > 0 { WAITING_COLOR } else { GREEN })),
+            Span::styled(
+                goals_str,
+                Style::default().fg(if done == total && total > 0 {
+                    GREEN
+                } else if !proj.has_plan && total == 0 {
+                    TEXT_MUTED
+                } else {
+                    TEXT_DIM
+                }),
+            ),
+            Span::styled(
+                sess_str,
+                Style::default().fg(if waiting > 0 { WAITING_COLOR } else { GREEN }),
+            ),
             Span::styled(queued_str, Style::default().fg(WAITING_COLOR)),
             Span::styled(plan_str, Style::default().fg(WAITING_COLOR)),
-            Span::styled(format!("  [{}]", proj.default_action()), Style::default().fg(TEXT_MUTED)),
-            if proj.meta.apple_target { Span::styled(" 🍎", Style::default()) } else { Span::raw("") },
+            Span::styled(
+                format!("  [{}]", proj.default_action()),
+                Style::default().fg(TEXT_MUTED),
+            ),
+            if proj.meta.apple_target {
+                Span::styled(" 🍎", Style::default())
+            } else {
+                Span::raw("")
+            },
         ])];
         if !proj.description.is_empty() {
             let desc: String = proj.description.chars().take(60).collect();
-            lines.push(Line::styled(format!("    {desc}"), Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                format!("    {desc}"),
+                Style::default().fg(TEXT_DIM),
+            ));
         }
         if let Some(next) = proj.next_priority() {
             lines.push(Line::from(vec![
-                Span::styled("    → ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "    → ",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(next.title.clone(), Style::default().fg(TEXT)),
             ]));
         }
@@ -2726,14 +3861,26 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             let _pipelines = app.pipelines_for_project(&proj.path);
             for s in &managed_sessions {
                 let sc = match s.state {
-                    SessionState::Working => GREEN, SessionState::Waiting => WAITING_COLOR,
-                    SessionState::Idle => TEXT_MUTED, SessionState::Dead => Color::Red,
+                    SessionState::Working => GREEN,
+                    SessionState::Waiting => WAITING_COLOR,
+                    SessionState::Idle => TEXT_MUTED,
+                    SessionState::Dead => Color::Red,
                 };
                 let sel = app.tree_selected == item_idx;
                 let marker = if sel { "  ▶ " } else { "    " };
-                let style = if sel { Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+                let style = if sel {
+                    Style::default()
+                        .fg(TEXT)
+                        .bg(BG_HIGHLIGHT)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{marker}{} ", s.state.icon()), Style::default().fg(sc)),
+                    Span::styled(
+                        format!("{marker}{} ", s.state.icon()),
+                        Style::default().fg(sc),
+                    ),
                     Span::styled(s.goal_display().to_string(), style),
                     Span::styled(format!(" {}", s.backend.badge()), Style::default().fg(CYAN)),
                 ]));
@@ -2743,12 +3890,22 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
                 let sel = app.tree_selected == item_idx;
                 let marker = if sel { "  ▶ " } else { "    " };
                 let host_badge = ext.host_badge();
-                let style = if sel { Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) };
+                let style = if sel {
+                    Style::default()
+                        .fg(TEXT)
+                        .bg(BG_HIGHLIGHT)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                };
                 lines.push(Line::from(vec![
                     Span::styled(format!("{marker}👁 "), Style::default().fg(CYAN)),
                     Span::styled(ext.display_name().to_string(), style),
                     if !host_badge.is_empty() {
-                        Span::styled(format!(" {host_badge}"), Style::default().fg(Color::Rgb(180, 140, 255)))
+                        Span::styled(
+                            format!(" {host_badge}"),
+                            Style::default().fg(Color::Rgb(180, 140, 255)),
+                        )
                     } else {
                         Span::raw("")
                     },
@@ -2758,30 +3915,39 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 
             // Feedback processing sessions targeting this project
             for fb_item in &app.feedback_items {
-                if fb_item.status == FeedbackStatus::Processing {
-                    if let Some(ref session) = fb_item.tmux_session {
-                        // Check if this session's routes include this project
-                        let targets_this = fb_item.routes.iter().any(|r| r == &proj.name)
-                            || fb_item.routes.is_empty(); // workspace-level targets all
-                        if targets_this {
-                            let live = orrch_core::tmux_session_status(session)
-                                .unwrap_or_else(|| "processing...".into());
-                            lines.push(Line::from(vec![
-                                Span::styled("    ⏳ ", Style::default().fg(WAITING_COLOR)),
-                                Span::styled(format!("feedback: {}", fb_item.preview.chars().take(25).collect::<String>()), Style::default().fg(WAITING_COLOR)),
-                            ]));
-                            lines.push(Line::styled(
-                                format!("       └─ {live}"),
-                                Style::default().fg(TEXT_MUTED),
-                            ));
-                        }
+                if fb_item.status == FeedbackStatus::Processing
+                    && let Some(ref session) = fb_item.tmux_session
+                {
+                    // Check if this session's routes include this project
+                    let targets_this =
+                        fb_item.routes.iter().any(|r| r == &proj.name) || fb_item.routes.is_empty(); // workspace-level targets all
+                    if targets_this {
+                        let live = orrch_core::tmux_session_status(session)
+                            .unwrap_or_else(|| "processing...".into());
+                        lines.push(Line::from(vec![
+                            Span::styled("    ⏳ ", Style::default().fg(WAITING_COLOR)),
+                            Span::styled(
+                                format!(
+                                    "feedback: {}",
+                                    fb_item.preview.chars().take(25).collect::<String>()
+                                ),
+                                Style::default().fg(WAITING_COLOR),
+                            ),
+                        ]));
+                        lines.push(Line::styled(
+                            format!("       └─ {live}"),
+                            Style::default().fg(TEXT_MUTED),
+                        ));
                     }
                 }
             }
 
             // Separator between sessions and files
             if session_count > 0 {
-                lines.push(Line::styled("    ────────────────────────", Style::default().fg(Color::Rgb(50, 50, 70))));
+                lines.push(Line::styled(
+                    "    ────────────────────────",
+                    Style::default().fg(Color::Rgb(50, 50, 70)),
+                ));
             }
 
             // Directory tree (selectable, with depth indentation)
@@ -2795,10 +3961,17 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             for (ti, node) in tree_nodes.iter().enumerate() {
                 let sel = app.tree_selected == session_count + ti;
                 let indent = "    ".to_string() + &"  ".repeat(node.2);
-                let arrow = if node.1 { if node.4 { "▾ " } else { "▸ " } } else { "  " };
+                let arrow = if node.1 {
+                    if node.4 { "▾ " } else { "▸ " }
+                } else {
+                    "  "
+                };
                 let sel_marker = if sel { "▶" } else { " " };
                 let style = if sel {
-                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD).bg(BG_HIGHLIGHT)
+                    Style::default()
+                        .fg(TEXT)
+                        .add_modifier(Modifier::BOLD)
+                        .bg(BG_HIGHLIGHT)
                 } else if node.1 {
                     Style::default().fg(CYAN)
                 } else {
@@ -2823,9 +3996,19 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
     ) {
         let entries = orrch_core::list_directory(dir);
         for entry in entries {
-            let rel = entry.path.strip_prefix(root).unwrap_or(&entry.path).to_path_buf();
+            let rel = entry
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&entry.path)
+                .to_path_buf();
             let is_expanded = entry.is_dir && expanded.contains(&rel);
-            out.push((entry.name.clone(), entry.is_dir, depth, entry.icon(), is_expanded));
+            out.push((
+                entry.name.clone(),
+                entry.is_dir,
+                depth,
+                entry.icon(),
+                is_expanded,
+            ));
             if is_expanded {
                 build_tree_for_render(&entry.path, root, expanded, depth + 1, out);
             }
@@ -2869,8 +4052,13 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
                 items.push(ListItem::new(Line::from(vec![
                     Span::styled(format!("  {} ", proj.name), Style::default().fg(TEXT_MUTED)),
                     if !proj.description.is_empty() {
-                        Span::styled(proj.description.chars().take(40).collect::<String>(), Style::default().fg(TEXT_MUTED))
-                    } else { Span::raw("") },
+                        Span::styled(
+                            proj.description.chars().take(40).collect::<String>(),
+                            Style::default().fg(TEXT_MUTED),
+                        )
+                    } else {
+                        Span::raw("")
+                    },
                 ])));
             }
         }
@@ -2885,9 +4073,17 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
         for v in &app.production_versions {
             let status_color = if v.working { GREEN } else { Color::Red };
             items.push(ListItem::new(Line::from(vec![
-                Span::styled(if v.working { "  🟢 " } else { "  🔴 " }, Style::default().fg(status_color)),
+                Span::styled(
+                    if v.working { "  🟢 " } else { "  🔴 " },
+                    Style::default().fg(status_color),
+                ),
                 Span::styled(&v.project_name, Style::default().fg(TEXT)),
-                Span::styled(format!(" {}", v.version), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!(" {}", v.version),
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ])));
         }
     }
@@ -2907,19 +4103,29 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
             ])));
         }
         for facility in &app.facilities {
-            items.push(ListItem::new(vec![
-                Line::from(vec![
-                    Span::styled("  📦 ", Style::default().fg(TEXT_DIM)),
-                    Span::styled(&facility.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("  ({} sub-projects)", facility.sub_projects.len()), Style::default().fg(TEXT_MUTED)),
-                ]),
-            ]));
+            items.push(ListItem::new(vec![Line::from(vec![
+                Span::styled("  📦 ", Style::default().fg(TEXT_DIM)),
+                Span::styled(
+                    &facility.name,
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  ({} sub-projects)", facility.sub_projects.len()),
+                    Style::default().fg(TEXT_MUTED),
+                ),
+            ])]));
             for sub in &facility.sub_projects {
                 items.push(ListItem::new(Line::from(vec![
                     Span::raw("      "),
                     Span::styled(&sub.name, Style::default().fg(TEXT_DIM)),
                     if !sub.description.is_empty() {
-                        Span::styled(format!(" — {}", sub.description.chars().take(40).collect::<String>()), Style::default().fg(TEXT_MUTED))
+                        Span::styled(
+                            format!(
+                                " — {}",
+                                sub.description.chars().take(40).collect::<String>()
+                            ),
+                            Style::default().fg(TEXT_MUTED),
+                        )
                     } else {
                         Span::raw("")
                     },
@@ -2937,7 +4143,12 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 
         let list = List::new(items)
             .scroll_padding(SCROLL_PAD)
-            .block(Block::default().title(projects_title(app)).borders(Borders::ALL).style(Style::default().fg(ACCENT)))
+            .block(
+                Block::default()
+                    .title(projects_title(app))
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(ACCENT)),
+            )
             .highlight_style(Style::default().bg(BG_HIGHLIGHT))
             .highlight_symbol("▶ ")
             .highlight_spacing(HighlightSpacing::Always);
@@ -2946,13 +4157,23 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 
         let preview = Paragraph::new(app.tree_preview.as_str())
             .style(Style::default().fg(TEXT))
-            .block(Block::default().title(" Preview ").borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)))
+            .block(
+                Block::default()
+                    .title(" Preview ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_DIM)),
+            )
             .wrap(Wrap { trim: false });
         frame.render_widget(preview, hsplit[1]);
     } else {
         let list = List::new(items)
             .scroll_padding(SCROLL_PAD)
-            .block(Block::default().title(projects_title(app)).borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)))
+            .block(
+                Block::default()
+                    .title(projects_title(app))
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(TEXT_DIM)),
+            )
             .highlight_style(Style::default().bg(BG_HIGHLIGHT))
             .highlight_symbol("▶ ")
             .highlight_spacing(HighlightSpacing::Always);
@@ -2966,27 +4187,43 @@ fn draw_projects(frame: &mut Frame, app: &App, area: Rect) {
 #[allow(dead_code)]
 fn draw_production(frame: &mut Frame, app: &App, area: Rect) {
     if app.production_versions.is_empty() {
-        let msg = Paragraph::new("No versioned releases found.\nProjects with v1/, v2/ directories appear here.")
-            .style(Style::default().fg(TEXT_DIM))
-            .block(Block::default().title(" Production ").borders(Borders::ALL));
+        let msg = Paragraph::new(
+            "No versioned releases found.\nProjects with v1/, v2/ directories appear here.",
+        )
+        .style(Style::default().fg(TEXT_DIM))
+        .block(Block::default().title(" Production ").borders(Borders::ALL));
         frame.render_widget(msg, area);
         return;
     }
 
-    let rows: Vec<Row> = app.production_versions.iter().map(|v| {
-        let color = if v.working { GREEN } else { Color::Red };
-        Row::new(vec![
-            Cell::from(if v.working { "🟢" } else { "🔴" }),
-            Cell::from(v.project_name.as_str()).style(Style::default().fg(TEXT)),
-            Cell::from(v.version.as_str()).style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
-            Cell::from(v.path.display().to_string()).style(Style::default().fg(TEXT_DIM)),
-        ])
-    }).collect();
+    let rows: Vec<Row> = app
+        .production_versions
+        .iter()
+        .map(|v| {
+            let color = if v.working { GREEN } else { Color::Red };
+            Row::new(vec![
+                Cell::from(if v.working { "🟢" } else { "🔴" }),
+                Cell::from(v.project_name.as_str()).style(Style::default().fg(TEXT)),
+                Cell::from(v.version.as_str())
+                    .style(Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Cell::from(v.path.display().to_string()).style(Style::default().fg(TEXT_DIM)),
+            ])
+        })
+        .collect();
 
-    let table = Table::new(rows, [
-        Constraint::Length(3), Constraint::Length(18), Constraint::Length(6), Constraint::Min(20),
-    ])
-    .header(Row::new(vec!["", "Project", "Ver", "Path"]).style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)))
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(3),
+            Constraint::Length(18),
+            Constraint::Length(6),
+            Constraint::Min(20),
+        ],
+    )
+    .header(
+        Row::new(vec!["", "Project", "Ver", "Path"])
+            .style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    )
     .block(Block::default().title(" Production ").borders(Borders::ALL))
     .row_highlight_style(Style::default().bg(BG_HIGHLIGHT))
     .highlight_symbol("▶ ");
@@ -2999,7 +4236,9 @@ fn draw_production(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize) {
     use crate::app::{DetailFocus, SectionCursor};
-    let Some(proj) = app.projects.get(proj_idx) else { return; };
+    let Some(proj) = app.projects.get(proj_idx) else {
+        return;
+    };
     let in_section_select = app.detail_focus == DetailFocus::SectionSelect;
     let in_sessions = app.detail_focus == DetailFocus::Sessions;
     let in_browser = app.detail_focus == DetailFocus::Browser;
@@ -3009,8 +4248,8 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     let constraints = vec![
         Constraint::Length(2),              // header
         Constraint::Length(roadmap_height), // roadmap (scrollable)
-        Constraint::Length(8),             // sessions (compact)
-        Constraint::Min(5),                // file browser
+        Constraint::Length(8),              // sessions (compact)
+        Constraint::Min(5),                 // file browser
     ];
 
     let layout = Layout::default()
@@ -3039,12 +4278,27 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
         Span::raw("")
     };
     let header = Paragraph::new(Line::from(vec![
-        Span::styled(&proj.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  [{}] {}/{} goals", proj.scope.badge(), proj.done_count(), proj.roadmap.len()), Style::default().fg(TEXT_DIM)),
-        Span::styled(lifecycle_detail, Style::default().fg(Color::Rgb(200, 200, 100))),
+        Span::styled(
+            &proj.name,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                "  [{}] {}/{} goals",
+                proj.scope.badge(),
+                proj.done_count(),
+                proj.roadmap.len()
+            ),
+            Style::default().fg(TEXT_DIM),
+        ),
+        Span::styled(
+            lifecycle_detail,
+            Style::default().fg(Color::Rgb(200, 200, 100)),
+        ),
         logo_span,
         nav_hint,
-    ])).style(Style::default().bg(BG_DARK));
+    ]))
+    .style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
     // Roadmap — color-coded by feature status, scrollable via PgUp/PgDn
@@ -3052,13 +4306,29 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     // OPT-004: highlight section header when section_cursor points here in SectionSelect mode
     let roadmap_section_hover = in_section_select && app.section_cursor == SectionCursor::Roadmap;
     let scroll_offset = app.roadmap_scroll;
-    let all_roadmap_items: Vec<ListItem> = proj.roadmap.iter().enumerate().map(|(i, item)| {
-        let style = feature_status_style(item.status);
-        let sel_prefix = if in_roadmap && i == app.roadmap_selected { "▸" } else { " " };
-        ListItem::new(format!("{}{} {}", sel_prefix, item.status_icon(), item.title)).style(style)
-    }).collect();
+    let all_roadmap_items: Vec<ListItem> = proj
+        .roadmap
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let style = feature_status_style(item.status);
+            let sel_prefix = if in_roadmap && i == app.roadmap_selected {
+                "▸"
+            } else {
+                " "
+            };
+            ListItem::new(format!(
+                "{}{} {}",
+                sel_prefix,
+                item.status_icon(),
+                item.title
+            ))
+            .style(style)
+        })
+        .collect();
     // Slice to visible window
-    let visible_roadmap: Vec<ListItem> = all_roadmap_items.into_iter().skip(scroll_offset).collect();
+    let visible_roadmap: Vec<ListItem> =
+        all_roadmap_items.into_iter().skip(scroll_offset).collect();
     let roadmap_border = if in_roadmap {
         Style::default().fg(ACCENT)
     } else if roadmap_section_hover {
@@ -3069,29 +4339,51 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     // OPT-003: show both up and down scroll indicators when content overflows.
     // Visible capacity = roadmap_height - 2 border rows.
     let visible_capacity = (roadmap_height as usize).saturating_sub(2).max(1);
-    let items_below = proj.roadmap.len().saturating_sub(scroll_offset + visible_capacity);
+    let items_below = proj
+        .roadmap
+        .len()
+        .saturating_sub(scroll_offset + visible_capacity);
     let scroll_hint = match (scroll_offset > 0, items_below > 0) {
         (true, true) => format!(" Roadmap ↑{scroll_offset} ↓{items_below} "),
         (true, false) => format!(" Roadmap ↑{scroll_offset} "),
         (false, true) => format!(" Roadmap ↓{items_below} "),
         (false, false) => " Roadmap ".to_string(),
     };
-    let roadmap = List::new(visible_roadmap)
-        .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(scroll_hint).borders(Borders::ALL).style(roadmap_border));
+    let roadmap = List::new(visible_roadmap).scroll_padding(SCROLL_PAD).block(
+        Block::default()
+            .title(scroll_hint)
+            .borders(Borders::ALL)
+            .style(roadmap_border),
+    );
     frame.render_widget(roadmap, layout[1]);
 
     // Sessions — selectable, shows managed + external, with duplicate-goal badges
     let proj_path = proj.path.clone();
     let pipelines = app.pipelines_for_project(&proj_path);
     let mut session_rows: Vec<(String, String, String, SessionState, String, String)> = app
-        .sessions_for_project(&proj_path).iter()
+        .sessions_for_project(&proj_path)
+        .iter()
         .map(|s| {
             let goal = s.goal_display().to_string();
             // Check if multiple sessions share this goal
-            let dupes = pipelines.iter().find(|(g, _, _)| g == &goal).map(|(_, c, _)| *c).unwrap_or(0);
-            let goal_display = if dupes > 1 { format!("{goal} ⚠ ×{dupes}") } else { goal };
-            (s.state.icon().into(), s.sid.clone(), goal_display, s.state, s.uptime(), s.backend.badge().into())
+            let dupes = pipelines
+                .iter()
+                .find(|(g, _, _)| g == &goal)
+                .map(|(_, c, _)| *c)
+                .unwrap_or(0);
+            let goal_display = if dupes > 1 {
+                format!("{goal} ⚠ ×{dupes}")
+            } else {
+                goal
+            };
+            (
+                s.state.icon().into(),
+                s.sid.clone(),
+                goal_display,
+                s.state,
+                s.uptime(),
+                s.backend.badge().into(),
+            )
         })
         .collect();
     for ext in app.external_sessions_for_project(&proj_path) {
@@ -3127,32 +4419,65 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     if session_rows.is_empty() {
         let msg = Paragraph::new("  No sessions. Press 'n' to spawn.")
             .style(Style::default().fg(TEXT_MUTED))
-            .block(Block::default().title(" Sessions (Enter:brief  x:kill  n:spawn) ").borders(Borders::ALL).style(sess_border));
+            .block(
+                Block::default()
+                    .title(" Sessions (Enter:brief  x:kill  n:spawn) ")
+                    .borders(Borders::ALL)
+                    .style(sess_border),
+            );
         frame.render_widget(msg, layout[2]);
     } else {
         let max = session_rows.len().saturating_sub(1);
-        if app.session_selected > max { app.session_selected = max; }
-        let rows: Vec<Row> = session_rows.iter().map(|(icon, sid, goal, state, uptime, backend)| {
-            let sc = match state {
-                SessionState::Working => GREEN, SessionState::Waiting => WAITING_COLOR,
-                SessionState::Idle => TEXT_MUTED, SessionState::Dead => Color::Red,
-            };
-            Row::new(vec![
-                Cell::from(icon.as_str()), Cell::from(sid.as_str()),
-                Cell::from(goal.as_str()).style(Style::default().fg(TEXT)),
-                Cell::from(state.label()).style(Style::default().fg(sc)),
-                Cell::from(uptime.as_str()), Cell::from(backend.as_str()).style(Style::default().fg(CYAN)),
-            ])
-        }).collect();
-        let table = Table::new(rows, [
-            Constraint::Length(3), Constraint::Length(8), Constraint::Min(15),
-            Constraint::Length(8), Constraint::Length(8), Constraint::Length(10),
-        ])
-        .header(Row::new(vec!["", "ID", "Goal", "State", "Uptime", "Backend"]).style(Style::default().fg(ACCENT)))
-        .block(Block::default().title(sess_title).borders(Borders::ALL).style(sess_border))
+        if app.session_selected > max {
+            app.session_selected = max;
+        }
+        let rows: Vec<Row> = session_rows
+            .iter()
+            .map(|(icon, sid, goal, state, uptime, backend)| {
+                let sc = match state {
+                    SessionState::Working => GREEN,
+                    SessionState::Waiting => WAITING_COLOR,
+                    SessionState::Idle => TEXT_MUTED,
+                    SessionState::Dead => Color::Red,
+                };
+                Row::new(vec![
+                    Cell::from(icon.as_str()),
+                    Cell::from(sid.as_str()),
+                    Cell::from(goal.as_str()).style(Style::default().fg(TEXT)),
+                    Cell::from(state.label()).style(Style::default().fg(sc)),
+                    Cell::from(uptime.as_str()),
+                    Cell::from(backend.as_str()).style(Style::default().fg(CYAN)),
+                ])
+            })
+            .collect();
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(3),
+                Constraint::Length(8),
+                Constraint::Min(15),
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Length(10),
+            ],
+        )
+        .header(
+            Row::new(vec!["", "ID", "Goal", "State", "Uptime", "Backend"])
+                .style(Style::default().fg(ACCENT)),
+        )
+        .block(
+            Block::default()
+                .title(sess_title)
+                .borders(Borders::ALL)
+                .style(sess_border),
+        )
         .row_highlight_style(Style::default().bg(BG_HIGHLIGHT))
         .highlight_symbol("▶ ");
-        let mut state = TableState::default().with_selected(if in_sessions { Some(app.session_selected) } else { None });
+        let mut state = TableState::default().with_selected(if in_sessions {
+            Some(app.session_selected)
+        } else {
+            None
+        });
         frame.render_stateful_widget(table, layout[2], &mut state);
 
         // 90e: inline session brief overlay when expanded
@@ -3160,12 +4485,17 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
             let pm_sessions = app.sessions_for_project(&proj_path);
             if let Some(sess) = pm_sessions.get(app.session_selected) {
                 // Look up matching ManagedSession for cwd + last_output
-                let managed_info = app.managed_sessions.iter()
+                let managed_info = app
+                    .managed_sessions
+                    .iter()
                     .find(|ms| ms.name.contains(&sess.sid) || sess.sid.contains(&ms.name));
                 let proj_dir_str = sess.project_dir.to_string_lossy().into_owned();
-                let cwd = managed_info.map(|ms| ms.cwd.as_str()).unwrap_or(&proj_dir_str);
+                let cwd = managed_info
+                    .map(|ms| ms.cwd.as_str())
+                    .unwrap_or(&proj_dir_str);
                 let last_output = managed_info.map(|ms| ms.last_output.as_str()).unwrap_or("");
-                let output_preview: String = last_output.lines()
+                let output_preview: String = last_output
+                    .lines()
                     .filter(|l| !l.trim().is_empty())
                     .take(2)
                     .collect::<Vec<_>>()
@@ -3175,7 +4505,11 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
                     sess.sid,
                     cwd,
                     sess.state.label(),
-                    if output_preview.is_empty() { String::new() } else { format!("Output: {}", output_preview) }
+                    if output_preview.is_empty() {
+                        String::new()
+                    } else {
+                        format!("Output: {}", output_preview)
+                    }
                 );
                 // Position the brief as a floating panel overlapping the browser area
                 let brief_area = layout[browser_slot];
@@ -3203,7 +4537,6 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
             }
         }
     }
-
 
     // File browser — single tree column + preview pane
     // OPT-004: highlight browser section header when hovered in SectionSelect mode
@@ -3235,30 +4568,73 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     };
 
     for (i, entry) in app.browser_parent_entries.iter().enumerate() {
-        let style = if entry.is_dir { Style::default().fg(CYAN) } else { Style::default().fg(TEXT) };
-        let expanded = i == app.browser_parent_selected && !app.browser_child_entries.is_empty() && entry.is_dir;
-        let arrow = if entry.is_dir { if expanded { "▾ " } else { "▸ " } } else { "  " };
-        tree_items.push(ListItem::new(format!("{}{} {}", arrow, entry.icon(), entry.name)).style(style));
+        let style = if entry.is_dir {
+            Style::default().fg(CYAN)
+        } else {
+            Style::default().fg(TEXT)
+        };
+        let expanded = i == app.browser_parent_selected
+            && !app.browser_child_entries.is_empty()
+            && entry.is_dir;
+        let arrow = if entry.is_dir {
+            if expanded { "▾ " } else { "▸ " }
+        } else {
+            "  "
+        };
+        tree_items
+            .push(ListItem::new(format!("{}{} {}", arrow, entry.icon(), entry.name)).style(style));
 
         if expanded {
             // Show child entries indented
             for child in &app.browser_child_entries {
-                let cs = if child.is_dir { Style::default().fg(CYAN) } else { Style::default().fg(TEXT_DIM) };
+                let cs = if child.is_dir {
+                    Style::default().fg(CYAN)
+                } else {
+                    Style::default().fg(TEXT_DIM)
+                };
                 let child_arrow = if child.is_dir { "▸ " } else { "  " };
-                tree_items.push(ListItem::new(format!("    {}{} {}", child_arrow, child.icon(), child.name)).style(cs));
+                tree_items.push(
+                    ListItem::new(format!(
+                        "    {}{} {}",
+                        child_arrow,
+                        child.icon(),
+                        child.name
+                    ))
+                    .style(cs),
+                );
             }
         }
     }
 
-    let rel_path = app.browser_path.strip_prefix(&app.browser_root).unwrap_or(&app.browser_path);
-    let tree_title = if rel_path.as_os_str().is_empty() { " ./ ".to_string() } else { format!(" {}/ ", rel_path.display()) };
+    let rel_path = app
+        .browser_path
+        .strip_prefix(&app.browser_root)
+        .unwrap_or(&app.browser_path);
+    let tree_title = if rel_path.as_os_str().is_empty() {
+        " ./ ".to_string()
+    } else {
+        format!(" {}/ ", rel_path.display())
+    };
 
     let tree_list = List::new(tree_items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(tree_title).borders(Borders::ALL).style(browser_border))
-        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .block(
+            Block::default()
+                .title(tree_title)
+                .borders(Borders::ALL)
+                .style(browser_border),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
-    let sel = if in_browser { Some(selected_entry) } else { None };
+    let sel = if in_browser {
+        Some(selected_entry)
+    } else {
+        None
+    };
     let mut tstate = ListState::default().with_selected(sel);
     frame.render_stateful_widget(tree_list, hsplit[0], &mut tstate);
 
@@ -3266,12 +4642,22 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
     if app.browser_preview.is_empty() {
         let empty = Paragraph::new("  Select a file to preview")
             .style(Style::default().fg(TEXT_MUTED))
-            .block(Block::default().title(" Preview ").borders(Borders::ALL).style(unfocused_border));
+            .block(
+                Block::default()
+                    .title(" Preview ")
+                    .borders(Borders::ALL)
+                    .style(unfocused_border),
+            );
         frame.render_widget(empty, hsplit[1]);
     } else {
         let preview = Paragraph::new(app.browser_preview.as_str())
             .style(Style::default().fg(TEXT))
-            .block(Block::default().title(" Preview ").borders(Borders::ALL).style(unfocused_border))
+            .block(
+                Block::default()
+                    .title(" Preview ")
+                    .borders(Borders::ALL)
+                    .style(unfocused_border),
+            )
             .wrap(Wrap { trim: false });
         frame.render_widget(preview, hsplit[1]);
     }
@@ -3281,10 +4667,14 @@ fn draw_project_detail(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: u
 
 #[allow(dead_code)]
 fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, focused: bool) {
-    
-
-    let Some(proj) = app.projects.get(proj_idx) else { return; };
-    let border_style = if focused { Style::default().fg(ACCENT) } else { Style::default().fg(TEXT_MUTED) };
+    let Some(proj) = app.projects.get(proj_idx) else {
+        return;
+    };
+    let border_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(TEXT_MUTED)
+    };
 
     // Build flat list items from phases + expanded features
     let mut items: Vec<ListItem> = Vec::new();
@@ -3315,11 +4705,12 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
             format!("{arrow} {}{progress}", phase.name)
         };
 
-        items.push(
-            ListItem::new(Line::from(vec![
-                Span::styled(phase_name, Style::default().fg(phase_color).add_modifier(Modifier::BOLD)),
-            ]))
-        );
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            phase_name,
+            Style::default()
+                .fg(phase_color)
+                .add_modifier(Modifier::BOLD),
+        )])));
 
         if expanded {
             for feat in &phase.features {
@@ -3350,8 +4741,7 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
                     ));
                 }
 
-                let commits =
-                    orrch_core::git::commits_for_feature(&proj.path, &lookup_id);
+                let commits = orrch_core::git::commits_for_feature(&proj.path, &lookup_id);
                 let commit_count = commits.len();
                 if commit_count > 0 {
                     spans.push(Span::styled(
@@ -3368,23 +4758,23 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
                     // Reserve space for the indent ("    "), 7-char short sha,
                     // and a separating space. Subject gets whatever's left.
                     let max_subject = (area.width as usize)
-                        .saturating_sub(2)  // list border padding
-                        .saturating_sub(4)  // indent
+                        .saturating_sub(2) // list border padding
+                        .saturating_sub(4) // indent
                         .saturating_sub(8); // "abcdef1 "
                     for c in commits.iter().take(3) {
                         let short = c.sha.chars().take(7).collect::<String>();
                         let subject: String = if c.subject.chars().count() > max_subject {
-                            let truncated: String =
-                                c.subject.chars().take(max_subject.saturating_sub(1)).collect();
+                            let truncated: String = c
+                                .subject
+                                .chars()
+                                .take(max_subject.saturating_sub(1))
+                                .collect();
                             format!("{truncated}…")
                         } else {
                             c.subject.clone()
                         };
                         lines.push(Line::from(vec![
-                            Span::styled(
-                                format!("    {short} "),
-                                Style::default().fg(TEXT_MUTED),
-                            ),
+                            Span::styled(format!("    {short} "), Style::default().fg(TEXT_MUTED)),
                             Span::styled(subject, Style::default().fg(TEXT_DIM)),
                         ]));
                     }
@@ -3401,11 +4791,24 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
 
     let list = List::new(items)
         .scroll_padding(SCROLL_PAD)
-        .block(Block::default().title(block_title).borders(Borders::ALL).style(border_style))
-        .highlight_style(Style::default().bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD))
+        .block(
+            Block::default()
+                .title(block_title)
+                .borders(Borders::ALL)
+                .style(border_style),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol("▶ ");
 
-    let sel = if focused { Some(app.devmap_selected) } else { None };
+    let sel = if focused {
+        Some(app.devmap_selected)
+    } else {
+        None
+    };
     let mut state = ListState::default().with_selected(sel);
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -3415,56 +4818,106 @@ fn draw_dev_map(frame: &mut Frame, app: &mut App, area: Rect, proj_idx: usize, f
 fn draw_session_focus(frame: &mut Frame, app: &App, area: Rect, idx: usize) {
     let data = {
         let sessions = app.pm.sessions();
-        sessions.get(idx).map(|s| (
-            s.display_name().to_string(), s.sid.clone(), s.backend.label().to_string(),
-            s.goal_display().to_string(), String::from_utf8_lossy(&s.output_buffer).to_string(),
-        ))
+        sessions.get(idx).map(|s| {
+            (
+                s.display_name().to_string(),
+                s.sid.clone(),
+                s.backend.label().to_string(),
+                s.goal_display().to_string(),
+                String::from_utf8_lossy(&s.output_buffer).to_string(),
+            )
+        })
     };
     let Some((name, sid, backend, goal, text)) = data else {
-        frame.render_widget(Paragraph::new("Session not found.").style(Style::default().fg(Color::Red)), area);
+        frame.render_widget(
+            Paragraph::new("Session not found.").style(Style::default().fg(Color::Red)),
+            area,
+        );
         return;
     };
-    let layout = Layout::default().direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
     let lines: Vec<&str> = text.lines().collect();
     let visible = layout[0].height as usize;
     let start = lines.len().saturating_sub(visible);
     let terminal = Paragraph::new(lines[start..].join("\n"))
         .style(Style::default().fg(TEXT).bg(Color::Rgb(16, 16, 30)));
     frame.render_widget(terminal, layout[0]);
-    let bar_text = if goal == "(no goal)" { format!(" {name} [{sid}] ({backend}) — Esc") }
-        else { format!(" {name} [{sid}] ({backend}) goal: {goal} — Esc") };
-    frame.render_widget(Paragraph::new(bar_text).style(Style::default().fg(Color::White).bg(ACCENT)), layout[1]);
+    let bar_text = if goal == "(no goal)" {
+        format!(" {name} [{sid}] ({backend}) — Esc")
+    } else {
+        format!(" {name} [{sid}] ({backend}) goal: {goal} — Esc")
+    };
+    frame.render_widget(
+        Paragraph::new(bar_text).style(Style::default().fg(Color::White).bg(ACCENT)),
+        layout[1],
+    );
 }
 
 // ─── Editor ───────────────────────────────────────────────────────────
 
 fn draw_external_session(frame: &mut Frame, app: &App, area: Rect, pid: u32) {
-    let layout = Layout::default().direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
 
     let session_name = orrch_core::session::read_session_name(pid);
-    let display_name = if session_name.is_empty() { format!("pid:{pid}") } else { session_name };
+    let display_name = if session_name.is_empty() {
+        format!("pid:{pid}")
+    } else {
+        session_name
+    };
 
     let lines: Vec<&str> = app.ext_log_cache.lines().collect();
     let total = lines.len();
     let visible = layout[1].height.saturating_sub(2) as usize;
     let max_scroll = total.saturating_sub(visible);
     let scroll = app.ext_log_scroll.min(max_scroll);
-    let scroll_pct = if max_scroll > 0 { (scroll * 100) / max_scroll } else { 100 };
+    let scroll_pct = if max_scroll > 0 {
+        (scroll * 100) / max_scroll
+    } else {
+        100
+    };
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled("  👁 ", Style::default().fg(CYAN)),
-        Span::styled(&display_name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &display_name,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(format!("  pid:{pid}"), Style::default().fg(TEXT_MUTED)),
-        Span::styled(format!("  {scroll_pct}%  [{}/{total} lines]", scroll + visible.min(total)), Style::default().fg(TEXT_DIM)),
-    ])).style(Style::default().bg(BG_DARK));
+        Span::styled(
+            format!(
+                "  {scroll_pct}%  [{}/{total} lines]",
+                scroll + visible.min(total)
+            ),
+            Style::default().fg(TEXT_DIM),
+        ),
+    ]))
+    .style(Style::default().bg(BG_DARK));
     frame.render_widget(header, layout[0]);
 
-    let visible_text: String = lines.iter().skip(scroll).take(visible).copied().collect::<Vec<_>>().join("\n");
+    let visible_text: String = lines
+        .iter()
+        .skip(scroll)
+        .take(visible)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
     let log_widget = Paragraph::new(visible_text)
         .style(Style::default().fg(TEXT).bg(Color::Rgb(16, 16, 30)))
-        .block(Block::default().borders(Borders::ALL).style(Style::default().fg(TEXT_MUTED)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default().fg(TEXT_MUTED)),
+        )
         .wrap(Wrap { trim: false });
     frame.render_widget(log_widget, layout[1]);
 
@@ -3583,7 +5036,12 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     app.workflow_status = app
         .managed_sessions
         .iter()
-        .filter(|s| matches!(s.status, SessionStatus::Working | SessionStatus::WaitingForInput))
+        .filter(|s| {
+            matches!(
+                s.status,
+                SessionStatus::Working | SessionStatus::WaitingForInput
+            )
+        })
         .find_map(|s| orrch_core::load_workflow_status(std::path::Path::new(&s.cwd)));
 
     let total = app.managed_sessions.len();
@@ -3596,7 +5054,12 @@ fn draw_sessions_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         .managed_sessions
         .iter()
         .enumerate()
-        .filter(|(_, s)| matches!(s.status, SessionStatus::WaitingForInput | SessionStatus::Dead))
+        .filter(|(_, s)| {
+            matches!(
+                s.status,
+                SessionStatus::WaitingForInput | SessionStatus::Dead
+            )
+        })
         .map(|(i, _)| i)
         .collect();
     let triage_count = triage_indices.len();
@@ -3648,13 +5111,22 @@ fn draw_cockpit_workflow_strip(frame: &mut Frame, area: Rect, app: &App) {
         _ => TEXT_MUTED,
     };
     lines.push(Line::from(vec![
-        Span::styled("▣ ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Span::styled(&ws.workflow, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "▣ ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            &ws.workflow,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!(" · step {}/{}", ws.step, ws.total_steps),
             Style::default().fg(TEXT_DIM),
         ),
-        Span::styled(format!(" · {}", ws.status), Style::default().fg(status_color)),
+        Span::styled(
+            format!(" · {}", ws.status),
+            Style::default().fg(status_color),
+        ),
     ]));
     let shown = ws.agents.len().min(2);
     for (i, agent) in ws.agents.iter().take(shown).enumerate() {
@@ -3669,7 +5141,10 @@ fn draw_cockpit_workflow_strip(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(vec![
             Span::styled(connector, Style::default().fg(TEXT_DIM)),
             Span::styled(&agent.role, Style::default().fg(TEXT)),
-            Span::styled(format!("  [{}]", agent.status), Style::default().fg(agent_color)),
+            Span::styled(
+                format!("  [{}]", agent.status),
+                Style::default().fg(agent_color),
+            ),
         ]));
     }
     if ws.agents.len() > 2 {
@@ -3686,12 +5161,7 @@ fn draw_cockpit_workflow_strip(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(p, area);
 }
 
-fn draw_cockpit_triage_strip(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    indices: &[usize],
-) {
+fn draw_cockpit_triage_strip(frame: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     use orrch_core::windows::SessionStatus;
     let mut lines: Vec<Line> = Vec::new();
     for &idx in indices.iter().take(5) {
@@ -3706,8 +5176,7 @@ fn draw_cockpit_triage_strip(
         let last_line = s
             .last_output
             .lines()
-            .filter(|l| !l.trim().is_empty())
-            .last()
+            .rfind(|l| !l.trim().is_empty())
             .unwrap_or("");
         let snippet: String = last_line.chars().take(80).collect();
         lines.push(Line::from(vec![
@@ -3730,7 +5199,9 @@ fn draw_cockpit_triage_strip(
     let block = Block::default()
         .title(Span::styled(
             title,
-            Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .style(Style::default().fg(WAITING_COLOR));
@@ -3801,11 +5272,7 @@ fn draw_cockpit_roster(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_cockpit_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
-    let Some(s) = app
-        .managed_sessions
-        .get(app.session_tab_selected)
-        .cloned()
-    else {
+    let Some(s) = app.managed_sessions.get(app.session_tab_selected).cloned() else {
         let p = Paragraph::new("  no session selected")
             .style(Style::default().fg(TEXT_MUTED))
             .block(
@@ -3839,7 +5306,14 @@ fn draw_cockpit_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
     } else {
         let chars: Vec<char> = s.cwd.chars().collect();
         if chars.len() > 80 {
-            let tail: String = chars.into_iter().rev().take(80).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = chars
+                .into_iter()
+                .rev()
+                .take(80)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             format!("…{tail}")
         } else {
             s.cwd.clone()
@@ -3848,9 +5322,18 @@ fn draw_cockpit_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
     let header_lines = vec![
         Line::from(vec![
             Span::styled("▣ ", Style::default().fg(ACCENT)),
-            Span::styled(&s.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("  [{}]", s.status.label()), Style::default().fg(status_color)),
-            Span::styled("    i prompt · Enter expand · o open · x kill", Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                &s.name,
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  [{}]", s.status.label()),
+                Style::default().fg(status_color),
+            ),
+            Span::styled(
+                "    i prompt · Enter expand · o open · x kill",
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]),
         Line::styled(format!("  {cwd_display}"), Style::default().fg(TEXT_DIM)),
     ];
@@ -3955,7 +5438,9 @@ fn strip_ansi_simple(input: &str) -> String {
                     while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
                         i += 1;
                     }
-                    if i < bytes.len() { i += 1; }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
                     continue;
                 }
                 b']' => {
@@ -3963,11 +5448,18 @@ fn strip_ansi_simple(input: &str) -> String {
                     while i < bytes.len() && bytes[i] != 0x07 && bytes[i] != 0x1b {
                         i += 1;
                     }
-                    if i < bytes.len() && bytes[i] == 0x1b { i += 1; }
-                    if i < bytes.len() { i += 1; }
+                    if i < bytes.len() && bytes[i] == 0x1b {
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
                     continue;
                 }
-                _ => { i += 2; continue; }
+                _ => {
+                    i += 2;
+                    continue;
+                }
             }
         }
         out.push(bytes[i]);
@@ -3986,12 +5478,16 @@ fn strip_ansi_simple(input: &str) -> String {
 /// The session is looked up by name, not index, so adding or removing
 /// sessions while the view is open never displays the wrong pane.
 fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, name: &str) {
-    use std::time::{Duration, Instant};
     use orrch_core::windows::capture_pane_ansi;
+    use std::time::{Duration, Instant};
 
     const REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
-    let session = app.managed_sessions.iter().find(|s| s.name == name).cloned();
+    let session = app
+        .managed_sessions
+        .iter()
+        .find(|s| s.name == name)
+        .cloned();
     let Some(session) = session else {
         // Session vanished — drop back to the list cleanly.
         app.sub = crate::app::SubView::List;
@@ -4022,16 +5518,28 @@ fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, name: &st
 
     // Header strip
     let header = Line::from(vec![
-        Span::styled("▣ ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Span::styled(&session.name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  [{}]", session.status.label()), Style::default().fg(match session.status {
-            orrch_core::windows::SessionStatus::Working => CYAN,
-            orrch_core::windows::SessionStatus::Idle => TEXT_MUTED,
-            orrch_core::windows::SessionStatus::WaitingForInput => WAITING_COLOR,
-            orrch_core::windows::SessionStatus::Dead => Color::Red,
-        })),
+        Span::styled(
+            "▣ ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            &session.name,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  [{}]", session.status.label()),
+            Style::default().fg(match session.status {
+                orrch_core::windows::SessionStatus::Working => CYAN,
+                orrch_core::windows::SessionStatus::Idle => TEXT_MUTED,
+                orrch_core::windows::SessionStatus::WaitingForInput => WAITING_COLOR,
+                orrch_core::windows::SessionStatus::Dead => Color::Red,
+            }),
+        ),
         Span::styled("    ", Style::default()),
-        Span::styled("← ← to exit · Enter sends · Esc clears", Style::default().fg(TEXT_DIM)),
+        Span::styled(
+            "← ← to exit · Enter sends · Esc clears",
+            Style::default().fg(TEXT_DIM),
+        ),
     ]);
     frame.render_widget(Paragraph::new(header), chunks[0]);
 
@@ -4042,8 +5550,7 @@ fn draw_expanded_session(frame: &mut Frame, app: &mut App, area: Rect, name: &st
     let pane_inner = pane_block.inner(chunks[1]);
     frame.render_widget(pane_block, chunks[1]);
     let lines = crate::ansi::parse(&app.expanded_pane_content);
-    let pane = Paragraph::new(lines)
-        .style(Style::default().bg(BG_DARK).fg(TEXT));
+    let pane = Paragraph::new(lines).style(Style::default().bg(BG_DARK).fg(TEXT));
     frame.render_widget(pane, pane_inner);
 
     // Prompt input
@@ -4081,82 +5588,140 @@ fn draw_session_log_browser(frame: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // ── Left: log list ──
-    let list_items: Vec<ListItem> = app.session_logs.iter().enumerate().map(|(i, log)| {
-        let selected = i == app.session_logs_selected;
-        let age = {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let secs = now.saturating_sub(log.started);
-            if secs < 3600 { format!("{}m ago", secs / 60) }
-            else if secs < 86400 { format!("{}h ago", secs / 3600) }
-            else { format!("{}d ago", secs / 86400) }
-        };
-        let style = if selected {
-            Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT_MUTED)
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(if selected { " ▶ " } else { "   " }, Style::default().fg(ACCENT)),
-            Span::styled(&log.name, style),
-            Span::styled(format!("  {age}"), Style::default().fg(TEXT_DIM)),
-        ]))
-    }).collect();
+    let list_items: Vec<ListItem> = app
+        .session_logs
+        .iter()
+        .enumerate()
+        .map(|(i, log)| {
+            let selected = i == app.session_logs_selected;
+            let age = {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let secs = now.saturating_sub(log.started);
+                if secs < 3600 {
+                    format!("{}m ago", secs / 60)
+                } else if secs < 86400 {
+                    format!("{}h ago", secs / 3600)
+                } else {
+                    format!("{}d ago", secs / 86400)
+                }
+            };
+            let style = if selected {
+                Style::default()
+                    .fg(TEXT)
+                    .bg(BG_HIGHLIGHT)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_MUTED)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    if selected { " ▶ " } else { "   " },
+                    Style::default().fg(ACCENT),
+                ),
+                Span::styled(&log.name, style),
+                Span::styled(format!("  {age}"), Style::default().fg(TEXT_DIM)),
+            ]))
+        })
+        .collect();
 
-    let list = List::new(list_items)
-        .block(Block::default().title(format!(" Session Logs ({}) — Esc=close ↑↓=select ", app.session_logs.len())).borders(Borders::ALL).style(Style::default().fg(TEXT_DIM)));
+    let list = List::new(list_items).block(
+        Block::default()
+            .title(format!(
+                " Session Logs ({}) — Esc=close ↑↓=select ",
+                app.session_logs.len()
+            ))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(TEXT_DIM)),
+    );
     frame.render_widget(list, chunks[0]);
 
     // ── Right: head+tail viewer ──
-    let Some(log) = app.session_logs.get(app.session_logs_selected) else { return; };
+    let Some(log) = app.session_logs.get(app.session_logs_selected) else {
+        return;
+    };
     let (head, tail) = orrch_core::windows::read_session_log_head_tail(&log.path, 50);
 
     let mut lines: Vec<Line> = Vec::new();
 
     // Header block
-    lines.push(Line::styled(format!("Session:  {}", log.name), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)));
-    lines.push(Line::styled(format!("Category: {}", log.category), Style::default().fg(TEXT_MUTED)));
-    lines.push(Line::styled(format!("Attach:   {}", log.attach_cmd), Style::default().fg(CYAN)));
-    lines.push(Line::styled(format!("Goal:     {}", log.goal), Style::default().fg(TEXT_DIM)));
+    lines.push(Line::styled(
+        format!("Session:  {}", log.name),
+        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::styled(
+        format!("Category: {}", log.category),
+        Style::default().fg(TEXT_MUTED),
+    ));
+    lines.push(Line::styled(
+        format!("Attach:   {}", log.attach_cmd),
+        Style::default().fg(CYAN),
+    ));
+    lines.push(Line::styled(
+        format!("Goal:     {}", log.goal),
+        Style::default().fg(TEXT_DIM),
+    ));
     lines.push(Line::styled("─".repeat(60), Style::default().fg(TEXT_DIM)));
 
     // Head
-    lines.push(Line::styled("── First 50 lines ─────────────────────────────────────────", Style::default().fg(ACCENT)));
+    lines.push(Line::styled(
+        "── First 50 lines ─────────────────────────────────────────",
+        Style::default().fg(ACCENT),
+    ));
     for l in &head {
         lines.push(Line::styled(l.clone(), Style::default().fg(TEXT)));
     }
     if head.is_empty() {
-        lines.push(Line::styled("  (no output yet)", Style::default().fg(TEXT_DIM)));
+        lines.push(Line::styled(
+            "  (no output yet)",
+            Style::default().fg(TEXT_DIM),
+        ));
     }
 
     lines.push(Line::raw(""));
-    lines.push(Line::styled("── Last 50 lines ──────────────────────────────────────────", Style::default().fg(ACCENT)));
+    lines.push(Line::styled(
+        "── Last 50 lines ──────────────────────────────────────────",
+        Style::default().fg(ACCENT),
+    ));
     for l in &tail {
         lines.push(Line::styled(l.clone(), Style::default().fg(TEXT)));
     }
 
     let total = lines.len();
     let scroll = app.session_log_scroll.min(total.saturating_sub(1)) as u16;
-    let viewer = Paragraph::new(lines)
-        .scroll((scroll, 0))
-        .block(Block::default()
+    let viewer = Paragraph::new(lines).scroll((scroll, 0)).block(
+        Block::default()
             .title(format!(" Log Viewer — PgUp/PgDn=scroll ({} lines) ", total))
             .borders(Borders::ALL)
-            .style(Style::default().fg(TEXT_DIM)));
+            .style(Style::default().fg(TEXT_DIM)),
+    );
     frame.render_widget(viewer, chunks[1]);
 }
 
 #[allow(dead_code)]
 fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
-
-    let drafts: Vec<(usize, &orrch_core::FeedbackItem)> = app.feedback_items.iter().enumerate()
-        .filter(|(_, i)| i.status == FeedbackStatus::Draft).collect();
-    let processing: Vec<(usize, &orrch_core::FeedbackItem)> = app.feedback_items.iter().enumerate()
-        .filter(|(_, i)| i.status == FeedbackStatus::Processing || i.status == FeedbackStatus::Processed).collect();
-    let routed: Vec<(usize, &orrch_core::FeedbackItem)> = app.feedback_items.iter().enumerate()
-        .filter(|(_, i)| i.status == FeedbackStatus::Routed).collect();
+    let drafts: Vec<(usize, &orrch_core::FeedbackItem)> = app
+        .feedback_items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.status == FeedbackStatus::Draft)
+        .collect();
+    let processing: Vec<(usize, &orrch_core::FeedbackItem)> = app
+        .feedback_items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| {
+            i.status == FeedbackStatus::Processing || i.status == FeedbackStatus::Processed
+        })
+        .collect();
+    let routed: Vec<(usize, &orrch_core::FeedbackItem)> = app
+        .feedback_items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.status == FeedbackStatus::Routed)
+        .collect();
 
     let pending_count = app.pending_editors.len();
 
@@ -4166,7 +5731,9 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
     if pending_count > 0 {
         lines.push(Line::styled(
             format!("  {pending_count} editor(s) open..."),
-            Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
         ));
         lines.push(Line::raw(""));
     }
@@ -4177,7 +5744,10 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
     ));
     if drafts.is_empty() {
-        lines.push(Line::styled("    No drafts — press f to write feedback", Style::default().fg(TEXT_MUTED)));
+        lines.push(Line::styled(
+            "    No drafts — press f to write feedback",
+            Style::default().fg(TEXT_MUTED),
+        ));
     }
     for (global_idx, item) in &drafts {
         let selected = *global_idx == app.feedback_selected;
@@ -4188,15 +5758,28 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
             item.created.clone()
         };
         let style = if selected {
-            Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT)
+                .bg(BG_HIGHLIGHT)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(TEXT_DIM)
         };
-        let plan_badge = if item.feedback_type == orrch_core::FeedbackType::Plan { " 📋" } else { "" };
-        if item.is_empty {
-            lines.push(Line::styled(format!("{marker}{time_display}{plan_badge} — (empty)"), style));
+        let plan_badge = if item.feedback_type == orrch_core::FeedbackType::Plan {
+            " 📋"
         } else {
-            lines.push(Line::styled(format!("{marker}{time_display}{plan_badge} — {}", item.preview), style));
+            ""
+        };
+        if item.is_empty {
+            lines.push(Line::styled(
+                format!("{marker}{time_display}{plan_badge} — (empty)"),
+                style,
+            ));
+        } else {
+            lines.push(Line::styled(
+                format!("{marker}{time_display}{plan_badge} — {}", item.preview),
+                style,
+            ));
         }
     }
 
@@ -4206,7 +5789,9 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
     if !processing.is_empty() {
         lines.push(Line::styled(
             format!("  PROCESSING ({})", processing.len()),
-            Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
         ));
         for (global_idx, item) in &processing {
             let selected = *global_idx == app.feedback_selected;
@@ -4215,23 +5800,37 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
             if item.status == FeedbackStatus::Processed {
                 // Done — ready to commit
                 let style = if selected {
-                    Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(TEXT)
+                        .bg(BG_HIGHLIGHT)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(GREEN)
                 };
                 lines.push(Line::styled(
-                    format!("{marker}✓ {} — {} [c to commit]", item.created, item.preview.chars().take(40).collect::<String>()),
+                    format!(
+                        "{marker}✓ {} — {} [c to commit]",
+                        item.created,
+                        item.preview.chars().take(40).collect::<String>()
+                    ),
                     style,
                 ));
             } else {
                 // Still processing — show file info
                 let style = if selected {
-                    Style::default().fg(TEXT).bg(BG_HIGHLIGHT).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(TEXT)
+                        .bg(BG_HIGHLIGHT)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(WAITING_COLOR)
                 };
                 lines.push(Line::styled(
-                    format!("{marker}⏳ {} — {}", item.created, item.preview.chars().take(40).collect::<String>()),
+                    format!(
+                        "{marker}⏳ {} — {}",
+                        item.created,
+                        item.preview.chars().take(40).collect::<String>()
+                    ),
                     style,
                 ));
 
@@ -4255,7 +5854,10 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
     ));
     if routed.is_empty() {
-        lines.push(Line::styled("    No routed feedback yet", Style::default().fg(TEXT_MUTED)));
+        lines.push(Line::styled(
+            "    No routed feedback yet",
+            Style::default().fg(TEXT_MUTED),
+        ));
     }
     for (global_idx, item) in &routed {
         let selected = *global_idx == app.feedback_selected;
@@ -4265,10 +5867,15 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(TEXT_DIM)
         };
-        lines.push(Line::styled(format!("{marker}{} — {}", item.created, item.preview), style));
+        lines.push(Line::styled(
+            format!("{marker}{} — {}", item.created, item.preview),
+            style,
+        ));
         // Show routing targets
         if !item.routes.is_empty() {
-            let route_str = item.routes.iter()
+            let route_str = item
+                .routes
+                .iter()
                 .map(|r| r.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -4280,26 +5887,48 @@ fn draw_feedback_tab(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let widget = Paragraph::new(lines)
-        .block(Block::default().title(" Feedback Pipeline ").borders(Borders::ALL)
-            .style(Style::default().bg(BG_DARK).fg(TEXT)));
+    let widget = Paragraph::new(lines).block(
+        Block::default()
+            .title(" Feedback Pipeline ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(BG_DARK).fg(TEXT)),
+    );
     frame.render_widget(widget, area);
 }
 
 fn draw_confirm_delete_feedback(frame: &mut Frame, app: &App, idx: usize) {
     let popup = centered_popup(frame.area(), 50, 6);
     frame.render_widget(Clear, popup);
-    let preview = app.feedback_items.get(idx).map(|i| i.preview.as_str()).unwrap_or("?");
+    let preview = app
+        .feedback_items
+        .get(idx)
+        .map(|i| i.preview.as_str())
+        .unwrap_or("?");
     let lines = vec![
-        Line::styled("Delete this feedback?", Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "Delete this feedback?",
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
         Line::styled(format!("\"{preview}\""), Style::default().fg(TEXT_DIM)),
-        Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "Y to confirm, any key to cancel",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Delete ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -4308,7 +5937,12 @@ fn draw_confirm_delete_feedback(frame: &mut Frame, app: &App, idx: usize) {
 fn centered_popup(area: Rect, w: u16, h: u16) -> Rect {
     let width = w.min(area.width.saturating_sub(4));
     let height = h.min(area.height.saturating_sub(4));
-    Rect::new((area.width - width) / 2, (area.height - height) / 2, width, height)
+    Rect::new(
+        (area.width - width) / 2,
+        (area.height - height) / 2,
+        width,
+        height,
+    )
 }
 
 /// Compute a scroll offset (in logical lines) so popup content fits the visible
@@ -4316,7 +5950,12 @@ fn centered_popup(area: Rect, w: u16, h: u16) -> Rect {
 /// field), the offset is derived to keep that line on screen — stateless, so it
 /// works at ANY terminal size. Otherwise `manual_offset` (PgUp/PgDn driven) is
 /// used. Always clamped so it can never scroll past the end.
-fn popup_scroll_offset(total: usize, inner_h: usize, focus_line: Option<usize>, manual_offset: usize) -> usize {
+fn popup_scroll_offset(
+    total: usize,
+    inner_h: usize,
+    focus_line: Option<usize>,
+    manual_offset: usize,
+) -> usize {
     let max_off = total.saturating_sub(inner_h);
     match focus_line {
         // Keep the focused line visible with one line of trailing context when possible.
@@ -4371,21 +6010,45 @@ fn render_scrollable_popup<'a>(
 fn draw_spawn_goal(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 60, 16);
     frame.render_widget(Clear, popup);
-    let proj_name = app.projects.get(app.spawn_project_idx).map(|p| p.name.as_str()).unwrap_or("?");
+    let proj_name = app
+        .projects
+        .get(app.spawn_project_idx)
+        .map(|p| p.name.as_str())
+        .unwrap_or("?");
     let mut focus_line: Option<usize> = None;
     let mut lines = vec![
-        Line::from(vec![Span::raw("Project: "), Span::styled(proj_name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD))]),
+        Line::from(vec![
+            Span::raw("Project: "),
+            Span::styled(
+                proj_name,
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+        ]),
         Line::raw(""),
-        Line::styled("Goal (Enter=continue dev, Tab=roadmap):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Goal (Enter=continue dev, Tab=roadmap):",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(ACCENT)),
             Span::styled(&app.spawn_goal_text, Style::default().fg(TEXT)),
-            Span::styled(if app.spawn_goal_from_roadmap.is_none() { "█" } else { "" }, Style::default().fg(ACCENT)),
+            Span::styled(
+                if app.spawn_goal_from_roadmap.is_none() {
+                    "█"
+                } else {
+                    ""
+                },
+                Style::default().fg(ACCENT),
+            ),
         ]),
     ];
     // Duplicate goal warning
     if let Some(proj) = app.projects.get(app.spawn_project_idx) {
-        let check_goal = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+        let check_goal = if app.spawn_goal_text.is_empty() {
+            "continue development"
+        } else {
+            &app.spawn_goal_text
+        };
         let dupes = app.duplicate_goal_count(&proj.path, check_goal);
         if dupes > 0 {
             lines.push(Line::styled(
@@ -4399,23 +6062,42 @@ fn draw_spawn_goal(frame: &mut Frame, app: &App) {
             lines.push(Line::raw(""));
             for (i, item) in open.iter().enumerate() {
                 let sel = app.spawn_goal_from_roadmap == Some(i);
-                if sel { focus_line = Some(lines.len()); }
+                if sel {
+                    focus_line = Some(lines.len());
+                }
                 let marker = if sel { "■ " } else { "  " };
                 // Show existing session count next to each roadmap item
                 let existing = app.duplicate_goal_count(&proj.path, &item.title);
-                let badge = if existing > 0 { format!(" ({existing}▶)") } else { String::new() };
+                let badge = if existing > 0 {
+                    format!(" ({existing}▶)")
+                } else {
+                    String::new()
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{marker}{}", item.title),
-                        if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) }),
+                    Span::styled(
+                        format!("{marker}{}", item.title),
+                        if sel {
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(TEXT_DIM)
+                        },
+                    ),
                     Span::styled(badge, Style::default().fg(WAITING_COLOR)),
                 ]));
             }
         }
     }
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Goal (N=spawn all) ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Goal (N=spawn all) ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4423,38 +6105,75 @@ fn draw_spawn_workforce(frame: &mut Frame, app: &App) {
     let height = 7 + app.loaded_workforces.len() as u16;
     let popup = centered_popup(frame.area(), 60, height.min(16));
     frame.render_widget(Clear, popup);
-    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let goal_display = if app.spawn_goal_text.is_empty() {
+        "continue development"
+    } else {
+        &app.spawn_goal_text
+    };
     let mut lines = vec![
-        Line::from(vec![Span::raw("Goal: "), Span::styled(goal_display, Style::default().fg(GREEN))]),
+        Line::from(vec![
+            Span::raw("Goal: "),
+            Span::styled(goal_display, Style::default().fg(GREEN)),
+        ]),
         Line::raw(""),
-        Line::styled("Workforce (Tab/arrows to select, Enter to confirm):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Workforce (Tab/arrows to select, Enter to confirm):",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
 
     // Option 0: no workforce (solo session)
     let no_wf_sel = app.spawn_workforce_idx == 0;
     let mut focus_line: Option<usize> = None;
-    if no_wf_sel { focus_line = Some(lines.len()); }
+    if no_wf_sel {
+        focus_line = Some(lines.len());
+    }
     lines.push(Line::styled(
-        format!("{} (none) — solo session", if no_wf_sel { "▶" } else { " " }),
-        if no_wf_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        format!(
+            "{} (none) — solo session",
+            if no_wf_sel { "▶" } else { " " }
+        ),
+        if no_wf_sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        },
     ));
 
     // Workforce templates
     for (i, wf) in app.loaded_workforces.iter().enumerate() {
         let sel = app.spawn_workforce_idx == i + 1;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let marker = if sel { "■ " } else { "  " };
         lines.push(Line::from(vec![
-            Span::styled(format!("{}{}", marker, wf.name),
-                if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
-            Span::styled(format!("  ({} agents)", wf.agents.len()), Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                format!("{}{}", marker, wf.name),
+                if sel {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                },
+            ),
+            Span::styled(
+                format!("  ({} agents)", wf.agents.len()),
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Workforce ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Workforce ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4464,7 +6183,10 @@ fn draw_workflow_picker(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
 
     let mut lines = vec![
-        Line::styled("Run Workflow (↑/↓ select, Enter to launch, Esc cancel)", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Run Workflow (↑/↓ select, Enter to launch, Esc cancel)",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::raw(""),
     ];
 
@@ -4482,14 +6204,14 @@ fn draw_workflow_picker(frame: &mut Frame, app: &App) {
     }
 
     // Show the selected project name at the bottom
-    if let Some(pidx) = app.selected_project_index() {
-        if let Some(proj) = app.projects.get(pidx) {
-            lines.push(Line::raw(""));
-            lines.push(Line::from(vec![
-                Span::styled("Project: ", Style::default().fg(TEXT_DIM)),
-                Span::styled(&proj.name, Style::default().fg(GREEN)),
-            ]));
-        }
+    if let Some(pidx) = app.selected_project_index()
+        && let Some(proj) = app.projects.get(pidx)
+    {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![
+            Span::styled("Project: ", Style::default().fg(TEXT_DIM)),
+            Span::styled(&proj.name, Style::default().fg(GREEN)),
+        ]));
     }
 
     // Items begin after the 2-line header; keep the selected one visible.
@@ -4523,11 +6245,22 @@ fn draw_add_feature(frame: &mut Frame, app: &App) {
         Style::default().fg(TEXT_DIM)
     };
 
-    let cursor_title = if app.add_feature_field == 0 { "█" } else { "" };
-    let cursor_desc = if app.add_feature_field == 1 { "█" } else { "" };
+    let cursor_title = if app.add_feature_field == 0 {
+        "█"
+    } else {
+        ""
+    };
+    let cursor_desc = if app.add_feature_field == 1 {
+        "█"
+    } else {
+        ""
+    };
 
     let lines = vec![
-        Line::styled("Add Feature (Tab=switch, Enter=add, Esc=cancel)", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Add Feature (Tab=switch, Enter=add, Esc=cancel)",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::raw(""),
         Line::styled("Title:", title_style.add_modifier(Modifier::BOLD)),
         Line::from(vec![
@@ -4543,18 +6276,25 @@ fn draw_add_feature(frame: &mut Frame, app: &App) {
             Span::styled(cursor_desc, desc_style),
         ]),
         Line::raw(""),
-        Line::styled("Appends: N. [ ] **Title** — Description", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "Appends: N. [ ] **Title** — Description",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
 
     // Keep the focused input line visible (title=line 3, description=line 6).
     let focus_line = Some(if app.add_feature_field == 0 { 3 } else { 6 });
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Add Feature ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4572,11 +6312,22 @@ fn draw_add_mcp_server(frame: &mut Frame, app: &App) {
         }
     };
 
-    let transport_label = if app.add_mcp_transport == 0 { "stdio" } else { "sse" };
-    let cmd_label = if app.add_mcp_transport == 0 { "Command:" } else { "URL:" };
+    let transport_label = if app.add_mcp_transport == 0 {
+        "stdio"
+    } else {
+        "sse"
+    };
+    let cmd_label = if app.add_mcp_transport == 0 {
+        "Command:"
+    } else {
+        "URL:"
+    };
 
     let mut lines = vec![
-        Line::styled("Register MCP Server (Tab=next, Enter=save, Esc=cancel)", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Register MCP Server (Tab=next, Enter=save, Esc=cancel)",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::raw(""),
         Line::styled("Name:", label_style(0)),
         Line::from(vec![
@@ -4602,7 +6353,14 @@ fn draw_add_mcp_server(frame: &mut Frame, app: &App) {
                     Style::default().fg(GREEN)
                 },
             ),
-            Span::styled(if field == 2 { "  (Enter/s/e to toggle)" } else { "" }, Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                if field == 2 {
+                    "  (Enter/s/e to toggle)"
+                } else {
+                    ""
+                },
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]),
         Line::raw(""),
         Line::styled(cmd_label, label_style(3)),
@@ -4634,18 +6392,31 @@ fn draw_add_mcp_server(frame: &mut Frame, app: &App) {
     // Map the focused field to its input line so it stays visible at any size.
     let stdio = app.add_mcp_transport == 0;
     let focus_line = Some(match field {
-        0 => 3, 1 => 6, 2 => 8, 3 => 11,
-        4 => 14,                              // args (stdio only)
-        5 => if stdio { 17 } else { 14 },     // roles
+        0 => 3,
+        1 => 6,
+        2 => 8,
+        3 => 11,
+        4 => 14, // args (stdio only)
+        5 => {
+            if stdio {
+                17
+            } else {
+                14
+            }
+        } // roles
         _ => 0,
     });
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Register MCP Server ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4653,43 +6424,83 @@ fn draw_spawn_agent(frame: &mut Frame, app: &App) {
     let height = 8 + app.agent_profiles.len() as u16;
     let popup = centered_popup(frame.area(), 55, height.min(18));
     frame.render_widget(Clear, popup);
-    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let goal_display = if app.spawn_goal_text.is_empty() {
+        "continue development"
+    } else {
+        &app.spawn_goal_text
+    };
     let mut lines = vec![
-        Line::from(vec![Span::raw("Goal: "), Span::styled(goal_display, Style::default().fg(GREEN))]),
+        Line::from(vec![
+            Span::raw("Goal: "),
+            Span::styled(goal_display, Style::default().fg(GREEN)),
+        ]),
         Line::raw(""),
-        Line::styled("Agent profile (Tab/arrows to select, Enter to confirm):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Agent profile (Tab/arrows to select, Enter to confirm):",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
 
     // Option 0: no agent (direct session)
     let no_agent_sel = app.spawn_agent_idx == 0;
     let mut focus_line: Option<usize> = None;
-    if no_agent_sel { focus_line = Some(lines.len()); }
+    if no_agent_sel {
+        focus_line = Some(lines.len());
+    }
     lines.push(Line::styled(
-        format!("{} (none) — direct session", if no_agent_sel { "▶" } else { " " }),
-        if no_agent_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        format!(
+            "{} (none) — direct session",
+            if no_agent_sel { "▶" } else { " " }
+        ),
+        if no_agent_sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        },
     ));
 
     // Agent profiles
     for (i, profile) in app.agent_profiles.iter().enumerate() {
         let sel = app.spawn_agent_idx == i + 1;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let marker = if sel { "■ " } else { "  " };
         lines.push(Line::from(vec![
-            Span::styled(format!("{}{}", marker, profile.name),
-                if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
-            Span::styled(format!("  {}", profile.role), Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                format!("{}{}", marker, profile.name),
+                if sel {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                },
+            ),
+            Span::styled(
+                format!("  {}", profile.role),
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]));
     }
 
     if app.agent_profiles.is_empty() {
         lines.push(Line::raw(""));
-        lines.push(Line::styled("  No agent profiles found in agents/", Style::default().fg(TEXT_MUTED)));
+        lines.push(Line::styled(
+            "  No agent profiles found in agents/",
+            Style::default().fg(TEXT_MUTED),
+        ));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Agent ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Agent ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -4698,16 +6509,26 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
     let avail = app.pm.backends.available();
     let mut lines = vec![
-        Line::from(vec![Span::raw("Goal: "), Span::styled(
-            if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text },
-            Style::default().fg(GREEN))]),
+        Line::from(vec![
+            Span::raw("Goal: "),
+            Span::styled(
+                if app.spawn_goal_text.is_empty() {
+                    "continue development"
+                } else {
+                    &app.spawn_goal_text
+                },
+                Style::default().fg(GREEN),
+            ),
+        ]),
         Line::raw(""),
         Line::styled("Backend (Tab to toggle):", Style::default().fg(TEXT_DIM)),
     ];
     let mut focus_line: Option<usize> = None;
     for &backend in BackendKind::cli_backends() {
         let selected = app.spawn_backend == backend;
-        if selected { focus_line = Some(lines.len()); }
+        if selected {
+            focus_line = Some(lines.len());
+        }
         let found = avail.contains(&backend);
         let marker = if selected { "▶" } else { " " };
         let suffix = if found { "" } else { " (not found)" };
@@ -4721,13 +6542,24 @@ fn draw_spawn_backend(frame: &mut Frame, app: &App) {
         };
         lines.push(Line::styled(
             format!("{marker} {label}{suffix}"),
-            if selected { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+            if selected {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_DIM)
+            },
         ));
     }
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Backend ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Backend ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -4740,27 +6572,47 @@ fn draw_spawn_engine(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 60, height);
     frame.render_widget(Clear, popup);
 
-    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let goal_display = if app.spawn_goal_text.is_empty() {
+        "continue development"
+    } else {
+        &app.spawn_goal_text
+    };
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(format!("{} ", app.spawn_backend.label()), Style::default().fg(CYAN)),
+            Span::styled(
+                format!("{} ", app.spawn_backend.label()),
+                Style::default().fg(CYAN),
+            ),
             Span::styled(goal_display, Style::default().fg(GREEN)),
         ]),
         Line::raw(""),
-        Line::styled("Engine (Tab/arrows to select):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Engine (Tab/arrows to select):",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
 
     // Index 0 — resolver default. Show which engine the precedence layers would
     // pick (agent role / project / global default), or "harness default".
     let default_sel = app.spawn_engine_idx == 0;
     let mut focus_line: Option<usize> = None;
-    if default_sel { focus_line = Some(lines.len()); }
+    if default_sel {
+        focus_line = Some(lines.len());
+    }
     let resolver_hint = app
         .resolved_default_engine_label()
         .unwrap_or_else(|| "harness default endpoint".to_string());
     lines.push(Line::styled(
-        format!("{} (default — resolver: {})", if default_sel { "▶" } else { " " }, resolver_hint),
-        if default_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        format!(
+            "{} (default — resolver: {})",
+            if default_sel { "▶" } else { " " },
+            resolver_hint
+        ),
+        if default_sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        },
     ));
 
     if engines.is_empty() {
@@ -4772,60 +6624,108 @@ fn draw_spawn_engine(frame: &mut Frame, app: &App) {
 
     for (i, eng) in engines.iter().enumerate() {
         let sel = app.spawn_engine_idx == i + 1;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let loc = match eng.location {
             orrch_library::EngineLocation::Cloud => "cloud",
             orrch_library::EngineLocation::Gateway => "gateway",
             orrch_library::EngineLocation::Local => "local",
         };
         lines.push(Line::styled(
-            format!("{} {} ({} · {})", if sel { "▶" } else { " " }, eng.name, eng.provider, loc),
-            if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+            format!(
+                "{} {} ({} · {})",
+                if sel { "▶" } else { " " },
+                eng.name,
+                eng.provider,
+                loc
+            ),
+            if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_DIM)
+            },
         ));
     }
 
     lines.push(Line::raw(""));
-    lines.push(Line::styled("Enter: continue · Esc: cancel", Style::default().fg(TEXT_MUTED)));
+    lines.push(Line::styled(
+        "Enter: continue · Esc: cancel",
+        Style::default().fg(TEXT_MUTED),
+    ));
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Engine ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Engine ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        false,
     );
 }
 
 fn draw_spawn_host(frame: &mut Frame, app: &App) {
-    let remote_hosts: Vec<&orrch_core::remote::RemoteHost> = app.remote_hosts.iter()
-        .filter(|h| !h.is_local)
-        .collect();
+    let remote_hosts: Vec<&orrch_core::remote::RemoteHost> =
+        app.remote_hosts.iter().filter(|h| !h.is_local).collect();
     let height = 6 + remote_hosts.len() as u16;
     let popup = centered_popup(frame.area(), 50, height.min(16));
     frame.render_widget(Clear, popup);
 
-    let goal_display = if app.spawn_goal_text.is_empty() { "continue development" } else { &app.spawn_goal_text };
+    let goal_display = if app.spawn_goal_text.is_empty() {
+        "continue development"
+    } else {
+        &app.spawn_goal_text
+    };
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(format!("{} ", app.spawn_backend.label()), Style::default().fg(CYAN)),
+            Span::styled(
+                format!("{} ", app.spawn_backend.label()),
+                Style::default().fg(CYAN),
+            ),
             Span::styled(goal_display, Style::default().fg(GREEN)),
         ]),
         Line::raw(""),
-        Line::styled("Host (Tab/arrows to select):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Host (Tab/arrows to select):",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
 
     // Local option
     let local_sel = app.spawn_host_idx == 0;
     let mut focus_line: Option<usize> = None;
-    if local_sel { focus_line = Some(lines.len()); }
-    let local_hostname = app.remote_hosts.iter().find(|h| h.is_local).map(|h| h.name.as_str()).unwrap_or("local");
+    if local_sel {
+        focus_line = Some(lines.len());
+    }
+    let local_hostname = app
+        .remote_hosts
+        .iter()
+        .find(|h| h.is_local)
+        .map(|h| h.name.as_str())
+        .unwrap_or("local");
     lines.push(Line::styled(
-        format!("{} {} (local)", if local_sel { "▶" } else { " " }, local_hostname),
-        if local_sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+        format!(
+            "{} {} (local)",
+            if local_sel { "▶" } else { " " },
+            local_hostname
+        ),
+        if local_sel {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(TEXT_DIM)
+        },
     ));
 
     // Remote options
     for (i, host) in remote_hosts.iter().enumerate() {
         let sel = app.spawn_host_idx == i + 1;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let status = if host.reachable {
             if let Some(caps) = &host.capabilities {
                 format!(" ({}/{})", caps.os, caps.mux)
@@ -4837,75 +6737,162 @@ fn draw_spawn_host(frame: &mut Frame, app: &App) {
         };
         lines.push(Line::styled(
             format!("{} {}{status}", if sel { "▶" } else { " " }, host.name),
-            if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) }
-            else if host.reachable { Style::default().fg(TEXT_DIM) }
-            else { Style::default().fg(TEXT_MUTED) },
+            if sel {
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else if host.reachable {
+                Style::default().fg(TEXT_DIM)
+            } else {
+                Style::default().fg(TEXT_MUTED)
+            },
         ));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Host ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Host ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        false,
     );
 }
 
 fn draw_routing_summary(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 55, 12);
     frame.render_widget(Clear, popup);
-    let mut lines = vec![Line::styled("Feedback processed!", Style::default().fg(GREEN).add_modifier(Modifier::BOLD)), Line::raw("")];
+    let mut lines = vec![
+        Line::styled(
+            "Feedback processed!",
+            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+        ),
+        Line::raw(""),
+    ];
     if app.routing_result.is_empty() {
-        lines.push(Line::styled("No project matches — saved to workspace instructions_inbox.md", Style::default().fg(TEXT_DIM)));
+        lines.push(Line::styled(
+            "No project matches — saved to workspace instructions_inbox.md",
+            Style::default().fg(TEXT_DIM),
+        ));
     } else {
-        lines.push(Line::styled(format!("Routed to {} project(s):", app.routing_result.len()), Style::default().fg(TEXT)));
+        lines.push(Line::styled(
+            format!("Routed to {} project(s):", app.routing_result.len()),
+            Style::default().fg(TEXT),
+        ));
         for (name, _) in &app.routing_result {
-            lines.push(Line::from(vec![Span::raw("  • "), Span::styled(name, Style::default().fg(ACCENT))]));
+            lines.push(Line::from(vec![
+                Span::raw("  • "),
+                Span::styled(name, Style::default().fg(ACCENT)),
+            ]));
         }
     }
     lines.push(Line::raw(""));
-    lines.push(Line::styled("Enter: spawn continue-dev sessions", Style::default().fg(TEXT)));
+    lines.push(Line::styled(
+        "Enter: spawn continue-dev sessions",
+        Style::default().fg(TEXT),
+    ));
     lines.push(Line::styled("Esc: back", Style::default().fg(TEXT_DIM)));
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Routed ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Routed ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
 fn draw_confirm_complete(frame: &mut Frame, app: &App, proj_idx: usize) {
     let popup = centered_popup(frame.area(), 55, 8);
     frame.render_widget(Clear, popup);
-    let name = app.projects.get(proj_idx).map(|p| p.name.as_str()).unwrap_or("?");
+    let name = app
+        .projects
+        .get(proj_idx)
+        .map(|p| p.name.as_str())
+        .unwrap_or("?");
     let lines = vec![
-        Line::styled(format!("Mark {name} as complete?"), Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            format!("Mark {name} as complete?"),
+            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
-        Line::styled("This packages the project into a v1/ directory.", Style::default().fg(TEXT)),
-        Line::styled("The project will appear in the Production panel.", Style::default().fg(TEXT_DIM)),
-        Line::styled("Development can continue on the versioned source.", Style::default().fg(TEXT_DIM)),
-        Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "This packages the project into a v1/ directory.",
+            Style::default().fg(TEXT),
+        ),
+        Line::styled(
+            "The project will appear in the Production panel.",
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled(
+            "Development can continue on the versioned source.",
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled(
+            "Y to confirm, any key to cancel",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Complete → v1 ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Complete → v1 ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
 fn draw_confirm_deprecate(frame: &mut Frame, app: &App, proj_idx: usize) {
     let popup = centered_popup(frame.area(), 50, 7);
     frame.render_widget(Clear, popup);
-    let name = app.projects.get(proj_idx).map(|p| p.name.as_str()).unwrap_or("?");
+    let name = app
+        .projects
+        .get(proj_idx)
+        .map(|p| p.name.as_str())
+        .unwrap_or("?");
     let lines = vec![
-        Line::styled(format!("Deprecate {name}?"), Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            format!("Deprecate {name}?"),
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
-        Line::styled(format!("Moves {name}/ → deprecated/{name}/"), Style::default().fg(TEXT)),
-        Line::styled("Kept as reference, not deleted.", Style::default().fg(TEXT_DIM)),
-        Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            format!("Moves {name}/ → deprecated/{name}/"),
+            Style::default().fg(TEXT),
+        ),
+        Line::styled(
+            "Kept as reference, not deleted.",
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled(
+            "Y to confirm, any key to cancel",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Deprecate ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Deprecate ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -4923,12 +6910,16 @@ fn draw_rename_popup(frame: &mut Frame, app: &App, title: &str) {
         Line::styled("Enter=save  Esc=cancel", Style::default().fg(TEXT_DIM)),
     ];
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(format!(" {title} "))
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(ACCENT)),
-        lines, None, app.popup_scroll, false,
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -4952,15 +6943,22 @@ fn draw_confirm_rollback(frame: &mut Frame, app: &App) {
             "To remove from remote: git push origin :refs/tags/<tag>",
             Style::default().fg(TEXT_DIM),
         ),
-        Line::styled("Y to confirm, any key to cancel", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "Y to confirm, any key to cancel",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Rollback Release ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(40, 10, 10)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -4972,25 +6970,36 @@ fn draw_confirm_kill_session(frame: &mut Frame, name: &str) {
     let lines = vec![
         Line::styled(
             format!("Kill session '{name}'?"),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
-        Line::styled("Y to confirm, n/Esc to cancel", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "Y to confirm, n/Esc to cancel",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Kill Session ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(40, 20, 10)).fg(TEXT)),
-        lines, None, 0, false,
+        lines,
+        None,
+        0,
+        false,
     );
 }
 
 // ─── Steer session input popup ───────────────────────────────────────
 
 fn draw_steer_session_input(frame: &mut Frame, app: &App, session_idx: usize) {
-    let session_name = app.managed_sessions.get(session_idx)
+    let session_name = app
+        .managed_sessions
+        .get(session_idx)
         .map(|s| s.name.as_str())
         .unwrap_or("session");
     let popup = centered_popup(frame.area(), 70, 5);
@@ -5005,12 +7014,16 @@ fn draw_steer_session_input(frame: &mut Frame, app: &App, session_idx: usize) {
         Line::styled(cursor_buf, Style::default().fg(TEXT)),
     ];
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Send Input ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -5021,37 +7034,46 @@ fn draw_set_logo_path(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
     let cursor_buf = format!("{}_", app.logo_path_input);
     let lines = vec![
-        Line::styled("Enter file path for project logo:", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Enter file path for project logo:",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::raw(""),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(ACCENT)),
             Span::styled(&cursor_buf, Style::default().fg(TEXT)),
         ]),
         Line::raw(""),
-        Line::styled("Leave blank + Enter to clear.  Esc = cancel.", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            "Leave blank + Enter to clear.  Esc = cancel.",
+            Style::default().fg(TEXT_MUTED),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Set Logo Path (Enter=save  Esc=cancel) ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(10, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
 // ─── Status Bar ───────────────────────────────────────────────────────
 
 fn draw_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
-    if let Some((ref msg, when)) = app.last_notification {
-        if when.elapsed().as_secs() < 5 {
-            frame.render_widget(
-                Paragraph::new(format!(" {msg}"))
-                    .style(Style::default().fg(GREEN).bg(BG_DARK)),
-                area,
-            );
-            return;
-        }
+    if let Some((ref msg, when)) = app.last_notification
+        && when.elapsed().as_secs() < 5
+    {
+        frame.render_widget(
+            Paragraph::new(format!(" {msg}")).style(Style::default().fg(GREEN).bg(BG_DARK)),
+            area,
+        );
+        return;
     }
     let line = build_hint_line(app);
     frame.render_widget(
@@ -5095,116 +7117,162 @@ fn unicode_display_width(s: &str) -> usize {
 fn build_hint_line(app: &App) -> Line<'static> {
     match (&app.panel, &app.sub) {
         (Panel::Oversee, SubView::List) if app.tree_browsing => hint_line(&[
-            ("←", "back/collapse"), ("→", "expand"), ("Enter", "open"),
+            ("←", "back/collapse"),
+            ("→", "expand"),
+            ("Enter", "open"),
             ("|", ""),
-            ("n", "spawn"), ("x", "kill"), ("a", "actions"),
+            ("n", "spawn"),
+            ("x", "kill"),
+            ("a", "actions"),
         ]),
         (Panel::Oversee, SubView::List) => {
             // OPT-007: show completion-specific actions when selected project is done
-            let selected_complete = app.selected_project_index()
+            let selected_complete = app
+                .selected_project_index()
                 .and_then(|i| app.projects.get(i))
-                .map_or(false, |p| p.roadmap_complete());
+                .is_some_and(|p| p.roadmap_complete());
             if selected_complete {
                 hint_line(&[
-                    ("→/Enter", "detail view"), ("n", "spawn"),
+                    ("→/Enter", "detail view"),
+                    ("n", "spawn"),
                     ("|", ""),
                     ("a", "submit feedback | construct packages"),
                     ("|", ""),
-                    ("↑↓", "select"), ("q", "quit"),
+                    ("↑↓", "select"),
+                    ("q", "quit"),
                 ])
             } else {
                 hint_line(&[
-                    ("→/Enter", "detail view"), ("n", "spawn"), ("a", "actions"),
-                    ("l", "lifecycle"), ("V", "visibility"),
+                    ("→/Enter", "detail view"),
+                    ("n", "spawn"),
+                    ("a", "actions"),
+                    ("l", "lifecycle"),
+                    ("V", "visibility"),
                     ("|", ""),
-                    ("↑↓", "select"), ("q", "quit"),
+                    ("↑↓", "select"),
+                    ("q", "quit"),
                 ])
             }
+        }
+        (Panel::Design, SubView::List) => match app.design_sub {
+            crate::app::DesignSub::Intentions => hint_line(&[
+                ("Enter", "edit"),
+                ("n", "new"),
+                ("s", "submit"),
+                ("r", "rename"),
+                ("R", "review"),
+                ("d", "delete"),
+                ("X", "retract"),
+                ("|", ""),
+                ("↑↓", "select"),
+                ("Tab", "sub-panel"),
+            ]),
+            crate::app::DesignSub::Workforce => hint_line(&[
+                ("Enter", "edit"),
+                ("n", "new"),
+                ("N", "AI-create"),
+                ("r", "rename"),
+                ("d", "del"),
+                ("R", "refresh"),
+                ("|", ""),
+                ("←→", "tabs"),
+                ("Home/End", "jump"),
+            ]),
+            crate::app::DesignSub::Library => hint_line(&[
+                ("v", "valve"),
+                ("e", "toggle"),
+                ("r", "refresh"),
+                ("|", ""),
+                ("←→", "tabs"),
+                ("PgUp/Dn", "scroll"),
+                ("Home/End", "jump"),
+            ]),
+            crate::app::DesignSub::Plans => hint_line(&[
+                ("Enter", "expand"),
+                ("v", "verify"),
+                ("s/S", "cycle status"),
+                ("d", "deprecate"),
+                ("|", ""),
+                ("k/j", "move"),
+                ("e", "edit"),
+                ("r", "refresh"),
+            ]),
         },
-        (Panel::Design, SubView::List) => {
-            match app.design_sub {
-                crate::app::DesignSub::Intentions => hint_line(&[
-                    ("Enter", "edit"), ("n", "new"), ("s", "submit"), ("r", "rename"), ("R", "review"), ("d", "delete"), ("X", "retract"),
-                    ("|", ""),
-                    ("↑↓", "select"), ("Tab", "sub-panel"),
-                ]),
-                crate::app::DesignSub::Workforce => hint_line(&[
-                    ("Enter", "edit"), ("n", "new"), ("N", "AI-create"), ("r", "rename"), ("d", "del"), ("R", "refresh"),
-                    ("|", ""),
-                    ("←→", "tabs"), ("Home/End", "jump"),
-                ]),
-                crate::app::DesignSub::Library => hint_line(&[
-                    ("v", "valve"), ("e", "toggle"), ("r", "refresh"),
-                    ("|", ""),
-                    ("←→", "tabs"), ("PgUp/Dn", "scroll"), ("Home/End", "jump"),
-                ]),
-                crate::app::DesignSub::Plans => hint_line(&[
-                    ("Enter", "expand"), ("v", "verify"), ("s/S", "cycle status"), ("d", "deprecate"),
-                    ("|", ""),
-                    ("k/j", "move"), ("e", "edit"), ("r", "refresh"),
-                ]),
-            }
-        },
-        (Panel::Analyze, SubView::List) => hint_line(&[
-            ("←→", "panels"), ("Esc", "menu"),
-        ]),
+        (Panel::Analyze, SubView::List) => hint_line(&[("←→", "panels"), ("Esc", "menu")]),
         (Panel::Publish, SubView::List) => hint_line(&[
-            ("←→", "tabs"), ("v", "preview"), ("b", "build"), ("D", "rollback tag"), ("r", "refresh"), ("Esc", "menu"),
+            ("←→", "tabs"),
+            ("v", "preview"),
+            ("b", "build"),
+            ("D", "rollback tag"),
+            ("r", "refresh"),
+            ("Esc", "menu"),
         ]),
         (Panel::Hypervise, SubView::List) => {
             if app.session_log_view {
                 hint_line(&[
-                    ("↑↓", "select"), ("PgUp/PgDn", "scroll log"), ("Esc", "close logs"),
+                    ("↑↓", "select"),
+                    ("PgUp/PgDn", "scroll log"),
+                    ("Esc", "close logs"),
                 ])
             } else {
                 let has_sessions = !app.managed_sessions.is_empty();
                 if has_sessions {
                     hint_line(&[
-                        ("→", "expand"), ("Enter", "focus"), ("↑↓", "scroll preview"), ("PgUp/PgDn", "fast"), ("p", "prompt"), ("o", "external window"), ("x", "kill"), ("R", "refresh"),
+                        ("→", "expand"),
+                        ("Enter", "focus"),
+                        ("↑↓", "scroll preview"),
+                        ("PgUp/PgDn", "fast"),
+                        ("p", "prompt"),
+                        ("o", "external window"),
+                        ("x", "kill"),
+                        ("R", "refresh"),
                     ])
                 } else {
-                    hint_line(&[
-                        ("R", "refresh"), ("L", "logs"), ("Esc", "menu"),
-                    ])
+                    hint_line(&[("R", "refresh"), ("L", "logs"), ("Esc", "menu")])
                 }
             }
         }
         (_, SubView::ExpandedSession(_)) => hint_line(&[
-            ("← ←", "back to list"), ("Enter", "send prompt"), ("Esc", "clear"),
+            ("← ←", "back to list"),
+            ("Enter", "send prompt"),
+            ("Esc", "clear"),
         ]),
-        (_, SubView::SteerSession(_)) => hint_line(&[
-            ("Enter", "send"), ("Esc", "cancel"),
-        ]),
+        (_, SubView::SteerSession(_)) => hint_line(&[("Enter", "send"), ("Esc", "cancel")]),
         // Feedback hints are now part of the Design panel
         (_, SubView::ProjectDetail(_)) => hint_line(&[
-            ("Enter", "open"), ("n", "spawn"), ("a", "actions"),
+            ("Enter", "open"),
+            ("n", "spawn"),
+            ("a", "actions"),
             ("|", ""),
-            ("Tab", "cycle focus"), ("Esc", "back"),
+            ("Tab", "cycle focus"),
+            ("Esc", "back"),
         ]),
-        (_, SubView::ExternalSessionView(_)) => hint_line(&[
-            ("r", "refresh"), ("Esc", "back"),
-        ]),
+        (_, SubView::ExternalSessionView(_)) => hint_line(&[("r", "refresh"), ("Esc", "back")]),
         (_, SubView::DeprecatedBrowser) => hint_line(&[
-            ("←→", "navigate"), ("Enter", "open"), ("d", "delete"), ("Esc", "back"),
+            ("←→", "navigate"),
+            ("Enter", "open"),
+            ("d", "delete"),
+            ("Esc", "back"),
         ]),
-        (_, SubView::AppMenu) => hint_line(&[
-            ("↑↓", "select"), ("Enter", "run"), ("Esc", "close"),
-        ]),
-        (_, SubView::CommitReview(_)) if app.commit_typing_correction => hint_line(&[
-            ("Enter", "send correction"), ("Esc", "cancel"),
-        ]),
+        (_, SubView::AppMenu) => hint_line(&[("↑↓", "select"), ("Enter", "run"), ("Esc", "close")]),
+        (_, SubView::CommitReview(_)) if app.commit_typing_correction => {
+            hint_line(&[("Enter", "send correction"), ("Esc", "cancel")])
+        }
         (_, SubView::CommitReview(_)) => hint_line(&[
-            ("y", "approve"), ("n", "correct"), ("d", "deny"), ("↑↓", "scroll"), ("Esc", "cancel"),
+            ("y", "approve"),
+            ("n", "correct"),
+            ("d", "deny"),
+            ("↑↓", "scroll"),
+            ("Esc", "cancel"),
         ]),
-        (_, SubView::CommitCorrecting(_)) => hint_line(&[
-            ("Esc", "cancel correction"),
-        ]),
+        (_, SubView::CommitCorrecting(_)) => hint_line(&[("Esc", "cancel correction")]),
         (_, SubView::ActionMenu) => hint_line(&[
-            ("↑↓", "select"), ("Enter", "run"), ("a-z", "shortcut"), ("Esc", "cancel"),
+            ("↑↓", "select"),
+            ("Enter", "run"),
+            ("a-z", "shortcut"),
+            ("Esc", "cancel"),
         ]),
-        (_, SubView::SessionFocus(_)) => hint_line(&[
-            ("Esc", "back to project"),
-        ]),
+        (_, SubView::SessionFocus(_)) => hint_line(&[("Esc", "back to project")]),
         _ => Line::raw(""),
     }
 }
@@ -5223,7 +7291,7 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
             spans.push(Span::styled(key.to_string(), key_style));
         } else {
             spans.push(Span::styled(key.to_string(), key_style));
-            spans.push(Span::styled(format!(" {action}  ", ), action_style));
+            spans.push(Span::styled(format!(" {action}  ",), action_style));
         }
     }
     Line::from(spans)
@@ -5232,19 +7300,35 @@ fn hint_line(hints: &[(&str, &str)]) -> Line<'static> {
 fn draw_confirm_delete_deprecated(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 50, 7);
     frame.render_widget(Clear, popup);
-    let name = app.dep_parent_entries.get(app.dep_parent_selected)
-        .map(|e| e.name.as_str()).unwrap_or("?");
+    let name = app
+        .dep_parent_entries
+        .get(app.dep_parent_selected)
+        .map(|e| e.name.as_str())
+        .unwrap_or("?");
     let lines = vec![
-        Line::styled(format!("Permanently delete deprecated/{name}?"), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            format!("Permanently delete deprecated/{name}?"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
         Line::styled("This cannot be undone.", Style::default().fg(TEXT_DIM)),
         Line::raw(""),
-        Line::styled("y: delete forever    n/Esc: cancel", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "y: delete forever    n/Esc: cancel",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(40, 15, 15)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Delete ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(40, 15, 15)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -5266,13 +7350,22 @@ fn draw_commit_review(frame: &mut Frame, app: &App) {
     ];
 
     if pkg_count == 0 {
-        lines.push(Line::styled("  No pending instruction packages found.", Style::default().fg(TEXT_MUTED)));
-        lines.push(Line::styled("  Claude may still be processing, or all entries were already committed.", Style::default().fg(TEXT_MUTED)));
+        lines.push(Line::styled(
+            "  No pending instruction packages found.",
+            Style::default().fg(TEXT_MUTED),
+        ));
+        lines.push(Line::styled(
+            "  Claude may still be processing, or all entries were already committed.",
+            Style::default().fg(TEXT_MUTED),
+        ));
     } else {
         for pkg in &app.commit_packages {
             lines.push(Line::from(vec![
                 Span::styled("  ▸ ", Style::default().fg(ACCENT)),
-                Span::styled(&pkg.project_name, Style::default().fg(CYAN).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &pkg.project_name,
+                    Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+                ),
             ]));
             for preview_line in pkg.entry_preview.lines().take(4) {
                 let truncated: String = preview_line.chars().take(70).collect();
@@ -5287,7 +7380,10 @@ fn draw_commit_review(frame: &mut Frame, app: &App) {
 
     // Correction text input (if active)
     if app.commit_typing_correction {
-        lines.push(Line::styled("  What needs to be corrected?", Style::default().fg(WAITING_COLOR)));
+        lines.push(Line::styled(
+            "  What needs to be corrected?",
+            Style::default().fg(WAITING_COLOR),
+        ));
         lines.push(Line::from(vec![
             Span::styled("  > ", Style::default().fg(ACCENT)),
             Span::styled(&app.commit_correction_text, Style::default().fg(TEXT)),
@@ -5308,10 +7404,17 @@ fn draw_commit_review(frame: &mut Frame, app: &App) {
     // Apply scroll
     let visible_lines: Vec<Line> = lines.into_iter().skip(app.commit_scroll).collect();
 
-    frame.render_widget(Paragraph::new(visible_lines)
-        .block(Block::default().title(" Commit Review ").borders(Borders::ALL)
-            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)))
-        .wrap(Wrap { trim: false }), popup);
+    frame.render_widget(
+        Paragraph::new(visible_lines)
+            .block(
+                Block::default()
+                    .title(" Commit Review ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+            )
+            .wrap(Wrap { trim: false }),
+        popup,
+    );
 }
 
 fn draw_commit_correcting(frame: &mut Frame, app: &App) {
@@ -5320,18 +7423,36 @@ fn draw_commit_correcting(frame: &mut Frame, app: &App) {
 
     let session = app.commit_correction_session.as_deref().unwrap_or("?");
     let lines = vec![
-        Line::styled("Correcting...", Style::default().fg(WAITING_COLOR).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "Correcting...",
+            Style::default()
+                .fg(WAITING_COLOR)
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
-        Line::styled(format!("  Claude is revising packages ({session})"), Style::default().fg(TEXT_DIM)),
-        Line::styled("  This overlay will refresh when done.", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            format!("  Claude is revising packages ({session})"),
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled(
+            "  This overlay will refresh when done.",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::raw(""),
         Line::styled("  Esc: cancel correction", Style::default().fg(TEXT_MUTED)),
     ];
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Correcting ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Correcting ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -5355,7 +7476,7 @@ fn truncate_url(s: &str, max: usize) -> String {
     // Reserve 1 col for the ellipsis. Split the remaining budget
     // into a head (slightly larger) and tail.
     let budget = max - 1;
-    let head_len = (budget + 1) / 2;
+    let head_len = budget.div_ceil(2);
     let tail_len = budget - head_len;
     let chars: Vec<char> = s.chars().collect();
     let head: String = chars[..head_len].iter().collect();
@@ -5380,13 +7501,17 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     let public_http_url = app.webui_public_http_url.clone();
     // orrch-relay URL — only when the relay subsystem is enabled.
     let relay_url = (std::env::var("ORRCH_RELAY_ENABLE").as_deref() == Ok("1")).then(|| {
-        let bind = std::env::var("ORRCH_RELAY_BIND")
-            .unwrap_or_else(|_| "127.0.0.1:8585".to_string());
+        let bind =
+            std::env::var("ORRCH_RELAY_BIND").unwrap_or_else(|_| "127.0.0.1:8585".to_string());
         format!("http://{bind}/v1")
     });
     let voice_socket = (std::env::var("ORRCH_VOICE_ENABLE").as_deref() == Ok("1")).then(|| {
-        std::env::var("ORRCH_VOICE_SOCKET")
-            .unwrap_or_else(|_| orrch_core::data_dir().join("voice.sock").display().to_string())
+        std::env::var("ORRCH_VOICE_SOCKET").unwrap_or_else(|_| {
+            orrch_core::data_dir()
+                .join("voice.sock")
+                .display()
+                .to_string()
+        })
     });
     let mut url_lines = 0u16;
     if local_url.is_some() {
@@ -5410,7 +7535,10 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
 
     let mut lines = vec![
-        Line::styled("orrchestrator", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "orrchestrator",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Line::styled("v0.1.0", Style::default().fg(TEXT_MUTED)),
         Line::raw(""),
     ];
@@ -5438,7 +7566,10 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
         if let Some(http_public) = &public_http_url {
             lines.push(Line::from(vec![
                 Span::styled("  http   ", Style::default().fg(TEXT_DIM)),
-                Span::styled(truncate_url(http_public, URL_MAX), Style::default().fg(ACCENT)),
+                Span::styled(
+                    truncate_url(http_public, URL_MAX),
+                    Style::default().fg(ACCENT),
+                ),
             ]));
         }
         lines.push(Line::raw(""));
@@ -5477,7 +7608,9 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
     let mut focus_line: Option<usize> = None;
     for (i, (key, label)) in items.iter().enumerate() {
         let sel = i == app.app_menu_selected;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", if sel { "▶" } else { " " }),
@@ -5489,15 +7622,26 @@ fn draw_app_menu(frame: &mut Frame, app: &App) {
             ),
             Span::styled(
                 format!("  {label}"),
-                if sel { Style::default().fg(TEXT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+                if sel {
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT_DIM)
+                },
             ),
         ]));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Menu ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Menu ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -5514,9 +7658,10 @@ fn draw_action_menu(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 50, height);
     frame.render_widget(Clear, popup);
 
-    let mut lines = vec![
-        Line::styled("Actions", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
-    ];
+    let mut lines = vec![Line::styled(
+        "Actions",
+        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+    )];
     if let Some(ref name) = project_label {
         lines.push(Line::from(vec![
             Span::styled("for ", Style::default().fg(TEXT_DIM)),
@@ -5528,7 +7673,9 @@ fn draw_action_menu(frame: &mut Frame, app: &App) {
     let mut focus_line: Option<usize> = None;
     for (i, item) in app.action_items.iter().enumerate() {
         let sel = i == app.action_selected;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", if sel { "▶" } else { " " }),
@@ -5540,15 +7687,26 @@ fn draw_action_menu(frame: &mut Frame, app: &App) {
             ),
             Span::styled(
                 format!("  {}", item.label),
-                if sel { Style::default().fg(TEXT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT_DIM) },
+                if sel {
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT_DIM)
+                },
             ),
         ]));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Actions ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, false,
+        frame,
+        popup,
+        Block::default()
+            .title(" Actions ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        false,
     );
 }
 
@@ -5558,9 +7716,15 @@ fn draw_new_project_name(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 55, 10);
     frame.render_widget(Clear, popup);
     let mut lines = vec![
-        Line::styled("New Project", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "New Project",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
-        Line::styled("Name (lowercase, hyphens ok):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Name (lowercase, hyphens ok):",
+            Style::default().fg(TEXT_DIM),
+        ),
         Line::from(vec![
             Span::styled("> ", Style::default().fg(ACCENT)),
             Span::styled(&app.new_project_name, Style::default().fg(TEXT)),
@@ -5569,12 +7733,22 @@ fn draw_new_project_name(frame: &mut Frame, app: &App) {
     ];
     if let Some(ref err) = app.new_project_error {
         lines.push(Line::raw(""));
-        lines.push(Line::styled(format!("  ✗ {err}"), Style::default().fg(Color::Red)));
+        lines.push(Line::styled(
+            format!("  ✗ {err}"),
+            Style::default().fg(Color::Red),
+        ));
     }
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" New Project ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, Some(3), app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" New Project ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        Some(3),
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5607,7 +7781,9 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
     let mut focus_line: Option<usize> = None;
     for (i, scope) in scopes.iter().enumerate() {
         let sel = i == app.scope_visibility_selected;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let hidden = app.hidden_scopes.contains(scope);
         let checkbox = if hidden { "[ ] " } else { "[x] " };
         let cursor = if sel { "▶ " } else { "  " };
@@ -5620,7 +7796,10 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
         };
         lines.push(Line::from(vec![
             Span::styled(cursor, Style::default().fg(ACCENT)),
-            Span::styled(checkbox, Style::default().fg(if hidden { TEXT_MUTED } else { GREEN })),
+            Span::styled(
+                checkbox,
+                Style::default().fg(if hidden { TEXT_MUTED } else { GREEN }),
+            ),
             Span::styled(scope.label(), label_style),
         ]));
     }
@@ -5631,7 +7810,10 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
     } else {
         format!("{n} project(s) hidden")
     };
-    lines.push(Line::styled(format!("  {summary}"), Style::default().fg(TEXT_DIM)));
+    lines.push(Line::styled(
+        format!("  {summary}"),
+        Style::default().fg(TEXT_DIM),
+    ));
     lines.push(Line::raw(""));
     lines.push(Line::styled(
         "  ↑↓ select   Enter/Space toggle   Esc close",
@@ -5639,12 +7821,16 @@ fn draw_scope_visibility(frame: &mut Frame, app: &App) {
     ));
 
     render_scrollable_popup(
-        frame, popup,
+        frame,
+        popup,
         Block::default()
             .title(" Project Visibility ")
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5653,36 +7839,71 @@ fn draw_new_project_scope(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, popup);
 
     let scopes = [
-        (orrch_core::Scope::Personal, "personal", "Full-size project, user-only"),
-        (orrch_core::Scope::Private, "private", "Ship fast, iterate — no public API"),
-        (orrch_core::Scope::Public, "public", "Readable by others — docs, tests, license"),
-        (orrch_core::Scope::Commercial, "commercial", "Production-grade — full CI/CD, compliance"),
+        (
+            orrch_core::Scope::Personal,
+            "personal",
+            "Full-size project, user-only",
+        ),
+        (
+            orrch_core::Scope::Private,
+            "private",
+            "Ship fast, iterate — no public API",
+        ),
+        (
+            orrch_core::Scope::Public,
+            "public",
+            "Readable by others — docs, tests, license",
+        ),
+        (
+            orrch_core::Scope::Commercial,
+            "commercial",
+            "Production-grade — full CI/CD, compliance",
+        ),
     ];
 
     let mut lines = vec![
         Line::from(vec![
             Span::raw("Project: "),
-            Span::styled(&app.new_project_name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.new_project_name,
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::raw(""),
-        Line::styled("Scope (Tab/arrows to select):", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "Scope (Tab/arrows to select):",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
     let mut focus_line: Option<usize> = None;
     for (scope, label, desc) in &scopes {
         let sel = app.new_project_scope == *scope;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} {label}", if sel { "▶" } else { " " }),
-                if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) },
+                if sel {
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(TEXT)
+                },
             ),
             Span::styled(format!("  {desc}"), Style::default().fg(TEXT_MUTED)),
         ]));
     }
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Scope ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Scope ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5690,11 +7911,17 @@ fn draw_new_project_confirm(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 55, 12);
     frame.render_widget(Clear, popup);
     let lines = vec![
-        Line::styled("Create Project?", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "Create Project?",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
         Line::from(vec![
             Span::styled("  Name:  ", Style::default().fg(TEXT_DIM)),
-            Span::styled(&app.new_project_name, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.new_project_name,
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  Scope: ", Style::default().fg(TEXT_DIM)),
@@ -5703,19 +7930,38 @@ fn draw_new_project_confirm(frame: &mut Frame, app: &App) {
         Line::from(vec![
             Span::styled("  Temp:  ", Style::default().fg(TEXT_DIM)),
             Span::styled("hot", Style::default().fg(Color::Rgb(255, 130, 80))),
-            Span::styled(" (starts actively tracked)", Style::default().fg(TEXT_MUTED)),
+            Span::styled(
+                " (starts actively tracked)",
+                Style::default().fg(TEXT_MUTED),
+            ),
         ]),
         Line::raw(""),
         Line::styled("Will create:", Style::default().fg(TEXT_DIM)),
-        Line::styled(format!("  ~/projects/{}/", app.new_project_name), Style::default().fg(TEXT)),
-        Line::styled("  + CLAUDE.md, .scope, .orrtemp", Style::default().fg(TEXT_MUTED)),
+        Line::styled(
+            format!("  ~/projects/{}/", app.new_project_name),
+            Style::default().fg(TEXT),
+        ),
+        Line::styled(
+            "  + CLAUDE.md, .scope, .orrtemp",
+            Style::default().fg(TEXT_MUTED),
+        ),
         Line::raw(""),
-        Line::styled("  y/Enter: create + spawn plan session    n/Esc: back", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "  y/Enter: create + spawn plan session    n/Esc: back",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Confirm ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Confirm ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5727,7 +7973,11 @@ fn draw_connection_form(frame: &mut Frame, app: &App) {
 
     let mut lines = vec![
         Line::styled(
-            if app.connection_edit_original.is_some() { "Edit Connection" } else { "New Connection" },
+            if app.connection_edit_original.is_some() {
+                "Edit Connection"
+            } else {
+                "New Connection"
+            },
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
@@ -5736,100 +7986,219 @@ fn draw_connection_form(frame: &mut Frame, app: &App) {
     let mut focus_line: Option<usize> = None;
     match app.sub {
         SubView::ConnectionPreset => {
-            lines.push(Line::styled("Preset (arrows/Tab to select):", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                "Preset (arrows/Tab to select):",
+                Style::default().fg(TEXT_DIM),
+            ));
             for (i, preset) in app.connection_presets.iter().enumerate() {
                 let sel = app.connection_preset_idx == i;
-                if sel { focus_line = Some(lines.len()); }
+                if sel {
+                    focus_line = Some(lines.len());
+                }
                 lines.push(Line::from(vec![
                     Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
-                    Span::styled(&preset.name, if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
-                    Span::styled(format!("  {}  {}", preset.kind.label(), preset.base_url), Style::default().fg(TEXT_MUTED)),
+                    Span::styled(
+                        &preset.name,
+                        if sel {
+                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(TEXT)
+                        },
+                    ),
+                    Span::styled(
+                        format!("  {}  {}", preset.kind.label(), preset.base_url),
+                        Style::default().fg(TEXT_MUTED),
+                    ),
                 ]));
             }
             let custom_idx = app.connection_presets.len();
             let sel = app.connection_preset_idx == custom_idx;
-            if sel { focus_line = Some(lines.len()); }
+            if sel {
+                focus_line = Some(lines.len());
+            }
             lines.push(Line::from(vec![
                 Span::styled(if sel { "> " } else { "  " }, Style::default().fg(ACCENT)),
-                Span::styled("Custom", if sel { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(TEXT) }),
+                Span::styled(
+                    "Custom",
+                    if sel {
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(TEXT)
+                    },
+                ),
             ]));
             lines.push(Line::raw(""));
-            lines.push(Line::styled("Enter: continue   Esc: cancel", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                "Enter: continue   Esc: cancel",
+                Style::default().fg(TEXT_DIM),
+            ));
         }
         SubView::ConnectionName => {
             draw_connection_input_lines(&mut lines, "Name:", &app.connection_form.name, false);
-            lines.push(Line::styled("Used by ORRCH_VOICE_PORTAL_PROVIDER=connection:<name>", Style::default().fg(TEXT_MUTED)));
+            lines.push(Line::styled(
+                "Used by ORRCH_VOICE_PORTAL_PROVIDER=connection:<name>",
+                Style::default().fg(TEXT_MUTED),
+            ));
         }
         SubView::ConnectionBaseUrl => {
-            draw_connection_input_lines(&mut lines, "Base URL:", &app.connection_form.base_url, false);
-            lines.push(Line::styled("Include /v1 where the provider expects it.", Style::default().fg(TEXT_MUTED)));
+            draw_connection_input_lines(
+                &mut lines,
+                "Base URL:",
+                &app.connection_form.base_url,
+                false,
+            );
+            lines.push(Line::styled(
+                "Include /v1 where the provider expects it.",
+                Style::default().fg(TEXT_MUTED),
+            ));
         }
         SubView::ConnectionApiKey => {
             draw_connection_input_lines(&mut lines, "API key:", &app.connection_form.api_key, true);
-            lines.push(Line::styled("Leave empty for keyless local endpoints.", Style::default().fg(TEXT_MUTED)));
+            lines.push(Line::styled(
+                "Leave empty for keyless local endpoints.",
+                Style::default().fg(TEXT_MUTED),
+            ));
         }
         SubView::ConnectionModel => {
-            draw_connection_input_lines(&mut lines, "Default model:", &app.connection_form.default_model, false);
+            draw_connection_input_lines(
+                &mut lines,
+                "Default model:",
+                &app.connection_form.default_model,
+                false,
+            );
         }
         SubView::ConnectionRateLimit => {
-            draw_connection_input_lines(&mut lines, "Rate limit RPM (0 = unlimited):", &app.connection_form.rate_limit_rpm.to_string(), false);
+            draw_connection_input_lines(
+                &mut lines,
+                "Rate limit RPM (0 = unlimited):",
+                &app.connection_form.rate_limit_rpm.to_string(),
+                false,
+            );
         }
         SubView::ConnectionConfirm => {
             let c = &app.connection_form;
-            lines.push(Line::styled("Save connection?", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                "Save connection?",
+                Style::default().fg(TEXT_DIM),
+            ));
             lines.push(Line::raw(""));
-            lines.push(Line::from(vec![Span::styled("  Name:  ", Style::default().fg(TEXT_DIM)), Span::styled(&c.name, Style::default().fg(TEXT))]));
-            lines.push(Line::from(vec![Span::styled("  Kind:  ", Style::default().fg(TEXT_DIM)), Span::styled(c.kind.label(), Style::default().fg(TEXT))]));
-            lines.push(Line::from(vec![Span::styled("  URL:   ", Style::default().fg(TEXT_DIM)), Span::styled(&c.base_url, Style::default().fg(TEXT))]));
-            lines.push(Line::from(vec![Span::styled("  Model: ", Style::default().fg(TEXT_DIM)), Span::styled(&c.default_model, Style::default().fg(TEXT))]));
-            lines.push(Line::from(vec![Span::styled("  RPM:   ", Style::default().fg(TEXT_DIM)), Span::styled(c.rate_limit_rpm.to_string(), Style::default().fg(TEXT))]));
-            lines.push(Line::from(vec![Span::styled("  Key:   ", Style::default().fg(TEXT_DIM)), Span::styled(orrch_core::mask_key(&c.api_key), Style::default().fg(TEXT_DIM))]));
+            lines.push(Line::from(vec![
+                Span::styled("  Name:  ", Style::default().fg(TEXT_DIM)),
+                Span::styled(&c.name, Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Kind:  ", Style::default().fg(TEXT_DIM)),
+                Span::styled(c.kind.label(), Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  URL:   ", Style::default().fg(TEXT_DIM)),
+                Span::styled(&c.base_url, Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Model: ", Style::default().fg(TEXT_DIM)),
+                Span::styled(&c.default_model, Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  RPM:   ", Style::default().fg(TEXT_DIM)),
+                Span::styled(c.rate_limit_rpm.to_string(), Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Key:   ", Style::default().fg(TEXT_DIM)),
+                Span::styled(
+                    orrch_core::mask_key(&c.api_key),
+                    Style::default().fg(TEXT_DIM),
+                ),
+            ]));
             lines.push(Line::raw(""));
-            lines.push(Line::styled("y/Enter: save   n: edit name   Esc: back", Style::default().fg(TEXT_DIM)));
+            lines.push(Line::styled(
+                "y/Enter: save   n: edit name   Esc: back",
+                Style::default().fg(TEXT_DIM),
+            ));
         }
         _ => {}
     }
 
     if let Some(error) = &app.connection_form_error {
         lines.push(Line::raw(""));
-        lines.push(Line::styled(format!("  x {error}"), Style::default().fg(Color::Red)));
+        lines.push(Line::styled(
+            format!("  x {error}"),
+            Style::default().fg(Color::Red),
+        ));
     }
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Connection ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Connection ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
 fn draw_connection_input_lines(lines: &mut Vec<Line>, label: &str, value: &str, masked: bool) {
-    lines.push(Line::styled(label.to_string(), Style::default().fg(TEXT_DIM)));
-    let shown = if masked { "*".repeat(value.chars().count()) } else { value.to_string() };
+    lines.push(Line::styled(
+        label.to_string(),
+        Style::default().fg(TEXT_DIM),
+    ));
+    let shown = if masked {
+        "*".repeat(value.chars().count())
+    } else {
+        value.to_string()
+    };
     lines.push(Line::from(vec![
         Span::styled("> ", Style::default().fg(ACCENT)),
         Span::styled(shown, Style::default().fg(TEXT)),
         Span::styled("█", Style::default().fg(ACCENT)),
     ]));
     lines.push(Line::raw(""));
-    lines.push(Line::styled("Enter: next   Esc: back", Style::default().fg(TEXT_DIM)));
+    lines.push(Line::styled(
+        "Enter: next   Esc: back",
+        Style::default().fg(TEXT_DIM),
+    ));
 }
 
 fn draw_confirm_delete_connection(frame: &mut Frame, app: &App) {
     let popup = centered_popup(frame.area(), 58, 8);
     frame.render_widget(Clear, popup);
-    let name = app.connection_store.list().get(app.library_selected).map(|c| c.name.as_str()).unwrap_or("unknown");
+    let name = app
+        .connection_store
+        .list()
+        .get(app.library_selected)
+        .map(|c| c.name.as_str())
+        .unwrap_or("unknown");
     let lines = vec![
-        Line::styled("Delete Connection?", Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "Delete Connection?",
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ),
         Line::raw(""),
         Line::styled(format!("  {name}"), Style::default().fg(ACCENT)),
         Line::raw(""),
-        Line::styled("This removes it from local connections.json.", Style::default().fg(TEXT_DIM)),
-        Line::styled("y/Enter: delete   n/Esc: cancel", Style::default().fg(TEXT_DIM)),
+        Line::styled(
+            "This removes it from local connections.json.",
+            Style::default().fg(TEXT_DIM),
+        ),
+        Line::styled(
+            "y/Enter: delete   n/Esc: cancel",
+            Style::default().fg(TEXT_DIM),
+        ),
     ];
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Confirm Delete ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, None, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Confirm Delete ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        None,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5845,12 +8214,24 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
     let enabled_count = app.confirm_routes.iter().filter(|(_, _, e)| *e).count();
 
     let is_plan = app.confirm_feedback_type == orrch_core::FeedbackType::Plan;
-    let title_text = if is_plan { "Submit Planning Document" } else { "Submit Feedback" };
+    let title_text = if is_plan {
+        "Submit Planning Document"
+    } else {
+        "Submit Feedback"
+    };
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(title_text, Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                title_text,
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
             if is_plan {
-                Span::styled("  📋 PLAN", Style::default().fg(Color::Rgb(255, 200, 50)).add_modifier(Modifier::BOLD))
+                Span::styled(
+                    "  📋 PLAN",
+                    Style::default()
+                        .fg(Color::Rgb(255, 200, 50))
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
                 Span::raw("")
             },
@@ -5859,13 +8240,18 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
     ];
 
     // Preview (first few lines of feedback)
-    let preview: Vec<&str> = app.confirm_feedback_text.lines()
+    let preview: Vec<&str> = app
+        .confirm_feedback_text
+        .lines()
         .filter(|l| !l.trim().is_empty())
         .take(3)
         .collect();
     for p in &preview {
         let truncated: String = p.chars().take(58).collect();
-        lines.push(Line::styled(format!("  │ {truncated}"), Style::default().fg(TEXT_DIM)));
+        lines.push(Line::styled(
+            format!("  │ {truncated}"),
+            Style::default().fg(TEXT_DIM),
+        ));
     }
     if app.confirm_feedback_text.lines().count() > 3 {
         lines.push(Line::styled("  │ ...", Style::default().fg(TEXT_MUTED)));
@@ -5880,7 +8266,9 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
     let mut focus_line: Option<usize> = None;
     for (i, (name, _, enabled)) in app.confirm_routes.iter().enumerate() {
         let sel = i == app.confirm_route_selected;
-        if sel { focus_line = Some(lines.len()); }
+        if sel {
+            focus_line = Some(lines.len());
+        }
         let check = if *enabled { "☑" } else { "☐" };
         let marker = if sel { "▶" } else { " " };
         lines.push(Line::styled(
@@ -5914,9 +8302,16 @@ fn draw_feedback_confirm(frame: &mut Frame, app: &App) {
     ));
 
     render_scrollable_popup(
-        frame, popup,
-        Block::default().title(" Confirm Feedback ").borders(Borders::ALL).style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
-        lines, focus_line, app.popup_scroll, true,
+        frame,
+        popup,
+        Block::default()
+            .title(" Confirm Feedback ")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::Rgb(20, 20, 40)).fg(TEXT)),
+        lines,
+        focus_line,
+        app.popup_scroll,
+        true,
     );
 }
 
@@ -5931,14 +8326,22 @@ mod ui_tests {
 
     #[test]
     fn truncate_url_passthrough_when_fits() {
-        assert_eq!(truncate_url("http://localhost:8484", 45), "http://localhost:8484");
+        assert_eq!(
+            truncate_url("http://localhost:8484", 45),
+            "http://localhost:8484"
+        );
     }
 
     #[test]
     fn truncate_url_elides_middle() {
         let long = "http://very-long-orrchestrator-host.example.com:8484/login";
         let out = truncate_url(long, 30);
-        assert!(out.chars().count() <= 30, "got {} ({} chars)", out, out.chars().count());
+        assert!(
+            out.chars().count() <= 30,
+            "got {} ({} chars)",
+            out,
+            out.chars().count()
+        );
         assert!(out.starts_with("http://"));
         assert!(out.contains('…'));
         // Tail (path) should still be present.

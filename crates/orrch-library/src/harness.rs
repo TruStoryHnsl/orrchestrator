@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// The control points orrchestrator can exert on a harness (CTX-004). Each is
 /// an independent capability bit. Default = all false (a harness we can only
@@ -107,7 +107,7 @@ impl FlexibilityMatrix {
 /// LOOP-013 cares about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
-    Read,         // Read/cat/grep/find/ls — always safe
+    Read, // Read/cat/grep/find/ls — always safe
     Grep,
     Find,
     Research,     // WebSearch/WebFetch/MCP research tools — safe
@@ -174,7 +174,9 @@ pub fn policy_enforceable_on(
             if matrix.tool_gating {
                 Ok(())
             } else {
-                Err("support loop requires a tool-gating-capable harness (CTX-004 tool_gating) to be provably non-destructive")
+                Err(
+                    "support loop requires a tool-gating-capable harness (CTX-004 tool_gating) to be provably non-destructive",
+                )
             }
         }
     }
@@ -218,12 +220,12 @@ pub fn load_harnesses(dir: &Path) -> Vec<HarnessEntry> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Some(mut h) = parse_harness_file(&path) {
-                    // Auto-detect availability
-                    h.available = which_exists(&h.command);
-                    harnesses.push(h);
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Some(mut h) = parse_harness_file(&path)
+            {
+                // Auto-detect availability
+                h.available = which_exists(&h.command);
+                harnesses.push(h);
             }
         }
     }
@@ -298,10 +300,7 @@ mod tests {
         // parse_harness_file should return None for last_checked when the
         // frontmatter has no such field (the real claude_code.md doesn't).
         let tmp = std::env::temp_dir().join("orrch_last_checked_test.md");
-        std::fs::write(
-            &tmp,
-            "---\nname: LCtest\ncommand: lctest\n---\n\nBody.\n",
-        ).unwrap();
+        std::fs::write(&tmp, "---\nname: LCtest\ncommand: lctest\n---\n\nBody.\n").unwrap();
         let parsed = parse_harness_file(&tmp).unwrap();
         assert_eq!(parsed.last_checked, None);
         let _ = std::fs::remove_file(&tmp);
@@ -313,7 +312,8 @@ mod tests {
         std::fs::write(
             &tmp,
             "---\nname: LCtest\ncommand: lctest\nlast_checked: 2026-04-08\n---\n\nBody.\n",
-        ).unwrap();
+        )
+        .unwrap();
         let parsed = parse_harness_file(&tmp).unwrap();
         assert_eq!(parsed.last_checked.as_deref(), Some("2026-04-08"));
         let _ = std::fs::remove_file(&tmp);
@@ -326,8 +326,7 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../library/harnesses")
             .join(name);
-        parse_harness_file(&path)
-            .unwrap_or_else(|| panic!("failed to parse {}", path.display()))
+        parse_harness_file(&path).unwrap_or_else(|| panic!("failed to parse {}", path.display()))
     }
 
     #[test]
@@ -386,9 +385,7 @@ mod tests {
 
     #[test]
     fn test_from_frontmatter_sets_exactly_named_keys() {
-        let m = FlexibilityMatrix::from_frontmatter(
-            "env_injection: true\nmcp_tools: true\n",
-        );
+        let m = FlexibilityMatrix::from_frontmatter("env_injection: true\nmcp_tools: true\n");
         assert!(m.env_injection);
         assert!(m.mcp_tools);
         assert!(!m.rpc_steering);
@@ -445,7 +442,10 @@ mod tests {
             ToolKind::BashReadOnly,
             ToolKind::GitCommit,
         ] {
-            assert!(is_tool_allowed(ToolPolicy::Full, kind), "Full must allow {kind:?}");
+            assert!(
+                is_tool_allowed(ToolPolicy::Full, kind),
+                "Full must allow {kind:?}"
+            );
         }
     }
 
@@ -483,8 +483,14 @@ mod tests {
 
     #[test]
     fn test_policy_enforceable_on() {
-        let gating = FlexibilityMatrix { tool_gating: true, ..Default::default() };
-        let no_gating = FlexibilityMatrix { tool_gating: false, ..Default::default() };
+        let gating = FlexibilityMatrix {
+            tool_gating: true,
+            ..Default::default()
+        };
+        let no_gating = FlexibilityMatrix {
+            tool_gating: false,
+            ..Default::default()
+        };
 
         // Full never needs a precondition.
         assert!(policy_enforceable_on(ToolPolicy::Full, &gating).is_ok());

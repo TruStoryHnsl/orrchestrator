@@ -118,10 +118,10 @@ pub fn quant_quality_penalty(q: &str) -> f64 {
 /// Port of params_b(model). parameters_raw>0 wins (raw/1e9); else parse the
 /// parameter_count string against ^([\d.]+)\s*([BKMGT]?)$ after trim+upper.
 pub fn params_b(model: &CatalogModel) -> f64 {
-    if let Some(raw) = model.parameters_raw {
-        if raw > 0 {
-            return raw as f64 / 1_000_000_000.0;
-        }
+    if let Some(raw) = model.parameters_raw
+        && raw > 0
+    {
+        return raw as f64 / 1_000_000_000.0;
     }
 
     let pc = model.parameter_count.trim().to_uppercase();
@@ -129,26 +129,26 @@ pub fn params_b(model: &CatalogModel) -> f64 {
         return 0.0;
     }
 
-    if let Some((num_str, suffix)) = parse_param_count(&pc) {
-        if let Ok(val) = num_str.parse::<f64>() {
-            return match suffix {
-                'B' => val,
-                'M' => val / 1000.0,
-                'K' => val / 1_000_000.0,
-                'T' => val * 1000.0,
-                _ => {
-                    // No unit. A bare number is conventionally a millions count
-                    // (e.g. "355" = 355M). Very large bare values are raw counts.
-                    if val >= 1_000_000.0 {
-                        val / 1_000_000_000.0 // raw count
-                    } else if val >= 1000.0 {
-                        val / 1000.0 // thousands of millions? treat as millions
-                    } else {
-                        val / 1000.0 // e.g. "355" → 0.355B
-                    }
+    if let Some((num_str, suffix)) = parse_param_count(&pc)
+        && let Ok(val) = num_str.parse::<f64>()
+    {
+        return match suffix {
+            'B' => val,
+            'M' => val / 1000.0,
+            'K' => val / 1_000_000.0,
+            'T' => val * 1000.0,
+            _ => {
+                // No unit. A bare number is conventionally a millions count
+                // (e.g. "355" = 355M). Very large bare values are raw counts.
+                if val >= 1_000_000.0 {
+                    val / 1_000_000_000.0 // raw count
+                } else if val >= 1000.0 {
+                    val / 1000.0 // thousands of millions? treat as millions
+                } else {
+                    val / 1000.0 // e.g. "355" → 0.355B
                 }
-            };
-        }
+            }
+        };
     }
     0.0
 }
@@ -192,12 +192,12 @@ fn parse_param_count(pc: &str) -> Option<(&str, char)> {
 
 /// Python _active_params_b, renamed public (no leading _).
 pub fn active_params_b(model: &CatalogModel) -> f64 {
-    if model.is_moe {
-        if let Some(active) = model.active_parameters {
-            // Python: `if is_moe and active_parameters` — 0 is falsy.
-            if active != 0 {
-                return active as f64 / 1_000_000_000.0;
-            }
+    if model.is_moe
+        && let Some(active) = model.active_parameters
+    {
+        // Python: `if is_moe and active_parameters` — 0 is falsy.
+        if active != 0 {
+            return active as f64 / 1_000_000_000.0;
         }
     }
     params_b(model)

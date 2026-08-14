@@ -19,12 +19,8 @@ pub fn shadow_git_dir(project_id: &str) -> PathBuf {
 }
 
 /// The default gitignore-style set of operational paths the shadow repo tracks.
-pub const DEFAULT_TRACKED_PATHS: &[&str] = &[
-    ".orrch/**",
-    "PLAN.md",
-    "DEVLOG.md",
-    "instructions_inbox.md",
-];
+pub const DEFAULT_TRACKED_PATHS: &[&str] =
+    &[".orrch/**", "PLAN.md", "DEVLOG.md", "instructions_inbox.md"];
 
 const TRACKED_FILE_NAME: &str = "orrch_tracked_paths";
 
@@ -68,7 +64,10 @@ impl ShadowRepo {
 
             // Persist default tracked set if none recorded yet.
             if repo.tracked.is_empty() {
-                repo.tracked = DEFAULT_TRACKED_PATHS.iter().map(|s| s.to_string()).collect();
+                repo.tracked = DEFAULT_TRACKED_PATHS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
                 write_tracked(&git_dir, &repo.tracked)?;
             }
 
@@ -78,16 +77,16 @@ impl ShadowRepo {
                 .args(["commit", "--allow-empty", "-m", "shadow: init"])
                 .output()?;
             if !out.status.success() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "shadow init commit failed: {}",
-                        String::from_utf8_lossy(&out.stderr)
-                    ),
-                ));
+                return Err(io::Error::other(format!(
+                    "shadow init commit failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                )));
             }
         } else if repo.tracked.is_empty() {
-            repo.tracked = DEFAULT_TRACKED_PATHS.iter().map(|s| s.to_string()).collect();
+            repo.tracked = DEFAULT_TRACKED_PATHS
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         }
 
         Ok(repo)
@@ -104,7 +103,10 @@ impl ShadowRepo {
         }
         let mut tracked = load_tracked(&git_dir);
         if tracked.is_empty() {
-            tracked = DEFAULT_TRACKED_PATHS.iter().map(|s| s.to_string()).collect();
+            tracked = DEFAULT_TRACKED_PATHS
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         }
         Ok(ShadowRepo {
             git_dir,
@@ -148,10 +150,10 @@ impl ShadowRepo {
             }
             let out = add.output()?;
             if !out.status.success() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("shadow add failed: {}", String::from_utf8_lossy(&out.stderr)),
-                ));
+                return Err(io::Error::other(format!(
+                    "shadow add failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                )));
             }
         }
 
@@ -165,10 +167,10 @@ impl ShadowRepo {
         }
         let st = status.output()?;
         if !st.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("shadow status failed: {}", String::from_utf8_lossy(&st.stderr)),
-            ));
+            return Err(io::Error::other(format!(
+                "shadow status failed: {}",
+                String::from_utf8_lossy(&st.stderr)
+            )));
         }
         if st.stdout.is_empty() {
             return Ok(None);
@@ -176,20 +178,22 @@ impl ShadowRepo {
 
         let cm = self.git().args(["commit", "-m", message]).output()?;
         if !cm.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("shadow commit failed: {}", String::from_utf8_lossy(&cm.stderr)),
-            ));
+            return Err(io::Error::other(format!(
+                "shadow commit failed: {}",
+                String::from_utf8_lossy(&cm.stderr)
+            )));
         }
 
         let rev = self.git().args(["rev-parse", "--short", "HEAD"]).output()?;
         if !rev.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("shadow rev-parse failed: {}", String::from_utf8_lossy(&rev.stderr)),
-            ));
+            return Err(io::Error::other(format!(
+                "shadow rev-parse failed: {}",
+                String::from_utf8_lossy(&rev.stderr)
+            )));
         }
-        Ok(Some(String::from_utf8_lossy(&rev.stdout).trim().to_string()))
+        Ok(Some(
+            String::from_utf8_lossy(&rev.stdout).trim().to_string(),
+        ))
     }
 
     /// HARD INVARIANT CHECK. Returns true iff the project's MAIN repo shows
@@ -197,10 +201,10 @@ impl ShadowRepo {
     /// stray `.git` for the shadow inside the project.
     pub fn is_project_tree_clean(&self) -> io::Result<bool> {
         // (a) shadow git_dir must never be inside work_tree.
-        if let (Ok(gd), Ok(wt)) = (self.git_dir.canonicalize(), self.work_tree.canonicalize()) {
-            if gd.starts_with(&wt) {
-                return Ok(false);
-            }
+        if let (Ok(gd), Ok(wt)) = (self.git_dir.canonicalize(), self.work_tree.canonicalize())
+            && gd.starts_with(&wt)
+        {
+            return Ok(false);
         }
 
         // (b) project's own git (if any): status --porcelain must not list any
@@ -266,25 +270,21 @@ impl ShadowRepo {
     fn status_pathspecs(&self) -> Vec<String> {
         let mut specs: Vec<String> = self.existing_pathspecs();
         // Add pathspecs known to the index (covers deletions of tracked files).
-        let ls = self
-            .git()
-            .args(["ls-files"])
-            .output()
-            .ok();
-        if let Some(ls) = ls {
-            if ls.status.success() {
-                let listed = String::from_utf8_lossy(&ls.stdout);
-                for g in &self.tracked {
-                    let base = Self::glob_to_pathspec(g);
-                    if base.is_empty() {
-                        continue;
-                    }
-                    let in_index = listed.lines().any(|l| {
-                        l == base || l.starts_with(&format!("{base}/"))
-                    });
-                    if in_index && !specs.contains(&base) {
-                        specs.push(base);
-                    }
+        let ls = self.git().args(["ls-files"]).output().ok();
+        if let Some(ls) = ls
+            && ls.status.success()
+        {
+            let listed = String::from_utf8_lossy(&ls.stdout);
+            for g in &self.tracked {
+                let base = Self::glob_to_pathspec(g);
+                if base.is_empty() {
+                    continue;
+                }
+                let in_index = listed
+                    .lines()
+                    .any(|l| l == base || l.starts_with(&format!("{base}/")));
+                if in_index && !specs.contains(&base) {
+                    specs.push(base);
                 }
             }
         }
@@ -332,10 +332,10 @@ impl ShadowRepo {
     fn git_config(&self, key: &str, val: &str) -> io::Result<()> {
         let out = self.git().args(["config", key, val]).output()?;
         if !out.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("git config {key} failed: {}", String::from_utf8_lossy(&out.stderr)),
-            ));
+            return Err(io::Error::other(format!(
+                "git config {key} failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
         }
         Ok(())
     }
@@ -362,19 +362,16 @@ fn run_git_init(git_dir: &Path) -> io::Result<()> {
             .arg(git_dir)
             .output()?;
         if !out2.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("git init failed: {}", String::from_utf8_lossy(&out2.stderr)),
-            ));
+            return Err(io::Error::other(format!(
+                "git init failed: {}",
+                String::from_utf8_lossy(&out2.stderr)
+            )));
         }
         // Point HEAD at master.
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/master\n")?;
         return Ok(());
     }
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        format!("git init failed: {stderr}"),
-    ))
+    Err(io::Error::other(format!("git init failed: {stderr}")))
 }
 
 fn load_tracked(git_dir: &Path) -> Vec<String> {
@@ -488,7 +485,19 @@ mod tests {
             ".orrch/\nPLAN.md\nDEVLOG.md\ninstructions_inbox.md\n",
         );
         git_in(proj.path(), &["add", "-A"]);
-        git_in(proj.path(), &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]);
+        git_in(
+            proj.path(),
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "base",
+            ],
+        );
 
         let shadow = ShadowRepo::init(proj.path(), "proj-test").unwrap();
 

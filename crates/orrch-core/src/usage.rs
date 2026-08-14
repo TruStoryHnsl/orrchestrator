@@ -77,6 +77,12 @@ pub struct UsageTracker {
     pub throttled: HashMap<String, String>,
 }
 
+impl Default for UsageTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UsageTracker {
     pub fn new() -> Self {
         Self {
@@ -98,8 +104,7 @@ impl UsageTracker {
             .create(true)
             .append(true)
             .open(&self.log_path)?;
-        let line = serde_json::to_string(record)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let line = serde_json::to_string(record).map_err(std::io::Error::other)?;
         writeln!(file, "{}", line)?;
         Ok(())
     }
@@ -151,13 +156,11 @@ impl UsageTracker {
                         _ => {}
                     }
                 }
-                UsageEvent::ApiCall { .. } => {
-                    match (&entry.last_used, &rec.timestamp) {
-                        (None, ts) => entry.last_used = Some(ts.clone()),
-                        (Some(prev), ts) if ts > prev => entry.last_used = Some(ts.clone()),
-                        _ => {}
-                    }
-                }
+                UsageEvent::ApiCall { .. } => match (&entry.last_used, &rec.timestamp) {
+                    (None, ts) => entry.last_used = Some(ts.clone()),
+                    (Some(prev), ts) if ts > prev => entry.last_used = Some(ts.clone()),
+                    _ => {}
+                },
             }
         }
 
@@ -195,26 +198,38 @@ impl UsageTracker {
 
     /// Set default rate limits for known providers.
     pub fn set_defaults(&mut self) {
-        self.rate_limits.insert("Anthropic".into(), RateLimitConfig {
-            requests_per_min: 50,
-            tokens_per_min: 80_000,
-            cooldown_secs: 60,
-        });
-        self.rate_limits.insert("Google".into(), RateLimitConfig {
-            requests_per_min: 30,
-            tokens_per_min: 0,
-            cooldown_secs: 60,
-        });
-        self.rate_limits.insert("Mistral".into(), RateLimitConfig {
-            requests_per_min: 30,
-            tokens_per_min: 0,
-            cooldown_secs: 60,
-        });
-        self.rate_limits.insert("OpenAI".into(), RateLimitConfig {
-            requests_per_min: 60,
-            tokens_per_min: 100_000,
-            cooldown_secs: 60,
-        });
+        self.rate_limits.insert(
+            "Anthropic".into(),
+            RateLimitConfig {
+                requests_per_min: 50,
+                tokens_per_min: 80_000,
+                cooldown_secs: 60,
+            },
+        );
+        self.rate_limits.insert(
+            "Google".into(),
+            RateLimitConfig {
+                requests_per_min: 30,
+                tokens_per_min: 0,
+                cooldown_secs: 60,
+            },
+        );
+        self.rate_limits.insert(
+            "Mistral".into(),
+            RateLimitConfig {
+                requests_per_min: 30,
+                tokens_per_min: 0,
+                cooldown_secs: 60,
+            },
+        );
+        self.rate_limits.insert(
+            "OpenAI".into(),
+            RateLimitConfig {
+                requests_per_min: 60,
+                tokens_per_min: 100_000,
+                cooldown_secs: 60,
+            },
+        );
     }
 
     /// Record a request to a provider (for throttle tracking).
@@ -613,11 +628,14 @@ mod tests {
     #[test]
     fn test_usage_tracker_basic() {
         let mut tracker = UsageTracker::new();
-        tracker.set_rate_limit("TestProvider", RateLimitConfig {
-            requests_per_min: 5,
-            tokens_per_min: 0,
-            cooldown_secs: 30,
-        });
+        tracker.set_rate_limit(
+            "TestProvider",
+            RateLimitConfig {
+                requests_per_min: 5,
+                tokens_per_min: 0,
+                cooldown_secs: 30,
+            },
+        );
 
         for _ in 0..4 {
             tracker.record_request("TestProvider", 100);
@@ -634,11 +652,14 @@ mod tests {
     #[test]
     fn test_token_limit() {
         let mut tracker = UsageTracker::new();
-        tracker.set_rate_limit("TokenProvider", RateLimitConfig {
-            requests_per_min: 100,
-            tokens_per_min: 1000,
-            cooldown_secs: 60,
-        });
+        tracker.set_rate_limit(
+            "TokenProvider",
+            RateLimitConfig {
+                requests_per_min: 100,
+                tokens_per_min: 1000,
+                cooldown_secs: 60,
+            },
+        );
 
         tracker.record_request("TokenProvider", 500);
         assert!(tracker.check_throttle().is_empty());

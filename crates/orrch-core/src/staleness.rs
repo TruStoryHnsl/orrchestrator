@@ -107,13 +107,15 @@ pub fn start_monitor(info: BuildInfo) {
 
     std::thread::Builder::new()
         .name("orrch-staleness".into())
-        .spawn(move || loop {
-            let stale = scan(&repo_root, build_ts);
-            if let Ok(mut st) = state().write() {
-                st.stale_files = stale;
-                st.last_scan = Some(SystemTime::now());
+        .spawn(move || {
+            loop {
+                let stale = scan(&repo_root, build_ts);
+                if let Ok(mut st) = state().write() {
+                    st.stale_files = stale;
+                    st.last_scan = Some(SystemTime::now());
+                }
+                std::thread::sleep(interval);
             }
-            std::thread::sleep(interval);
         })
         .ok();
 }
@@ -158,14 +160,7 @@ fn is_rebuild_required(path: &Path) -> bool {
 fn is_ignored_dir(name: &str) -> bool {
     matches!(
         name,
-        "target"
-            | ".git"
-            | "node_modules"
-            | ".idea"
-            | ".vscode"
-            | "dist"
-            | "build"
-            | "__pycache__"
+        "target" | ".git" | "node_modules" | ".idea" | ".vscode" | "dist" | "build" | "__pycache__"
     )
 }
 
@@ -197,14 +192,13 @@ fn walk(dir: &Path, build_ts: SystemTime, out: &mut Vec<PathBuf>, depth: usize) 
                 continue;
             }
             walk(&path, build_ts, out, depth + 1);
-        } else if ft.is_file() && is_rebuild_required(&path) {
-            if let Ok(meta) = entry.metadata() {
-                if let Ok(mtime) = meta.modified() {
-                    if mtime > build_ts {
-                        out.push(path);
-                    }
-                }
-            }
+        } else if ft.is_file()
+            && is_rebuild_required(&path)
+            && let Ok(meta) = entry.metadata()
+            && let Ok(mtime) = meta.modified()
+            && mtime > build_ts
+        {
+            out.push(path);
         }
     }
 }

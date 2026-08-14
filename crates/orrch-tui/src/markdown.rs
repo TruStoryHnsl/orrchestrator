@@ -77,7 +77,10 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
         output.push(line);
     };
 
-    let parser = Parser::new_ext(content, Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES);
+    let parser = Parser::new_ext(
+        content,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+    );
 
     for event in parser {
         match event {
@@ -119,13 +122,17 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
                 let new_style = top(&style_stack).add_modifier(Modifier::BOLD);
                 style_stack.push(new_style);
             }
-            Event::End(TagEnd::Strong) => { style_stack.pop(); }
+            Event::End(TagEnd::Strong) => {
+                style_stack.pop();
+            }
 
             Event::Start(Tag::Emphasis) => {
                 let new_style = top(&style_stack).add_modifier(Modifier::ITALIC);
                 style_stack.push(new_style);
             }
-            Event::End(TagEnd::Emphasis) => { style_stack.pop(); }
+            Event::End(TagEnd::Emphasis) => {
+                style_stack.pop();
+            }
 
             Event::Start(Tag::CodeBlock(_)) => {
                 in_code_block = true;
@@ -150,7 +157,10 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
             Event::Start(Tag::Item) => {
                 in_list_item = true;
                 // Bullet prefix in TEXT_DIM
-                spans.push(Span::styled("  • ".to_owned(), Style::default().fg(TEXT_DIM)));
+                spans.push(Span::styled(
+                    "  • ".to_owned(),
+                    Style::default().fg(TEXT_DIM),
+                ));
                 style_stack.push(Style::default().fg(TEXT));
             }
             Event::End(TagEnd::Item) => {
@@ -168,20 +178,23 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
             }
             Event::End(TagEnd::Link) => {
                 style_stack.pop();
-                if let Some(url) = link_url.take() {
-                    if !url.is_empty() {
-                        spans.push(Span::styled(
-                            format!(" ({url})"),
-                            Style::default().fg(TEXT_MUTED),
-                        ));
-                    }
+                if let Some(url) = link_url.take()
+                    && !url.is_empty()
+                {
+                    spans.push(Span::styled(
+                        format!(" ({url})"),
+                        Style::default().fg(TEXT_MUTED),
+                    ));
                 }
             }
 
             Event::Start(Tag::BlockQuote(_)) => {
                 let new_style = top(&style_stack).fg(TEXT_DIM);
                 style_stack.push(new_style);
-                spans.push(Span::styled("│ ".to_owned(), Style::default().fg(TEXT_MUTED)));
+                spans.push(Span::styled(
+                    "│ ".to_owned(),
+                    Style::default().fg(TEXT_MUTED),
+                ));
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 style_stack.pop();
@@ -210,10 +223,7 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
                         if i > 0 {
                             flush(&mut spans, &mut output);
                         }
-                        spans.push(Span::styled(
-                            format!("  {code_line}"),
-                            current_style,
-                        ));
+                        spans.push(Span::styled(format!("  {code_line}"), current_style));
                     }
                     // If original text ended with newline, flush now
                     if text_str.ends_with('\n') && !spans.is_empty() {
@@ -257,7 +267,11 @@ pub fn markdown_to_lines(content: &str) -> Vec<Line<'static>> {
     }
 
     // Suppress trailing blank lines
-    while output.last().map(|l: &Line| l.spans.is_empty()).unwrap_or(false) {
+    while output
+        .last()
+        .map(|l: &Line| l.spans.is_empty())
+        .unwrap_or(false)
+    {
         output.pop();
     }
 

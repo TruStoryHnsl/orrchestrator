@@ -40,7 +40,9 @@ pub struct OrrdealConfig {
 
 impl OrrdealConfig {
     pub fn path() -> PathBuf {
-        orrch_core::config::config_dir().join("orrdeal").join("config.json")
+        orrch_core::config::config_dir()
+            .join("orrdeal")
+            .join("config.json")
     }
 
     pub fn load() -> anyhow::Result<Self> {

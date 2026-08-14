@@ -39,7 +39,11 @@ impl<C: Clock + 'static> Worker<C> {
     }
 
     /// Enqueue a request with its descriptor. Errors if the queue is full.
-    pub async fn submit(&self, qr: QueuedRequest, desc: AffinityDescriptor) -> Result<(), EnqueueError> {
+    pub async fn submit(
+        &self,
+        qr: QueuedRequest,
+        desc: AffinityDescriptor,
+    ) -> Result<(), EnqueueError> {
         let id = qr.id;
         self.pending.lock().await.insert(id, qr);
         if let Err(e) = self.sched.lock().await.enqueue(id, desc) {
@@ -72,7 +76,9 @@ impl<C: Clock + 'static> Worker<C> {
                     _ = shutdown.notified() => return,
                 }
             };
-            let Some(qr) = self.pending.lock().await.remove(&id) else { continue };
+            let Some(qr) = self.pending.lock().await.remove(&id) else {
+                continue;
+            };
             match self.engine.complete(&qr.request).await {
                 Ok(mut stream) => {
                     while let Some(ev) = stream.next().await {

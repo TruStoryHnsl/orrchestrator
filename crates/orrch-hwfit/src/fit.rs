@@ -172,26 +172,26 @@ pub fn estimate_speed(
         system.backend.as_str()
     };
 
-    if let Some(bw) = bw {
-        if run_mode == "gpu" || run_mode == "cpu_offload" || run_mode == RUN_MODE_MOE_OFFLOAD {
-            let bpp = quant_bytes_per_param(quant);
-            let model_gb = pb * bpp;
-            if model_gb <= 0.0 {
-                return 0.0;
-            }
-            let efficiency = 0.55;
-            let raw_tps = (bw as f64 / model_gb) * efficiency;
-            let mode_factor = if run_mode == "cpu_offload" {
-                0.5
-            } else if run_mode == RUN_MODE_MOE_OFFLOAD {
-                moe_offload_speed_factor(model).unwrap_or(0.65)
-            } else if is_moe {
-                0.8
-            } else {
-                1.0
-            };
-            return raw_tps * mode_factor;
+    if let Some(bw) = bw
+        && (run_mode == "gpu" || run_mode == "cpu_offload" || run_mode == RUN_MODE_MOE_OFFLOAD)
+    {
+        let bpp = quant_bytes_per_param(quant);
+        let model_gb = pb * bpp;
+        if model_gb <= 0.0 {
+            return 0.0;
         }
+        let efficiency = 0.55;
+        let raw_tps = (bw as f64 / model_gb) * efficiency;
+        let mode_factor = if run_mode == "cpu_offload" {
+            0.5
+        } else if run_mode == RUN_MODE_MOE_OFFLOAD {
+            moe_offload_speed_factor(model).unwrap_or(0.65)
+        } else if is_moe {
+            0.8
+        } else {
+            1.0
+        };
+        return raw_tps * mode_factor;
     }
 
     if run_mode == RUN_MODE_DISK_STREAM {
@@ -282,15 +282,16 @@ fn try_moe_offload_at_or_below(
 
     let mut cur_ctx = ctx;
     loop {
-        if let Some((resident_gb, full_weight_gb)) = moe_offload_memory_gb(model, quant, cur_ctx) {
-            if resident_gb <= gpu_vram && full_weight_gb <= available_ram {
-                return Some((
-                    RUN_MODE_MOE_OFFLOAD.to_string(),
-                    quant.to_string(),
-                    cur_ctx,
-                    resident_gb,
-                ));
-            }
+        if let Some((resident_gb, full_weight_gb)) = moe_offload_memory_gb(model, quant, cur_ctx)
+            && resident_gb <= gpu_vram
+            && full_weight_gb <= available_ram
+        {
+            return Some((
+                RUN_MODE_MOE_OFFLOAD.to_string(),
+                quant.to_string(),
+                cur_ctx,
+                resident_gb,
+            ));
         }
 
         if cur_ctx < 2048 {
@@ -511,11 +512,7 @@ pub fn try_quant_at(
 
 /// _quant_bits: approximate bit-width of a quant label. 0 = unknown.
 pub fn quant_bits(q: &str) -> u32 {
-    let qu = q
-        .to_uppercase()
-        .replace('-', "")
-        .replace('_', "")
-        .replace(' ', "");
+    let qu = q.to_uppercase().replace(['-', '_', ' '], "");
     // GGUF k-quants + float formats
     if qu.starts_with("Q8") || qu.contains("FP8") {
         return 8;
@@ -572,17 +569,17 @@ pub fn quant_bits(q: &str) -> u32 {
             } else {
                 digits
             };
-            if let Ok(b) = digits.parse::<u32>() {
-                if !digits.is_empty() {
-                    found = Some(b);
-                }
+            if let Ok(b) = digits.parse::<u32>()
+                && !digits.is_empty()
+            {
+                found = Some(b);
             }
         }
     }
-    if let Some(b) = found {
-        if (2..=16).contains(&b) {
-            return b;
-        }
+    if let Some(b) = found
+        && (2..=16).contains(&b)
+    {
+        return b;
     }
     0
 }
@@ -693,13 +690,12 @@ pub fn analyze_model(
                     break;
                 }
             }
-        } else if is_moe {
-            if let Some(idx) = QUANT_HIERARCHY.iter().position(|&q| q == quant_to_try) {
-                for q in &QUANT_HIERARCHY[idx + 1..] {
-                    result = try_quant_at(model, q, ctx, effective_vram, eff_ram);
-                    if result.is_some() {
-                        break;
-                    }
+        } else if is_moe && let Some(idx) = QUANT_HIERARCHY.iter().position(|&q| q == quant_to_try)
+        {
+            for q in &QUANT_HIERARCHY[idx + 1..] {
+                result = try_quant_at(model, q, ctx, effective_vram, eff_ram);
+                if result.is_some() {
+                    break;
                 }
             }
         }

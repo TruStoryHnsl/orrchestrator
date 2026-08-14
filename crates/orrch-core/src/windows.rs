@@ -66,8 +66,10 @@ pub fn ensure_session(cat: SessionCategory) -> bool {
 
     // Bind F9 to jump to most urgent window in this session
     // Use string concat to avoid Rust interpolating #{...} as format args
-    let f9_cmd = "tmux select-window -t ".to_string() + name
-        + ":$(tmux list-windows -t " + name
+    let f9_cmd = "tmux select-window -t ".to_string()
+        + name
+        + ":$(tmux list-windows -t "
+        + name
         + " -F '#{window_index}' | head -1)";
     let _ = Command::new("tmux")
         .args(["bind-key", "-T", "root", "F9", "run-shell", &f9_cmd])
@@ -77,7 +79,15 @@ pub fn ensure_session(cat: SessionCategory) -> bool {
 
     // Launch an alacritty window attached to this tmux session
     let _ = Command::new("alacritty")
-        .args(["--title", &format!("[orrch] {}", cat.label()), "-e", "tmux", "attach-session", "-t", name])
+        .args([
+            "--title",
+            &format!("[orrch] {}", cat.label()),
+            "-e",
+            "tmux",
+            "attach-session",
+            "-t",
+            name,
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
@@ -112,7 +122,16 @@ pub fn spawn_in_category(
         .status();
 
     let output = Command::new("tmux")
-        .args(["new-window", "-t", name, "-n", &clean_name, "bash", "-c", shell_cmd])
+        .args([
+            "new-window",
+            "-t",
+            name,
+            "-n",
+            &clean_name,
+            "bash",
+            "-c",
+            shell_cmd,
+        ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()?;
@@ -158,10 +177,18 @@ pub fn spawn_tmux_session(
             ));
             let _ = std::fs::write(&tmp, g);
             Some(tmp)
-        } else { None }
-    } else { None };
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-    let backend_str = backend_cmd.iter().map(|a| shell_escape(a)).collect::<Vec<_>>().join(" ");
+    let backend_str = backend_cmd
+        .iter()
+        .map(|a| shell_escape(a))
+        .collect::<Vec<_>>()
+        .join(" ");
 
     let shell_cmd = if let Some(ref gf) = goal_file {
         format!(
@@ -216,9 +243,8 @@ pub fn spawn_vim_in_tmux(file_path: &Path, window_name: &str) -> anyhow::Result<
 
 /// Return the directory containing workflow dispatcher scripts.
 pub fn workflow_scripts_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".into());
-    std::path::PathBuf::from(home)
-        .join("projects/orrchestrator/library/tools")
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join("projects/orrchestrator/library/tools")
 }
 
 /// List available workflow dispatcher scripts.
@@ -234,8 +260,10 @@ pub fn list_workflows() -> Vec<(String, String)> {
                 // run_workflow.sh → "develop-feature"
                 // run_intake.sh → "instruction-intake"
                 let display = name
-                    .strip_prefix("run_").unwrap_or(&name)
-                    .strip_suffix(".sh").unwrap_or(&name)
+                    .strip_prefix("run_")
+                    .unwrap_or(&name)
+                    .strip_suffix(".sh")
+                    .unwrap_or(&name)
                     .replace('_', "-");
                 workflows.push((name, display));
             }
@@ -248,7 +276,11 @@ pub fn list_workflows() -> Vec<(String, String)> {
 /// Spawn a workflow dispatcher script in the Proc category.
 /// `workflow_script` is the filename (e.g. "run_workflow.sh").
 /// `goal` is passed as the second argument to the script.
-pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> anyhow::Result<String> {
+pub fn spawn_workflow(
+    project_dir: &Path,
+    workflow_script: &str,
+    goal: &str,
+) -> anyhow::Result<String> {
     let dir_str = project_dir.to_string_lossy();
     let script = workflow_scripts_dir().join(workflow_script);
 
@@ -257,8 +289,10 @@ pub fn spawn_workflow(project_dir: &Path, workflow_script: &str, goal: &str) -> 
     }
 
     let window_name = workflow_script
-        .strip_prefix("run_").unwrap_or(workflow_script)
-        .strip_suffix(".sh").unwrap_or(workflow_script);
+        .strip_prefix("run_")
+        .unwrap_or(workflow_script)
+        .strip_suffix(".sh")
+        .unwrap_or(workflow_script);
 
     let cmd = format!(
         "cd {} && bash {} {} {}",
@@ -349,9 +383,13 @@ pub fn hub_vim_open(file_path: &Path) -> anyhow::Result<()> {
         let output = Command::new("tmux")
             .args([
                 "new-window",
-                "-t", session,
-                "-n", HUB_EDIT_WINDOW,
-                "bash", "-c", &cmd,
+                "-t",
+                session,
+                "-n",
+                HUB_EDIT_WINDOW,
+                "bash",
+                "-c",
+                &cmd,
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -451,38 +489,64 @@ pub fn list_sessions_in(cat: SessionCategory) -> Vec<ManagedSession> {
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines().filter_map(|line| {
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() < 5 { return None; }
-        let index: u32 = parts[0].parse().unwrap_or(0);
-        let win_name = parts[1].to_string();
-        let cwd = parts[2].to_string();
-        let active = parts[3] == "1";
-        let _cmd = parts[4];
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 5 {
+                return None;
+            }
+            let index: u32 = parts[0].parse().unwrap_or(0);
+            let win_name = parts[1].to_string();
+            let cwd = parts[2].to_string();
+            let active = parts[3] == "1";
+            let _cmd = parts[4];
 
-        // Skip the default "hub" placeholder window
-        if win_name == "hub" { return None; }
+            // Skip the default "hub" placeholder window
+            if win_name == "hub" {
+                return None;
+            }
 
-        // Infer status from last pane output
-        let (status, last_output) = infer_session_status(name, index);
+            // Infer status from last pane output
+            let (status, last_output) = infer_session_status(name, index);
 
-        Some(ManagedSession { category: cat, index, name: win_name, cwd, active, status, last_output })
-    }).collect()
+            Some(ManagedSession {
+                category: cat,
+                index,
+                name: win_name,
+                cwd,
+                active,
+                status,
+                last_output,
+            })
+        })
+        .collect()
 }
 
 /// Infer whether a session is working, idle, or waiting by reading its pane content.
 fn infer_session_status(tmux_session: &str, window_index: u32) -> (SessionStatus, String) {
     let output = Command::new("tmux")
-        .args(["capture-pane", "-t", &format!("{tmux_session}:{window_index}"), "-p"])
+        .args([
+            "capture-pane",
+            "-t",
+            &format!("{tmux_session}:{window_index}"),
+            "-p",
+        ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output();
 
-    let Ok(out) = output else { return (SessionStatus::Dead, String::new()); };
-    if !out.status.success() { return (SessionStatus::Dead, String::new()); }
+    let Ok(out) = output else {
+        return (SessionStatus::Dead, String::new());
+    };
+    if !out.status.success() {
+        return (SessionStatus::Dead, String::new());
+    }
 
     let text = String::from_utf8_lossy(&out.stdout);
-    let last_line = text.lines().rev()
+    let last_line = text
+        .lines()
+        .rev()
         .find(|l| {
             let t = l.trim();
             !t.is_empty() && !t.starts_with("───") && !t.starts_with("⏵")
@@ -509,7 +573,9 @@ fn infer_session_status(tmux_session: &str, window_index: u32) -> (SessionStatus
     };
 
     // Collect up to 2 recent non-empty, non-decoration lines for display.
-    let recent_lines: Vec<String> = text.lines().rev()
+    let recent_lines: Vec<String> = text
+        .lines()
+        .rev()
         .filter(|l| {
             let t = l.trim();
             !t.is_empty() && !t.starts_with("───") && !t.starts_with("⏵")
@@ -518,7 +584,11 @@ fn infer_session_status(tmux_session: &str, window_index: u32) -> (SessionStatus
         .map(|l| l.trim().chars().take(80).collect())
         .collect();
     // Reverse so earlier line comes first (chronological order).
-    let display = recent_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
+    let display = recent_lines
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n");
     (status, display)
 }
 
@@ -670,11 +740,13 @@ pub fn capture_pane_ansi(cat: SessionCategory, window_index: u32, lines: u32) ->
     let output = Command::new("tmux")
         .args([
             "capture-pane",
-            "-t", &target,
-            "-e",       // include escape sequences (colors)
-            "-J",       // join wrapped lines
-            "-p",       // print to stdout instead of buffer
-            "-S", &start,
+            "-t",
+            &target,
+            "-e", // include escape sequences (colors)
+            "-J", // join wrapped lines
+            "-p", // print to stdout instead of buffer
+            "-S",
+            &start,
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -691,7 +763,9 @@ pub fn capture_pane_ansi(cat: SessionCategory, window_index: u32, lines: u32) ->
 pub fn kill_all_managed_tmux_sessions() {
     for cat in SessionCategory::all() {
         let name = cat.tmux_name();
-        if !tmux_has_session(name) { continue; }
+        if !tmux_has_session(name) {
+            continue;
+        }
         let result = Command::new("tmux")
             .args(["kill-session", "-t", name])
             .stdout(std::process::Stdio::null())
@@ -715,7 +789,9 @@ pub struct SessionRecord {
 
 fn orrch_config_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    std::path::PathBuf::from(home).join(".config").join("orrchestrator")
+    std::path::PathBuf::from(home)
+        .join(".config")
+        .join("orrchestrator")
 }
 
 fn session_records_path() -> std::path::PathBuf {
@@ -729,7 +805,9 @@ pub fn record_spawned_window(cat: &str, window_name: &str) {
 
     // Purge closed windows before appending so the file never accumulates orphans.
     records.retain(|rec| {
-        if !tmux_has_session(&rec.category) { return false; }
+        if !tmux_has_session(&rec.category) {
+            return false;
+        }
         tmux_window_exists(&rec.category, &rec.window_name)
     });
 
@@ -758,9 +836,12 @@ pub fn purge_orphaned_sessions() -> usize {
     let path = session_records_path();
     let records = load_session_records();
     let before = records.len();
-    let live: Vec<SessionRecord> = records.into_iter().filter(|rec| {
-        tmux_has_session(&rec.category) && tmux_window_exists(&rec.category, &rec.window_name)
-    }).collect();
+    let live: Vec<SessionRecord> = records
+        .into_iter()
+        .filter(|rec| {
+            tmux_has_session(&rec.category) && tmux_window_exists(&rec.category, &rec.window_name)
+        })
+        .collect();
     let purged = before - live.len();
     if purged > 0 {
         save_session_records(&path, &live);
@@ -776,7 +857,9 @@ pub fn clear_session_records() {
 /// Load session records from disk. Returns empty vec if file is missing or malformed.
 pub fn load_session_records() -> Vec<SessionRecord> {
     let path = session_records_path();
-    let Ok(data) = std::fs::read_to_string(&path) else { return Vec::new(); };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     serde_json::from_str(&data).unwrap_or_default()
 }
 
@@ -793,10 +876,14 @@ fn tmux_window_exists(session: &str, window_name: &str) -> bool {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output();
-    output.ok().filter(|o| o.status.success()).map(|o| {
-        let text = String::from_utf8_lossy(&o.stdout);
-        text.lines().any(|l| l.trim() == window_name)
-    }).unwrap_or(false)
+    output
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            let text = String::from_utf8_lossy(&o.stdout);
+            text.lines().any(|l| l.trim() == window_name)
+        })
+        .unwrap_or(false)
 }
 
 // ─── Orphan Detection ───────────────────────────────────────────────
@@ -804,9 +891,12 @@ fn tmux_window_exists(session: &str, window_name: &str) -> bool {
 /// Detect session records that refer to tmux windows that no longer exist.
 /// Returns the orphaned records.
 pub fn detect_orphaned_sessions() -> Vec<SessionRecord> {
-    load_session_records().into_iter().filter(|rec| {
-        !tmux_has_session(&rec.category) || !tmux_window_exists(&rec.category, &rec.window_name)
-    }).collect()
+    load_session_records()
+        .into_iter()
+        .filter(|rec| {
+            !tmux_has_session(&rec.category) || !tmux_window_exists(&rec.category, &rec.window_name)
+        })
+        .collect()
 }
 
 // ─── Jump to Most Urgent Window ─────────────────────────────────────
@@ -815,7 +905,9 @@ pub fn detect_orphaned_sessions() -> Vec<SessionRecord> {
 /// (WaitingForInput > Working > Idle > Dead).
 pub fn jump_to_most_urgent(cat: SessionCategory) {
     let sessions = list_sessions_in(cat);
-    if sessions.is_empty() { return; }
+    if sessions.is_empty() {
+        return;
+    }
     let priority = |s: &SessionStatus| match s {
         SessionStatus::WaitingForInput => 0,
         SessionStatus::Working => 1,
@@ -859,9 +951,8 @@ fn apply_custom_status_bar(session_name: &str) {
     // Install status script if not present
     if !script_dst.exists() {
         // Try to copy from library/tools relative to the binary or projects dir
-        let candidates = [
-            std::env::var("HOME").unwrap_or_default() + "/projects/orrchestrator/library/tools/orrch-tmux-status.sh",
-        ];
+        let candidates = [std::env::var("HOME").unwrap_or_default()
+            + "/projects/orrchestrator/library/tools/orrch-tmux-status.sh"];
         for src in &candidates {
             if std::path::Path::new(src).exists() {
                 let _ = std::fs::create_dir_all(&config_dir);
@@ -915,9 +1006,14 @@ fn kdotool_search(title: &str) -> Option<String> {
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
-    if !output.status.success() { return None; }
+    if !output.status.success() {
+        return None;
+    }
     let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().next().map(|l| l.trim().to_string()).filter(|s| !s.is_empty())
+    text.lines()
+        .next()
+        .map(|l| l.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn kdotool_activate(window_id: String) -> bool {
@@ -994,44 +1090,69 @@ pub fn start_session_log(
 
 /// Load session log metadata from the log directory, newest first, up to `limit`.
 pub fn load_session_logs(log_dir: &Path, limit: usize) -> Vec<SessionLogMeta> {
-    let Ok(entries) = std::fs::read_dir(log_dir) else { return Vec::new(); };
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return Vec::new();
+    };
     let mut files: Vec<(u64, std::path::PathBuf)> = entries
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "log"))
         .filter_map(|e| {
             let mt = e.metadata().ok()?.modified().ok()?;
-            let secs = mt.duration_since(std::time::SystemTime::UNIX_EPOCH).ok()?.as_secs();
+            let secs = mt
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
             Some((secs, e.path()))
         })
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0));
     files.truncate(limit);
 
-    files.into_iter().filter_map(|(_, path)| {
-        let content = std::fs::read_to_string(&path).ok()?;
-        let mut name = String::new();
-        let mut category = String::new();
-        let mut started = 0u64;
-        let mut goal = String::new();
-        let mut attach_cmd = String::new();
-        for line in content.lines().take(10) {
-            if let Some(v) = line.strip_prefix("# Session: ") { name = v.to_string(); }
-            else if let Some(v) = line.strip_prefix("# Category: ") { category = v.to_string(); }
-            else if let Some(v) = line.strip_prefix("# Started: ") { started = v.parse().unwrap_or(0); }
-            else if let Some(v) = line.strip_prefix("# Attach: ") { attach_cmd = v.to_string(); }
-            else if let Some(v) = line.strip_prefix("# Goal: ") { goal = v.chars().take(120).collect(); }
-            else if line == "# ---" { break; }
-        }
-        if name.is_empty() { return None; }
-        Some(SessionLogMeta { path, name, category, started, goal, attach_cmd })
-    }).collect()
+    files
+        .into_iter()
+        .filter_map(|(_, path)| {
+            let content = std::fs::read_to_string(&path).ok()?;
+            let mut name = String::new();
+            let mut category = String::new();
+            let mut started = 0u64;
+            let mut goal = String::new();
+            let mut attach_cmd = String::new();
+            for line in content.lines().take(10) {
+                if let Some(v) = line.strip_prefix("# Session: ") {
+                    name = v.to_string();
+                } else if let Some(v) = line.strip_prefix("# Category: ") {
+                    category = v.to_string();
+                } else if let Some(v) = line.strip_prefix("# Started: ") {
+                    started = v.parse().unwrap_or(0);
+                } else if let Some(v) = line.strip_prefix("# Attach: ") {
+                    attach_cmd = v.to_string();
+                } else if let Some(v) = line.strip_prefix("# Goal: ") {
+                    goal = v.chars().take(120).collect();
+                } else if line == "# ---" {
+                    break;
+                }
+            }
+            if name.is_empty() {
+                return None;
+            }
+            Some(SessionLogMeta {
+                path,
+                name,
+                category,
+                started,
+                goal,
+                attach_cmd,
+            })
+        })
+        .collect()
 }
 
 /// Read the head (first `n` non-header lines) and tail (last `n` lines) from a log file.
 pub fn read_session_log_head_tail(path: &Path, n: usize) -> (Vec<String>, Vec<String>) {
     let content = std::fs::read_to_string(path).unwrap_or_default();
-    let lines: Vec<&str> = content.lines()
-        .skip_while(|l| l.starts_with('#'))  // skip header
+    let lines: Vec<&str> = content
+        .lines()
+        .skip_while(|l| l.starts_with('#')) // skip header
         .skip_while(|l| l.trim().is_empty()) // skip blank separator
         .collect();
     let head: Vec<String> = lines.iter().take(n).map(|l| l.to_string()).collect();
@@ -1044,16 +1165,31 @@ pub fn read_session_log_head_tail(path: &Path, n: usize) -> (Vec<String>, Vec<St
 // Keep TMUX_SESSION for backward compat during transition
 pub const TMUX_SESSION: &str = "orrch-dev";
 
-pub fn ensure_tmux_session() -> bool { ensure_session(SessionCategory::Dev) }
-pub fn list_tmux_windows() -> Vec<TmuxWindow> {
-    list_sessions_in(SessionCategory::Dev).into_iter().map(|s| TmuxWindow {
-        index: s.index, name: s.name, cwd: s.cwd, active: s.active,
-    }).collect()
+pub fn ensure_tmux_session() -> bool {
+    ensure_session(SessionCategory::Dev)
 }
-pub fn select_tmux_window(index: u32) -> bool { select_and_focus(SessionCategory::Dev, index) }
-pub fn kill_tmux_window(window_name: &str) -> bool { kill_session(SessionCategory::Dev, window_name) }
+pub fn list_tmux_windows() -> Vec<TmuxWindow> {
+    list_sessions_in(SessionCategory::Dev)
+        .into_iter()
+        .map(|s| TmuxWindow {
+            index: s.index,
+            name: s.name,
+            cwd: s.cwd,
+            active: s.active,
+        })
+        .collect()
+}
+pub fn select_tmux_window(index: u32) -> bool {
+    select_and_focus(SessionCategory::Dev, index)
+}
+pub fn kill_tmux_window(window_name: &str) -> bool {
+    kill_session(SessionCategory::Dev, window_name)
+}
 pub fn tmux_available() -> bool {
-    Command::new("which").arg("tmux").output().is_ok_and(|o| o.status.success())
+    Command::new("which")
+        .arg("tmux")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 #[derive(Debug, Clone)]
@@ -1070,7 +1206,9 @@ pub fn restore_and_raise(_: &str) {}
 pub fn toggle_minimize(_: &str) {}
 pub fn minimize_all_managed() {}
 pub fn restore_all_managed() {}
-pub fn bring_to_current_desktop(_: &str) -> bool { false }
+pub fn bring_to_current_desktop(_: &str) -> bool {
+    false
+}
 pub fn hide_window(_: &str) {}
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -1085,7 +1223,9 @@ fn tmux_has_session(name: &str) -> bool {
 }
 
 fn shell_escape(s: &str) -> String {
-    if s.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`') {
+    if s.contains(|c: char| {
+        c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`'
+    }) {
         format!("'{}'", s.replace('\'', "'\\''"))
     } else {
         s.to_string()
@@ -1169,8 +1309,10 @@ pub fn break_window_to_new_terminal(
         .args([
             "break-pane",
             "-d",
-            "-s", &src,
-            "-t", &format!("{new_session}:"),
+            "-s",
+            &src,
+            "-t",
+            &format!("{new_session}:"),
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

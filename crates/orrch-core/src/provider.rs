@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderKind {
     /// CLI-based provider using PTY (Claude CLI, Gemini CLI, Crush, OpenCode).
-    CliPty {
-        command: String,
-        flags: Vec<String>,
-    },
+    CliPty { command: String, flags: Vec<String> },
     /// Direct HTTP API provider (Anthropic API, OpenAI API).
     /// Stub — actual HTTP implementation comes in a future task.
     ApiHttp {

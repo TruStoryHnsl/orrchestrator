@@ -137,20 +137,25 @@ impl OperationExecution {
     pub fn progress_display(&self) -> String {
         let total = self.operation.steps.len();
         let completed = self.step_results.len();
-        let current_agent = self.next_steps()
+        let current_agent = self
+            .next_steps()
             .first()
             .map(|s| s.agent.as_str())
             .unwrap_or("done");
 
         match &self.state {
             OperationState::Idle => format!("{} [idle]", self.operation.name),
-            OperationState::Blocked(reason) => format!("{} [BLOCKED: {}]", self.operation.name, reason),
+            OperationState::Blocked(reason) => {
+                format!("{} [BLOCKED: {}]", self.operation.name, reason)
+            }
             OperationState::Running { .. } => format!(
                 "{} [{}/{}] — {} executing",
                 self.operation.name, completed, total, current_agent
             ),
             OperationState::Complete => format!("{} [complete]", self.operation.name),
-            OperationState::Interrupted(reason) => format!("{} [interrupted: {}]", self.operation.name, reason),
+            OperationState::Interrupted(reason) => {
+                format!("{} [interrupted: {}]", self.operation.name, reason)
+            }
         }
     }
 
@@ -268,21 +273,20 @@ pub fn resolve_step_for_dispatch(
                 .find(|a| a.agent_profile == step.agent)
         });
 
-    if let Some(node) = node {
-        if node.nested_workforce.is_some() {
-            if let Some(expansion) = expand_nested_workforce(workforce, all_workforces, &node.id) {
-                return ResolvedStep {
-                    step_index: step.index.clone(),
-                    agent_profile: expansion.output_agent_profile,
-                    nested_workforce: Some(expansion.inner_workforce),
-                    model_override: step.model_override.clone(),
-                };
-            }
-            // Expansion failed (missing inner, empty, etc.) — fall through to
-            // direct dispatch so the step still runs rather than silently
-            // disappearing.
-        }
+    if let Some(node) = node
+        && node.nested_workforce.is_some()
+        && let Some(expansion) = expand_nested_workforce(workforce, all_workforces, &node.id)
+    {
+        return ResolvedStep {
+            step_index: step.index.clone(),
+            agent_profile: expansion.output_agent_profile,
+            nested_workforce: Some(expansion.inner_workforce),
+            model_override: step.model_override.clone(),
+        };
     }
+    // Expansion failed (missing inner, empty, etc.) — fall through to
+    // direct dispatch so the step still runs rather than silently
+    // disappearing.
 
     ResolvedStep {
         step_index: step.index.clone(),
@@ -298,12 +302,11 @@ pub fn load_operations(dir: &std::path::Path) -> Vec<Operation> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Some(op) = crate::parser::parse_operation_markdown(&content) {
-                        ops.push(op);
-                    }
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(op) = crate::parser::parse_operation_markdown(&content)
+            {
+                ops.push(op);
             }
         }
     }
@@ -316,12 +319,11 @@ pub fn load_workforces(dir: &std::path::Path) -> Vec<crate::template::Workforce>
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "md") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Some(wf) = crate::parser::parse_workforce_markdown(&content) {
-                        workforces.push(wf);
-                    }
-                }
+            if path.extension().is_some_and(|e| e == "md")
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(wf) = crate::parser::parse_workforce_markdown(&content)
+            {
+                workforces.push(wf);
             }
         }
     }
@@ -340,10 +342,10 @@ pub fn load_teams(dir: &std::path::Path) -> Vec<crate::template::Team> {
             .collect();
         paths.sort();
         for path in paths {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Some(team) = crate::parser::parse_team_markdown(&content) {
-                    teams.push(team);
-                }
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(team) = crate::parser::parse_team_markdown(&content)
+            {
+                teams.push(team);
             }
         }
     }
@@ -404,10 +406,38 @@ mod tests {
             trigger: TriggerCondition::Manual,
             blocker: None,
             steps: vec![
-                Step { index: "1".into(), agent: "PM".into(), tool_or_skill: None, operation: "plan".into(), parallel_group: None, model_override: None },
-                Step { index: "2".into(), agent: "Dev".into(), tool_or_skill: None, operation: "code".into(), parallel_group: Some(1), model_override: None },
-                Step { index: "2".into(), agent: "Researcher".into(), tool_or_skill: None, operation: "research".into(), parallel_group: Some(1), model_override: None },
-                Step { index: "3".into(), agent: "Tester".into(), tool_or_skill: None, operation: "test".into(), parallel_group: None, model_override: None },
+                Step {
+                    index: "1".into(),
+                    agent: "PM".into(),
+                    tool_or_skill: None,
+                    operation: "plan".into(),
+                    parallel_group: None,
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Dev".into(),
+                    tool_or_skill: None,
+                    operation: "code".into(),
+                    parallel_group: Some(1),
+                    model_override: None,
+                },
+                Step {
+                    index: "2".into(),
+                    agent: "Researcher".into(),
+                    tool_or_skill: None,
+                    operation: "research".into(),
+                    parallel_group: Some(1),
+                    model_override: None,
+                },
+                Step {
+                    index: "3".into(),
+                    agent: "Tester".into(),
+                    tool_or_skill: None,
+                    operation: "test".into(),
+                    parallel_group: None,
+                    model_override: None,
+                },
             ],
             interrupts: vec![],
         }
@@ -444,18 +474,38 @@ mod tests {
         exec.start();
 
         // Complete step 1 (PM)
-        exec.advance(vec![StepResult { step_index: "1".into(), agent: "PM".into(), output: "plan done".into(), success: true }]);
+        exec.advance(vec![StepResult {
+            step_index: "1".into(),
+            agent: "PM".into(),
+            output: "plan done".into(),
+            success: true,
+        }]);
         assert_eq!(exec.current_step, 1);
 
         // Complete step 2 (parallel: Dev + Researcher)
         exec.advance(vec![
-            StepResult { step_index: "2".into(), agent: "Dev".into(), output: "code done".into(), success: true },
-            StepResult { step_index: "2".into(), agent: "Researcher".into(), output: "research done".into(), success: true },
+            StepResult {
+                step_index: "2".into(),
+                agent: "Dev".into(),
+                output: "code done".into(),
+                success: true,
+            },
+            StepResult {
+                step_index: "2".into(),
+                agent: "Researcher".into(),
+                output: "research done".into(),
+                success: true,
+            },
         ]);
         assert_eq!(exec.current_step, 3);
 
         // Complete step 3 (Tester)
-        exec.advance(vec![StepResult { step_index: "3".into(), agent: "Tester".into(), output: "tests pass".into(), success: true }]);
+        exec.advance(vec![StepResult {
+            step_index: "3".into(),
+            agent: "Tester".into(),
+            output: "tests pass".into(),
+            success: true,
+        }]);
         assert_eq!(exec.state, OperationState::Complete);
     }
 
@@ -468,7 +518,12 @@ mod tests {
         assert!(exec.progress_display().contains("[0/4]"));
         assert!(exec.progress_display().contains("PM executing"));
 
-        exec.advance(vec![StepResult { step_index: "1".into(), agent: "PM".into(), output: "done".into(), success: true }]);
+        exec.advance(vec![StepResult {
+            step_index: "1".into(),
+            agent: "PM".into(),
+            output: "done".into(),
+            success: true,
+        }]);
         assert!(exec.progress_display().contains("[1/4]"));
     }
 
@@ -517,7 +572,11 @@ operations:
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let mut path = std::env::temp_dir();
-        path.push(format!("orrch_wf_roundtrip_{}_{}.md", std::process::id(), nanos));
+        path.push(format!(
+            "orrch_wf_roundtrip_{}_{}.md",
+            std::process::id(),
+            nanos
+        ));
 
         // Export
         super::export_workforce_to_path(&wf_in, &path).expect("export succeeds");
@@ -556,7 +615,12 @@ operations:
         assert!(err.to_string().contains("failed to read workforce"));
     }
 
-    fn make_agent(id: &str, profile: &str, user_facing: bool, nested: Option<&str>) -> crate::template::AgentNode {
+    fn make_agent(
+        id: &str,
+        profile: &str,
+        user_facing: bool,
+        nested: Option<&str>,
+    ) -> crate::template::AgentNode {
         crate::template::AgentNode {
             id: id.into(),
             agent_profile: profile.into(),
@@ -565,7 +629,10 @@ operations:
         }
     }
 
-    fn make_workforce(name: &str, agents: Vec<crate::template::AgentNode>) -> crate::template::Workforce {
+    fn make_workforce(
+        name: &str,
+        agents: Vec<crate::template::AgentNode>,
+    ) -> crate::template::Workforce {
         crate::template::Workforce {
             name: name.into(),
             description: "test".into(),
@@ -580,7 +647,12 @@ operations:
     fn test_expand_nested_valid_ref() {
         let parent = make_workforce(
             "parent",
-            vec![make_agent("node_a", "Project Manager", false, Some("inner_team"))],
+            vec![make_agent(
+                "node_a",
+                "Project Manager",
+                false,
+                Some("inner_team"),
+            )],
         );
         let inner = make_workforce(
             "inner_team",
@@ -590,8 +662,8 @@ operations:
             ],
         );
         let all = vec![inner];
-        let expansion = super::expand_nested_workforce(&parent, &all, "node_a")
-            .expect("should resolve");
+        let expansion =
+            super::expand_nested_workforce(&parent, &all, "node_a").expect("should resolve");
         assert_eq!(expansion.output_agent_id, "lead");
         assert_eq!(expansion.output_agent_profile, "Software Engineer");
         assert_eq!(expansion.inner_workforce.name, "inner_team");
@@ -611,12 +683,14 @@ operations:
     fn test_expand_nested_missing_inner() {
         let parent = make_workforce(
             "parent",
-            vec![make_agent("node_a", "Project Manager", false, Some("missing_team"))],
+            vec![make_agent(
+                "node_a",
+                "Project Manager",
+                false,
+                Some("missing_team"),
+            )],
         );
-        let other = make_workforce(
-            "other_team",
-            vec![make_agent("x", "Developer", true, None)],
-        );
+        let other = make_workforce("other_team", vec![make_agent("x", "Developer", true, None)]);
         let all = vec![other];
         assert!(super::expand_nested_workforce(&parent, &all, "node_a").is_none());
     }
@@ -625,7 +699,12 @@ operations:
     fn test_expand_nested_fallback_first_agent() {
         let parent = make_workforce(
             "parent",
-            vec![make_agent("node_a", "Project Manager", false, Some("inner_team"))],
+            vec![make_agent(
+                "node_a",
+                "Project Manager",
+                false,
+                Some("inner_team"),
+            )],
         );
         let inner = make_workforce(
             "inner_team",
@@ -635,8 +714,8 @@ operations:
             ],
         );
         let all = vec![inner];
-        let expansion = super::expand_nested_workforce(&parent, &all, "node_a")
-            .expect("should resolve");
+        let expansion =
+            super::expand_nested_workforce(&parent, &all, "node_a").expect("should resolve");
         assert_eq!(expansion.output_agent_id, "first");
         assert_eq!(expansion.output_agent_profile, "Researcher");
     }
@@ -648,7 +727,11 @@ operations:
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let mut path = std::env::temp_dir();
-        path.push(format!("orrch_wf_invalid_{}_{}.md", std::process::id(), nanos));
+        path.push(format!(
+            "orrch_wf_invalid_{}_{}.md",
+            std::process::id(),
+            nanos
+        ));
 
         // Write obvious garbage (no frontmatter) to trigger parser None
         std::fs::write(&path, "this is not a workforce markdown file\n").expect("write garbage");

@@ -3,17 +3,17 @@ use crate::affinity::classify;
 use crate::server::RelayState;
 use crate::types::{CompletionRequest, QueuedRequest, TokenEvent};
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
     response::{
-        sse::{Event, Sse},
         IntoResponse, Response,
+        sse::{Event, Sse},
     },
     routing::{get, post},
-    Json, Router,
 };
-use futures::stream::Stream;
 use futures::StreamExt;
+use futures::stream::Stream;
 use std::convert::Infallible;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -37,10 +37,16 @@ async fn chat_completions(
     State(state): State<RelayState>,
     Json(req): Json<CompletionRequest>,
 ) -> Response {
-    let id = state.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let id = state
+        .next_id
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let desc = classify(&req, state.embedder.as_ref()).await;
     let (tx, rx) = mpsc::channel::<TokenEvent>(64);
-    let qr = QueuedRequest { id, request: req, tx };
+    let qr = QueuedRequest {
+        id,
+        request: req,
+        tx,
+    };
     if state.worker.submit(qr, desc).await.is_err() {
         return (
             StatusCode::TOO_MANY_REQUESTS,

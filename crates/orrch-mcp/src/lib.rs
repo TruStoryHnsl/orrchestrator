@@ -5,6 +5,6 @@
 //! fixture directories. The main binary at `src/main.rs` continues to use
 //! these modules directly via `mod` declarations.
 
+pub mod protocol;
 pub mod server;
 pub mod tools;
-pub mod protocol;

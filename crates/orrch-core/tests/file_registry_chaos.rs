@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use orrch_core::file_registry::{
     AgentId, ChangeSpec, Clock, EditHandle, FileRegistry, ManualClock, RegistryError,
@@ -179,7 +179,9 @@ fn run_scenario1(seed: u64, iterations: usize) {
 
     println!(
         "scenario1 seed={:#x}: {} audit entries, ACQUIRE counts per path: {:?}",
-        seed, entries.len(), acquire_count_per_path
+        seed,
+        entries.len(),
+        acquire_count_per_path
     );
 }
 
@@ -261,7 +263,11 @@ fn run_storm(thread_count: usize) {
 
     // Invariant: at least one success (otherwise the test isn't proving
     // anything), at least one conflict (otherwise we didn't actually race).
-    assert!(s >= 1, "no successful acquires under {} threads", thread_count);
+    assert!(
+        s >= 1,
+        "no successful acquires under {} threads",
+        thread_count
+    );
     // For 1 thread we wouldn't see conflicts, but we start at 2 threads.
     if thread_count >= 2 {
         assert!(
@@ -347,13 +353,13 @@ fn crash_recovery_with_active_pending_edits() {
     let json_path = dir.path().join(".orrch/file_registry.json");
     let json: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
-    let pending = json["pending_edits"].as_array().cloned().unwrap_or_default();
+    let pending = json["pending_edits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let leaked: Vec<_> = pending
         .iter()
-        .filter(|h| {
-            h["owner"].as_str() == Some(&a.0)
-                && h["status"].as_str() == Some("Pending")
-        })
+        .filter(|h| h["owner"].as_str() == Some(&a.0) && h["status"].as_str() == Some("Pending"))
         .collect();
     if !leaked.is_empty() {
         // Record but do not fail the test — capture as a finding.
@@ -363,7 +369,10 @@ fn crash_recovery_with_active_pending_edits() {
             a.0
         );
     }
-    println!("scenario3: PASS — b acquired foo post-crash; leaked_pending={}", leaked.len());
+    println!(
+        "scenario3: PASS — b acquired foo post-crash; leaked_pending={}",
+        leaked.len()
+    );
 }
 
 // =========================================================================
@@ -400,7 +409,11 @@ fn registry_json_corruption_recovery() {
     // should succeed.
     let new_agent = AgentId::new("Developer:1:c0:9999");
     let res = reg2.acquire(&p1, &new_agent);
-    assert!(res.is_ok(), "scenario4: first acquire post-corruption must succeed, got {:?}", res);
+    assert!(
+        res.is_ok(),
+        "scenario4: first acquire post-corruption must succeed, got {:?}",
+        res
+    );
 
     // Audit log should have the new ACQUIRE.
     let entries = read_audit_lines(&dir);
@@ -408,7 +421,10 @@ fn registry_json_corruption_recovery() {
         e["verdict"].as_str() == Some("ACQUIRE")
             && e["attempting_agent"].as_str() == Some(&new_agent.0)
     });
-    assert!(has_new_acquire, "scenario4: post-corruption ACQUIRE not in audit log");
+    assert!(
+        has_new_acquire,
+        "scenario4: post-corruption ACQUIRE not in audit log"
+    );
     println!("scenario4: PASS — corruption tolerated, fresh registry created");
 }
 
@@ -463,14 +479,23 @@ fn transfer_chain_under_load() {
         thread::sleep(Duration::from_millis(50));
         let from = agents[i].clone();
         let to = agents[i + 1].clone();
-        reg.lock().unwrap().transfer(&foo, &from, &to).expect("transfer");
+        reg.lock()
+            .unwrap()
+            .transfer(&foo, &from, &to)
+            .expect("transfer");
         // After transfer, confirm only one owner via list_owners.
         let owners = reg.lock().unwrap().list_owners();
         let owner_count_for_foo = owners
             .iter()
-            .filter(|(p, _, _)| p == &foo || std::fs::canonicalize(p).ok() == std::fs::canonicalize(&foo).ok())
+            .filter(|(p, _, _)| {
+                p == &foo || std::fs::canonicalize(p).ok() == std::fs::canonicalize(&foo).ok()
+            })
             .count();
-        assert_eq!(owner_count_for_foo, 1, "scenario5: foo has {} owners after step {}", owner_count_for_foo, i);
+        assert_eq!(
+            owner_count_for_foo, 1,
+            "scenario5: foo has {} owners after step {}",
+            owner_count_for_foo, i
+        );
     }
     thread::sleep(Duration::from_millis(50));
     stop.store(true, Ordering::Relaxed);
@@ -536,7 +561,9 @@ fn audit_log_invariants_under_chaos() {
             3 => {
                 if let Ok(h) = reg.request_edit(
                     file,
-                    ChangeSpec::Natural { directive: "x".into() },
+                    ChangeSpec::Natural {
+                        directive: "x".into(),
+                    },
                     agent,
                 ) {
                     live_handles.push(h);
@@ -578,7 +605,9 @@ fn audit_log_invariants_under_chaos() {
                     assert!(
                         owned.contains(&key),
                         "audit invariant A violated at entry {}: RELEASE for ({}, {}) without ACQUIRE",
-                        idx, path, agent
+                        idx,
+                        path,
+                        agent
                     );
                     owned.remove(&key);
                 }
@@ -604,7 +633,8 @@ fn audit_log_invariants_under_chaos() {
                     assert!(
                         requested.contains(&path),
                         "audit invariant B violated at entry {}: APPLY_EDIT for {} without REQUEST_EDIT",
-                        idx, path
+                        idx,
+                        path
                     );
                 }
                 _ => {}
@@ -620,13 +650,13 @@ fn audit_log_invariants_under_chaos() {
             let agent = e["attempting_agent"].as_str().unwrap().to_string();
             match v {
                 "ACQUIRE" => {
-                    if let Some(prev) = current_owner.get(&path) {
-                        if prev != &agent {
-                            panic!(
-                                "audit invariant C violated at entry {}: ACQUIRE by {} while {} owns {}",
-                                idx, agent, prev, path
-                            );
-                        }
+                    if let Some(prev) = current_owner.get(&path)
+                        && prev != &agent
+                    {
+                        panic!(
+                            "audit invariant C violated at entry {}: ACQUIRE by {} while {} owns {}",
+                            idx, agent, prev, path
+                        );
                     }
                     current_owner.insert(path, agent);
                 }
@@ -640,7 +670,11 @@ fn audit_log_invariants_under_chaos() {
             }
         }
     }
-    println!("scenario6 seed={:#x}: {} audit entries, all 3 invariants hold", seed, entries.len());
+    println!(
+        "scenario6 seed={:#x}: {} audit entries, all 3 invariants hold",
+        seed,
+        entries.len()
+    );
 }
 
 // =========================================================================
@@ -685,18 +719,18 @@ fn memory_safety_under_30_minute_soak() {
             3 => {
                 if let Ok(h) = reg.request_edit(
                     f,
-                    ChangeSpec::Natural { directive: format!("soak {}", i) },
+                    ChangeSpec::Natural {
+                        directive: format!("soak {}", i),
+                    },
                     a,
                 ) {
                     live_handles.push(h);
                 }
             }
-            4 => {
-                if !live_handles.is_empty() {
-                    let idx = rng.gen_range(0..live_handles.len());
-                    let h = live_handles[idx].clone();
-                    let _ = reg.apply_edit(&h);
-                }
+            4 if !live_handles.is_empty() => {
+                let idx = rng.gen_range(0..live_handles.len());
+                let h = live_handles[idx].clone();
+                let _ = reg.apply_edit(&h);
             }
             _ => {}
         }
@@ -718,7 +752,8 @@ fn memory_safety_under_30_minute_soak() {
         assert!(
             (end_rss as f64) < (baseline_rss as f64) * 10.0,
             "soak: RSS grew >10x ({} -> {})",
-            baseline_rss, end_rss
+            baseline_rss,
+            end_rss
         );
     }
 }
@@ -728,7 +763,6 @@ fn rss_kb() -> u64 {
     for line in s.lines() {
         if let Some(rest) = line.strip_prefix("VmRSS:") {
             return rest
-                .trim()
                 .split_whitespace()
                 .next()
                 .and_then(|t| t.parse().ok())

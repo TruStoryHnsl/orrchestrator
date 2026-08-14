@@ -186,7 +186,10 @@ export default function (pi: ExtensionAPI) {
 
 /// Create a new file from template and return its path.
 /// The file is created in the appropriate directory with a timestamp name.
-pub fn create_from_template(category: TemplateCategory, base_dir: &Path) -> std::io::Result<PathBuf> {
+pub fn create_from_template(
+    category: TemplateCategory,
+    base_dir: &Path,
+) -> std::io::Result<PathBuf> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -206,7 +209,9 @@ pub fn create_from_template(category: TemplateCategory, base_dir: &Path) -> std:
                 TemplateCategory::Agent => (AGENT_TEMPLATE, "agents", "new_agent"),
                 TemplateCategory::Model => (MODEL_TEMPLATE, "library/models", "new_model"),
                 TemplateCategory::Harness => (HARNESS_TEMPLATE, "library/harnesses", "new_harness"),
-                TemplateCategory::McpServer => (MCP_SERVER_TEMPLATE, "library/mcp_servers", "new_mcp"),
+                TemplateCategory::McpServer => {
+                    (MCP_SERVER_TEMPLATE, "library/mcp_servers", "new_mcp")
+                }
                 TemplateCategory::Workforce => (WORKFORCE_TEMPLATE, "workforces", "new_workforce"),
                 TemplateCategory::Operation => (OPERATION_TEMPLATE, "operations", "new_operation"),
                 TemplateCategory::Skill => (SKILL_TEMPLATE, "library/skills", "new_skill"),
