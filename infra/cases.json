@@ -1,0 +1,21 @@
+[
+  {"name": "webapp source-build on app-1 -> DENY (root-LV protection)",
+   "host": "app-1", "expect": 2,
+   "command": "cd ~/projects/webapp && cargo build --release"},
+
+  {"name": "webapp docker-image deploy on app-1 -> ALLOW",
+   "host": "app-1", "expect": 0,
+   "command": "cd /opt/stacks/webapp && docker compose up -d"},
+
+  {"name": "webapp source-dev on build-1 -> ALLOW",
+   "host": "build-1", "expect": 0,
+   "command": "cd ~/projects/webapp && cargo build --release && npm run build"},
+
+  {"name": "any deploy on storage-1 -> DENY (storage, not compute)",
+   "host": "storage-1", "expect": 2,
+   "command": "cd /opt/stacks/webapp && docker compose up -d"},
+
+  {"name": "non-deploy command anywhere -> ALLOW (fail-open)",
+   "host": "app-1", "expect": 0,
+   "command": "ls -la ~/projects"}
+]
