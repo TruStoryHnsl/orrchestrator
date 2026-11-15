@@ -18,7 +18,9 @@
 # touching it, so a bad auto-resolve is one `git reset` away.
 #
 # Usage:
-#   merge_to_main.sh [--no-llm] [--dry-run] [--main-branch <name>]
+#   merge_to_main.sh [--no-llm] [--dry-run] [--main-branch <name>] [--branch <name>]
+#   --branch merges <name> from the main checkout (use for a branch held by a
+#   worktree lane); its worktree is removed after the merge.
 #
 # Exit codes:
 #   0   merge complete, branch deleted
@@ -42,12 +44,43 @@ log() {
     fi
 }
 
+# remove_branch_worktree <branch>: remove every linked worktree that has
+# <branch> checked out, plus the harness's own `worktree-<dir>` branch when
+# it is merged. A worktree with uncommitted changes is NOT removed: returns 1
+# so the session cannot close with work stranded in it.
+remove_branch_worktree() {
+    local br="$1" wt="" cur="" main_wt
+    main_wt="$(git rev-parse --show-toplevel)"
+    while IFS= read -r line; do
+        case "$line" in
+            "worktree "*) wt="${line#worktree }" ;;
+            "branch refs/heads/"*)
+                cur="${line#branch refs/heads/}"
+                if [[ "$cur" == "$br" && "$wt" != "$main_wt" ]]; then
+                    if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+                        log "ESCALATE: worktree $wt (branch $br) has uncommitted changes — commit or discard, then re-run"
+                        return 1
+                    fi
+                    git worktree remove --force "$wt" && log "removed worktree $wt"
+                    local harness_br="worktree-$(basename "$wt")"
+                    if git show-ref --verify --quiet "refs/heads/$harness_br" \
+                       && git merge-base --is-ancestor "$harness_br" "$MAIN_BRANCH"; then
+                        git branch -D "$harness_br" >/dev/null && log "deleted merged harness branch $harness_br"
+                    fi
+                fi ;;
+        esac
+    done < <(git worktree list --porcelain)
+    git worktree prune
+    return 0
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-llm)       USE_LLM=0 ;;
             --dry-run)      DRY_RUN=1 ;;
             --main-branch)  MAIN_BRANCH="${2:-}"; shift ;;
+            --branch)       SB="${2:-}"; shift ;;
             -h|--help)
                 sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
                 exit 0
@@ -65,7 +98,7 @@ preflight() {
     }
     cd "$REPO_ROOT"
 
-    SB="$(git branch --show-current)"
+    SB="${SB:-$(git branch --show-current)}"
     case "$SB" in
         ""|main|master|develop|trunk)
             echo "[merge] on '$SB' (no session branch to merge) — skipping"
@@ -130,6 +163,10 @@ finish_merge_and_exit() {
     fi
 
     git push origin "$MAIN_BRANCH" 2>/dev/null || log "(push skipped — no remote or private scope)"
+    # A merged branch still checked out in a linked worktree (Agent
+    # isolation:"worktree" lanes, manual `git worktree add`) blocks the
+    # branch delete and leaves the worktree on disk forever. Remove it.
+    remove_branch_worktree "$SB" || exit 1
     git branch -d "$SB" 2>/dev/null || log "(could not fast-forward-delete local branch $SB)"
     git push origin --delete "$SB" 2>/dev/null || true
 
